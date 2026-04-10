@@ -1,0 +1,18 @@
+---
+source: tests/logfire_integration_test.rs
+expression: json
+---
+{
+  "attributes": {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.request.model": "gpt-4o-mini",
+    "gen_ai.system": "openai"
+  },
+  "end_time": "[timestamp]",
+  "name": "chat",
+  "span_id": "[span_id]",
+  "span_kind": "Internal",
+  "start_time": "[timestamp]",
+  "status": "Unset",
+  "trace_id": "[trace_id]"
+}

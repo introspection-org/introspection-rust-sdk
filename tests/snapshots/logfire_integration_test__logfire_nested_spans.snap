@@ -1,0 +1,30 @@
+---
+source: tests/logfire_integration_test.rs
+expression: json
+---
+[
+  {
+    "attributes": {
+      "gen_ai.request.model": "claude-3.5-sonnet",
+      "gen_ai.system": "anthropic"
+    },
+    "end_time": "[timestamp]",
+    "name": "chat",
+    "parent_span_id": "[span_id]",
+    "span_id": "[span_id]",
+    "span_kind": "Internal",
+    "start_time": "[timestamp]",
+    "status": "Unset",
+    "trace_id": "[trace_id]"
+  },
+  {
+    "attributes": {},
+    "end_time": "[timestamp]",
+    "name": "pipeline",
+    "span_id": "[span_id]",
+    "span_kind": "Internal",
+    "start_time": "[timestamp]",
+    "status": "Unset",
+    "trace_id": "[trace_id]"
+  }
+]

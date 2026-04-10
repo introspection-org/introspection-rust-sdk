@@ -1,0 +1,125 @@
+name: Publish to crates.io
+
+run-name: "${{ inputs.version && format('Publish v{0}', inputs.version) || format('Publish {0}', github.ref_name) }}"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without v prefix). Defaults to tag name."
+        required: false
+        type: string
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Resolve version from tag ───────────────────────────────────────
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: resolve
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "${VERSION}" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}"
+
+  # ── Lint & Test ────────────────────────────────────────────────────
+  lint-and-test:
+    name: Lint & Test
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
+
+  # ── Publish to crates.io ───────────────────────────────────────────
+  publish:
+    name: Publish v${{ needs.resolve-version.outputs.version }} to crates.io
+    needs: [resolve-version, lint-and-test]
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Stamp version from tag
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          sed -i "0,/^version = .*/s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+          sed -i "s/introspection-sdk = \"[^\"]*\"/introspection-sdk = \"${VERSION}\"/g" README.md
+          echo "Stamped Cargo.toml and README.md with version ${VERSION}"
+
+      - name: Publish to crates.io
+        run: cargo publish --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ── GitHub Release ─────────────────────────────────────────────────
+  github-release:
+    name: Create GitHub Release
+    needs: [resolve-version, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ needs.resolve-version.outputs.version }}" \
+            --title "v${{ needs.resolve-version.outputs.version }}" \
+            --generate-notes

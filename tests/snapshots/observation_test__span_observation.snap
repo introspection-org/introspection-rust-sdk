@@ -1,0 +1,14 @@
+---
+source: tests/observation_test.rs
+expression: json
+---
+{
+  "attributes": {},
+  "end_time": "[timestamp]",
+  "name": "retrieval-step",
+  "span_id": "[span_id]",
+  "span_kind": "Internal",
+  "start_time": "[timestamp]",
+  "status": "Unset",
+  "trace_id": "[trace_id]"
+}

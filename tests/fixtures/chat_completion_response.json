@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-test123",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I help you today?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 8,
+    "total_tokens": 20
+  },
+  "system_fingerprint": "fp_test123"
+}

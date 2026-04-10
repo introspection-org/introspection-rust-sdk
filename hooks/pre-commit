@@ -1,0 +1,25 @@
+#!/bin/bash
+# Pre-commit hook for Rust SDK
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+echo "Running cargo fmt..."
+cargo fmt --all -- --check || {
+    echo "Code is not formatted. Run 'cargo fmt' to fix."
+    exit 1
+}
+
+echo "Running cargo clippy..."
+cargo clippy --all-targets --all-features -- -D warnings || {
+    echo "Clippy found issues. Fix them before committing."
+    exit 1
+}
+
+echo "Running cargo test..."
+cargo test --all-features || {
+    echo "Tests failed. Fix them before committing."
+    exit 1
+}
+
+echo "All checks passed!"

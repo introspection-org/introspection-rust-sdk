@@ -1,0 +1,21 @@
+---
+source: tests/observation_test.rs
+expression: json
+---
+{
+  "attributes": {
+    "gen_ai.input.messages": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"Say hello\"}]}]",
+    "gen_ai.operation.name": "chat",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-4o-mini",
+    "gen_ai.system": "openai",
+    "openinference.span.kind": "LLM"
+  },
+  "end_time": "[timestamp]",
+  "name": "chat",
+  "span_id": "[span_id]",
+  "span_kind": "Client",
+  "start_time": "[timestamp]",
+  "status": "Unset",
+  "trace_id": "[trace_id]"
+}
