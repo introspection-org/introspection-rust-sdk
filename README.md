@@ -13,7 +13,7 @@
 <div align="center">
   <a href="https://introspection.dev"><img src="https://img.shields.io/badge/website-introspection.dev-blue" alt="Website"></a>
   <a href="https://crates.io/crates/introspection-sdk"><img src="https://img.shields.io/crates/v/introspection-sdk?label=%20" alt="crates.io version"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
   <a href="https://x.com/IntrospectionAI"><img src="https://img.shields.io/twitter/follow/IntrospectionAI" alt="Follow on X"></a>
 </div>
 
@@ -23,19 +23,17 @@
 
 ## Installation
 
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-introspection-sdk = "0.1.0"
+```bash
+cargo add introspection-sdk
 ```
 
 With optional integrations:
 
-```toml
-[dependencies]
-introspection-sdk = { version = "0.1", features = ["openai"] }
+```bash
+cargo add introspection-sdk --features openai,logfire
 ```
+
+See [Feature Flags](#feature-flags) below for the full list.
 
 ## Feature Flags
 
@@ -440,4 +438,4 @@ Full documentation is available at [docs.introspection.dev](https://docs.introsp
 
 ## License
 
-MIT
+Licensed under the [Apache License, Version 2.0](LICENSE).
