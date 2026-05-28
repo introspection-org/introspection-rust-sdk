@@ -28,23 +28,24 @@ otel = [
     "dep:opentelemetry-otlp",
 ]
 testing = ["otel", "opentelemetry_sdk/testing"]
-logfire = ["otel", "dep:logfire"]
 openai = ["otel", "dep:async-openai"]
 
 [dependencies]
 # Async runtime
 tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
-# OpenTelemetry — pinned to 0.30.x (logfire 0.9 requires opentelemetry 0.30).
-# Gated by the `otel` feature so REST-only installs don't pull them.
-opentelemetry = { version = "0.30.0", default-features = false, features = ["logs", "trace"], optional = true }
-opentelemetry_sdk = { version = "0.30.0", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
-opentelemetry-otlp = { version = "0.30.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-client"], optional = true }
+# OpenTelemetry — gated by the `otel` feature so REST-only installs don't pull them.
+opentelemetry = { version = "0.32.0", default-features = false, features = ["logs", "trace"], optional = true }
+opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-blocking-client"], optional = true }
 
 # HTTP client — async + multipart + streaming for the REST API; `blocking`
-# kept on for the otel BatchSpanProcessor's dedicated thread when the
-# `otel` feature is enabled.
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "stream", "rustls-tls-native-roots"] }
+# is required by the OTLP `reqwest-blocking-client` exporter under the
+# `otel` feature (the BatchSpanProcessor runs on a non-tokio thread).
+# Pinned to 0.13 to match opentelemetry-otlp 0.32 (avoids a duplicate
+# reqwest in the dep graph and the resulting HttpClient trait-bound
+# mismatch).
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "stream", "rustls", "rustls-native-certs"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -62,11 +63,8 @@ mime_guess = "2"
 # `IntrospectionLogs` (otel) builders alike.
 derive_builder = "0.20"
 
-# Optional: logfire integration (requires `otel`)
-logfire = { version = "0.9.0", optional = true }
-
 # Optional: async-openai integration (requires `otel`)
-async-openai = { version = "0.33", features = ["chat-completion", "responses"], optional = true }
+async-openai = { version = "0.40", features = ["chat-completion", "responses"], optional = true }
 
 # Streaming support (StreamExt for async-openai streams)
 futures = "0.3"
@@ -79,12 +77,8 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
-async-openai = { version = "0.33", features = ["chat-completion"] }
+async-openai = { version = "0.40", features = ["chat-completion"] }
 dotenvy = "0.15"
-
-[[example]]
-name = "logfire_dual_export"
-required-features = ["logfire", "openai"]
 
 [[example]]
 name = "openai_tool_call"
@@ -93,10 +87,6 @@ required-features = ["openai"]
 [[example]]
 name = "openai_streaming"
 required-features = ["openai"]
-
-[[example]]
-name = "logfire_introspection"
-required-features = ["logfire", "openai"]
 
 [[example]]
 name = "responses_api_features"

@@ -17,9 +17,13 @@ use crate::VERSION;
 
 /// Create a `reqwest::blocking::Client` on a dedicated thread.
 ///
-/// The blocking client spawns an internal tokio runtime, which panics
-/// if constructed inside an existing async runtime.  Building it on a
-/// short-lived thread avoids the "cannot drop a runtime …" issue.
+/// `BatchSpanProcessor` exports on a background thread without a
+/// tokio runtime, so the OTLP exporter needs the blocking reqwest
+/// client (gated by `opentelemetry-otlp/reqwest-blocking-client` ->
+/// `opentelemetry-http/reqwest-blocking`). The blocking client
+/// spawns an internal tokio runtime which panics if constructed
+/// inside an existing async runtime — building it on a short-lived
+/// thread avoids the "cannot drop a runtime …" issue.
 fn new_blocking_http_client(timeout: Duration) -> reqwest::blocking::Client {
     std::thread::spawn(move || {
         reqwest::blocking::Client::builder()

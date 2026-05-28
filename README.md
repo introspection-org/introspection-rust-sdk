@@ -25,15 +25,15 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 
 | Surface | What it does | Cargo feature |
 | --- | --- | --- |
-| [`IntrospectionClient`](#1-introspectionclient--rest) | REST: runtimes, experiments, runner, tasks, files | _none_ (default) |
-| [`IntrospectionLogs`](#2-introspectionlogs--analytics-events) | OTLP **logs**: `track` / `feedback` / `identify` | `otel` |
-| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--otel-traces) | OTLP **traces** exporter for your `TracerProvider` | `otel` |
+| [`IntrospectionClient`](#1-introspectionclient--introspection-api-runtimes-tasks-files) | Introspection API: runtimes, experiments, runner, tasks, files | _none_ (default) |
+| [`IntrospectionLogs`](#2-introspectionlogs--analytics-events-track-feedback-identify) | Analytics events: `track` / `feedback` / `identify` (OTLP logs) | `otel` |
+| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces-span-processors--instrumentors) | Traces: span processors + LLM SDK instrumentors (OTLP traces) | `otel` |
 
 They share no state. Construct the ones you want, configure independently, mix and match.
 
 ## Installation
 
-REST-only (no OpenTelemetry pulled in):
+Default install — `IntrospectionClient` only (no OpenTelemetry pulled in):
 
 ```toml
 [dependencies]
@@ -60,16 +60,15 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 | --------- | ------------------------------------------------------------------ |
 | `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
 | `openai`  | `async-openai` integration — `traced_chat_completion` and friends (implies `otel`) |
-| `logfire` | Logfire integration for dual-export pipelines (implies `otel`)     |
 | `testing` | In-memory span exporter and test helpers (implies `otel`)          |
 
 ## Three surfaces
 
-### 1. `IntrospectionClient` — REST
+### 1. `IntrospectionClient` — Introspection API (runtimes, tasks, files)
 
-No OpenTelemetry dependency; just HTTPS calls to the DP REST API. Use it
-to manage runtimes, experiments, tasks, and files, and to drive the
-`Runner` SSE stream.
+The main Introspection API surface. No OpenTelemetry dependency; just
+HTTPS calls to manage runtimes, experiments, tasks, and files, and to
+drive the `Runner` SSE stream.
 
 ```rust
 use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
@@ -89,7 +88,7 @@ println!("{text}");
 See [`examples/tasks_files.rs`](examples/tasks_files.rs) for a longer
 end-to-end walkthrough.
 
-### 2. `IntrospectionLogs` — analytics events
+### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)
 
 Owns its own `SdkLoggerProvider` and emits `track` / `feedback` /
 `identify` events as OTLP logs. Fully independent of
@@ -134,7 +133,7 @@ Available baggage guards: `set_user_id`, `set_anonymous_id`,
 `set_baggage`. Each returns an RAII guard that clears the value when
 dropped.
 
-### 3. `IntrospectionSpanProcessor` — OTel traces
+### 3. `IntrospectionSpanProcessor` — Traces (span processors + instrumentors)
 
 A standalone `SpanProcessor` you attach to your own
 `SdkTracerProvider`. Sends spans to the Introspection OTLP collector
@@ -217,29 +216,6 @@ let response = traced_chat_completion(&tracer, &client, request).await?;
 
 Streaming variant `traced_chat_completion_stream` and the
 `tracing`-based `tracing_traced_chat_completion` are also available.
-
-### Logfire dual-export
-
-Logfire routes spans through the `tracing` crate. For dual-export
-(Logfire **and** Introspection), build a `SdkTracerProvider` with both
-processors:
-
-```rust
-use introspection_sdk::otel::{IntrospectionSpanProcessor, SpanProcessorConfig};
-use opentelemetry_sdk::trace::SdkTracerProvider;
-
-let introspection = IntrospectionSpanProcessor::new(
-    SpanProcessorConfig::with_token("your-introspection-token"),
-).unwrap();
-
-let provider = SdkTracerProvider::builder()
-    .with_span_processor(introspection)
-    // .with_span_processor(logfire_processor)
-    .build();
-```
-
-See [`examples/logfire_dual_export.rs`](examples/logfire_dual_export.rs)
-and [`examples/logfire_introspection.rs`](examples/logfire_introspection.rs).
 
 ## Environment variables
 
