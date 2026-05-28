@@ -26,11 +26,11 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    // --- Introspection setup ---
+    // --- Introspection setup (sync context — keeps reqwest's internal runtime
+    //     from being dropped inside an async executor) ---
     let processor = IntrospectionSpanProcessor::new(SpanProcessorConfig::default())?;
     let provider = SdkTracerProvider::builder()
         .with_resource(
@@ -40,110 +40,116 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .with_span_processor(processor)
         .build();
-    let tracer = provider.tracer("responses-api-features-example");
-    let client = Client::with_config(OpenAIConfig::default());
 
-    // === 1. Web Search (gpt-4o) ===
-    println!("=== 1. Web Search Agent (gpt-4o) ===");
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let tracer = provider.tracer("responses-api-features-example");
+        let client = Client::with_config(OpenAIConfig::default());
 
-    let r1 = traced_responses_create(
-        &tracer,
-        &client,
-        CreateResponse {
-            model: Some("gpt-4o".to_string()),
-            instructions: Some(
-                "You MUST use web search. Always search the web first before answering.".into(),
-            ),
-            input: InputParam::Text("What is the latest SpaceX launch in 2026?".into()),
-            tools: Some(vec![Tool::WebSearch(WebSearchTool::default())]),
-            ..Default::default()
-        },
-    )
-    .await?;
-    print_response_text(&r1.output);
-    println!();
+        // === 1. Web Search (gpt-4o) ===
+        println!("=== 1. Web Search Agent (gpt-4o) ===");
 
-    // === 2. Reasoning with Detailed Summary (gpt-5.4) ===
-    println!("=== 2. Reasoning with Detailed Summary (gpt-5.4) ===");
-
-    let r2 = traced_responses_create(
-        &tracer,
-        &client,
-        CreateResponse {
-            model: Some("gpt-5.4".to_string()),
-            instructions: Some("Think step by step. Show your work.".into()),
-            input: InputParam::Text(
-                "A farmer has 17 chickens and 23 cows. Each chicken eats 0.5kg of feed per day \
-                 and each cow eats 15kg. If feed costs $0.40/kg, how much does the farmer spend per week?"
-                    .into(),
-            ),
-            reasoning: Some(Reasoning {
-                effort: Some(ReasoningEffort::High),
-                summary: Some(ReasoningSummary::Detailed),
-            }),
-            ..Default::default()
-        },
-    )
-    .await?;
-    print_response_text(&r2.output);
-    println!();
-
-    // === 3. Encrypted Reasoning + Detailed Summary (gpt-5.4) ===
-    println!("=== 3. Encrypted Reasoning + Detailed Summary (gpt-5.4) ===");
-
-    let r3 = traced_responses_create(
-        &tracer,
-        &client,
-        CreateResponse {
-            model: Some("gpt-5.4".to_string()),
-            instructions: Some("Think carefully before answering.".into()),
-            input: InputParam::Text(
-                "If a train travels at 120 km/h for 2.5 hours, then slows to 80 km/h for 1.75 hours, \
-                 what is the total distance and average speed?"
-                    .into(),
-            ),
-            reasoning: Some(Reasoning {
-                effort: Some(ReasoningEffort::High),
-                summary: Some(ReasoningSummary::Detailed),
-            }),
-            include: Some(vec![IncludeEnum::ReasoningEncryptedContent]),
-            store: Some(false),
-            ..Default::default()
-        },
-    )
-    .await?;
-    print_response_text(&r3.output);
-    println!();
-
-    // === 4. MCP Tools - DeepWiki (gpt-4o) ===
-    println!("=== 4. MCP Tools - DeepWiki (gpt-4o) ===");
-
-    let r4 = traced_responses_create(
-        &tracer,
-        &client,
-        CreateResponse {
-            model: Some("gpt-4o".to_string()),
-            instructions: Some(
-                "Use the DeepWiki MCP tools to answer questions about code repositories.".into(),
-            ),
-            input: InputParam::Text(
-                "How does the Agent class work in the openai/openai-agents-python repo?".into(),
-            ),
-            tools: Some(vec![Tool::Mcp(MCPTool {
-                server_label: "deepwiki".to_string(),
-                server_url: Some("https://mcp.deepwiki.com/mcp".to_string()),
-                require_approval: Some(MCPToolRequireApproval::ApprovalSetting(
-                    MCPToolApprovalSetting::Never,
-                )),
+        let r1 = traced_responses_create(
+            &tracer,
+            &client,
+            CreateResponse {
+                model: Some("gpt-4o".to_string()),
+                instructions: Some(
+                    "You MUST use web search. Always search the web first before answering.".into(),
+                ),
+                input: InputParam::Text("What is the latest SpaceX launch in 2026?".into()),
+                tools: Some(vec![Tool::WebSearch(WebSearchTool::default())]),
                 ..Default::default()
-            })]),
-            ..Default::default()
-        },
-    )
-    .await?;
-    print_response_text(&r4.output);
+            },
+        )
+        .await?;
+        print_response_text(&r1.output);
+        println!();
 
-    // --- Shutdown ---
+        // === 2. Reasoning with Detailed Summary (gpt-5.4) ===
+        println!("=== 2. Reasoning with Detailed Summary (gpt-5.4) ===");
+
+        let r2 = traced_responses_create(
+            &tracer,
+            &client,
+            CreateResponse {
+                model: Some("gpt-5.4".to_string()),
+                instructions: Some("Think step by step. Show your work.".into()),
+                input: InputParam::Text(
+                    "A farmer has 17 chickens and 23 cows. Each chicken eats 0.5kg of feed per day \
+                     and each cow eats 15kg. If feed costs $0.40/kg, how much does the farmer spend per week?"
+                        .into(),
+                ),
+                reasoning: Some(Reasoning {
+                    effort: Some(ReasoningEffort::High),
+                    summary: Some(ReasoningSummary::Detailed),
+                }),
+                ..Default::default()
+            },
+        )
+        .await?;
+        print_response_text(&r2.output);
+        println!();
+
+        // === 3. Encrypted Reasoning + Detailed Summary (gpt-5.4) ===
+        println!("=== 3. Encrypted Reasoning + Detailed Summary (gpt-5.4) ===");
+
+        let r3 = traced_responses_create(
+            &tracer,
+            &client,
+            CreateResponse {
+                model: Some("gpt-5.4".to_string()),
+                instructions: Some("Think carefully before answering.".into()),
+                input: InputParam::Text(
+                    "If a train travels at 120 km/h for 2.5 hours, then slows to 80 km/h for 1.75 hours, \
+                     what is the total distance and average speed?"
+                        .into(),
+                ),
+                reasoning: Some(Reasoning {
+                    effort: Some(ReasoningEffort::High),
+                    summary: Some(ReasoningSummary::Detailed),
+                }),
+                include: Some(vec![IncludeEnum::ReasoningEncryptedContent]),
+                store: Some(false),
+                ..Default::default()
+            },
+        )
+        .await?;
+        print_response_text(&r3.output);
+        println!();
+
+        // === 4. MCP Tools - DeepWiki (gpt-4o) ===
+        println!("=== 4. MCP Tools - DeepWiki (gpt-4o) ===");
+
+        let r4 = traced_responses_create(
+            &tracer,
+            &client,
+            CreateResponse {
+                model: Some("gpt-4o".to_string()),
+                instructions: Some(
+                    "Use the DeepWiki MCP tools to answer questions about code repositories."
+                        .into(),
+                ),
+                input: InputParam::Text(
+                    "How does the Agent class work in the openai/openai-agents-python repo?".into(),
+                ),
+                tools: Some(vec![Tool::Mcp(MCPTool {
+                    server_label: "deepwiki".to_string(),
+                    server_url: Some("https://mcp.deepwiki.com/mcp".to_string()),
+                    require_approval: Some(MCPToolRequireApproval::ApprovalSetting(
+                        MCPToolApprovalSetting::Never,
+                    )),
+                    ..Default::default()
+                })]),
+                ..Default::default()
+            },
+        )
+        .await?;
+        print_response_text(&r4.output);
+
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })?;
+
+    // --- Shutdown (sync context — safe to drop the blocking client's runtime) ---
     if let Err(e) = provider.shutdown() {
         eprintln!("Warning: shutdown error: {e}");
     }

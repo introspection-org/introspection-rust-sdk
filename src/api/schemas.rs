@@ -2,7 +2,7 @@
 //!
 //! Mirrored from `apps/dataplane-api/introspection_dataplane/models/{task,file}.py`
 //! and the Pydantic/TS implementations in
-//! `introspection-python-sdk-private` / `introspection-js-sdk-private`.
+//! `introspection-python-sdk` / `introspection-js-sdk`.
 //!
 //! Field names are kept on-the-wire (`snake_case`) so the JSON round-trips
 //! verbatim — no camelCase translation layer.

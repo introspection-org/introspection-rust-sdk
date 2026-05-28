@@ -30,11 +30,11 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok(); // Load .env if present
 
-    // --- Provider setup ---
+    // --- Provider setup (sync context — keeps reqwest's internal runtime
+    //     from being dropped inside an async executor) ---
     let introspection_processor = IntrospectionSpanProcessor::new(SpanProcessorConfig::default())?;
 
     let provider = SdkTracerProvider::builder()
@@ -46,68 +46,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_span_processor(introspection_processor)
         .build();
 
-    let tracer = provider.tracer("openai-streaming-example");
-    let openai_client = Client::with_config(OpenAIConfig::default());
-    let model = "gpt-4o-mini";
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let tracer = provider.tracer("openai-streaming-example");
+        let openai_client = Client::with_config(OpenAIConfig::default());
+        let model = "gpt-4o-mini";
 
-    // --- Wrap entire pipeline in a parent observation ---
-    let _pipeline = Observation::start(&tracer, ObservationConfig::span("streaming-pipeline"));
+        // --- Wrap entire pipeline in a parent observation ---
+        let _pipeline = Observation::start(&tracer, ObservationConfig::span("streaming-pipeline"));
 
-    // --- Turn 1: non-streaming call (auto-instrumented) ---
-    let request1 = CreateChatCompletionRequest {
-        model: model.to_string(),
-        messages: vec![ChatCompletionRequestMessage::User(
-            ChatCompletionRequestUserMessage {
-                content: "You are a helpful assistant. Say hello briefly.".into(),
-                ..Default::default()
-            },
-        )],
-        ..Default::default()
-    };
+        // --- Turn 1: non-streaming call (auto-instrumented) ---
+        let request1 = CreateChatCompletionRequest {
+            model: model.to_string(),
+            messages: vec![ChatCompletionRequestMessage::User(
+                ChatCompletionRequestUserMessage {
+                    content: "You are a helpful assistant. Say hello briefly.".into(),
+                    ..Default::default()
+                },
+            )],
+            ..Default::default()
+        };
 
-    let response1 = traced_chat_completion(&tracer, &openai_client, request1).await?;
-    let assistant_reply = response1.choices[0]
-        .message
-        .content
-        .as_deref()
-        .unwrap_or("");
-    println!("Turn 1 (non-streaming): {assistant_reply}");
+        let response1 = traced_chat_completion(&tracer, &openai_client, request1).await?;
+        let assistant_reply = response1.choices[0]
+            .message
+            .content
+            .as_deref()
+            .unwrap_or("");
+        println!("Turn 1 (non-streaming): {assistant_reply}");
 
-    // --- Turn 2: streaming call (auto-instrumented) ---
-    let stream_request = CreateChatCompletionRequest {
-        model: model.to_string(),
-        messages: vec![
-            ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                content: "You are a helpful assistant. Say hello briefly.".into(),
-                ..Default::default()
-            }),
-            ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-                content: Some(assistant_reply.to_string().into()),
-                ..Default::default()
-            }),
-            ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                content: "Now tell me a short joke about programming.".into(),
-                ..Default::default()
-            }),
-        ],
-        ..Default::default()
-    };
+        // --- Turn 2: streaming call (auto-instrumented) ---
+        let stream_request = CreateChatCompletionRequest {
+            model: model.to_string(),
+            messages: vec![
+                ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+                    content: "You are a helpful assistant. Say hello briefly.".into(),
+                    ..Default::default()
+                }),
+                ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+                    content: Some(assistant_reply.to_string().into()),
+                    ..Default::default()
+                }),
+                ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+                    content: "Now tell me a short joke about programming.".into(),
+                    ..Default::default()
+                }),
+            ],
+            ..Default::default()
+        };
 
-    let mut stream = traced_chat_completion_stream(&tracer, &openai_client, stream_request).await?;
+        let mut stream =
+            traced_chat_completion_stream(&tracer, &openai_client, stream_request).await?;
 
-    print!("Turn 2 (streaming): ");
-    while let Some(result) = stream.next().await {
-        let chunk = result?;
-        for choice in &chunk.choices {
-            if let Some(ref content) = choice.delta.content {
-                print!("{content}");
-                std::io::stdout().flush()?;
+        print!("Turn 2 (streaming): ");
+        while let Some(result) = stream.next().await {
+            let chunk = result?;
+            for choice in &chunk.choices {
+                if let Some(ref content) = choice.delta.content {
+                    print!("{content}");
+                    std::io::stdout().flush()?;
+                }
             }
         }
-    }
-    println!(); // newline after streaming output
+        println!(); // newline after streaming output
 
-    // --- Shutdown ---
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })?;
+
+    // --- Shutdown (sync context — safe to drop the blocking client's runtime) ---
     if let Err(e) = provider.shutdown() {
         eprintln!("Warning: shutdown error: {e}");
     }
