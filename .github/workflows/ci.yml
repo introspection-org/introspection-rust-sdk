@@ -132,8 +132,13 @@ jobs:
           INTROSPECTION_TOKEN: ${{ secrets.INTROSPECTION_TOKEN }}
           INTROSPECTION_BASE_URL: ${{ vars.INTROSPECTION_BASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
-        run: ./scripts/run_examples.sh
+        run: |
+          echo "==> Running openai_tool_call"
+          cargo run --example openai_tool_call --features openai
+          echo "==> Running openai_streaming"
+          cargo run --example openai_streaming --features openai
+          echo "==> Running responses_api_features"
+          cargo run --example responses_api_features --features openai
 
   # ── Create release tag (only on VERSION change) ────────────────────
   create-tag:
