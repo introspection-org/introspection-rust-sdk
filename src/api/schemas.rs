@@ -560,6 +560,54 @@ pub struct RecipeListParams {
 
 // ----- runtimes (CP) ---------------------------------------------------------
 
+/// How a Runtime acquires LLM provider credentials at session create —
+/// mirrors the CP `RuntimeLlmMode` enum.
+///
+/// `Managed` (the default) uses Introspection-managed keys; `Byok` uses
+/// the project's Endpoint pool. The `Other` variant captures any future
+/// mode the CP adds, so callers can still read the rest of the record.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RuntimeLlmMode {
+    #[default]
+    Managed,
+    Byok,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RuntimeLlmMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Managed => "managed",
+            Self::Byok => "byok",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for RuntimeLlmMode {
+    fn from(s: &str) -> Self {
+        match s {
+            "managed" => Self::Managed,
+            "byok" => Self::Byok,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RuntimeLlmMode {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RuntimeLlmMode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Runtime {
     pub id: Uuid,
@@ -580,6 +628,10 @@ pub struct Runtime {
     pub is_active: bool,
     #[serde(default)]
     pub allow_hot_swap: bool,
+    /// LLM credential source. Defaults to `Managed` when the CP omits
+    /// the field (older servers) or sends `"managed"` explicitly.
+    #[serde(default)]
+    pub llm_mode: RuntimeLlmMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_json: Option<HashMap<String, serde_json::Value>>,
 }
@@ -597,6 +649,10 @@ pub struct RuntimeCreate {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_hot_swap: Option<bool>,
+    /// LLM credential source. Defaults to `Managed`. The wire value is
+    /// always sent; the server's default (`"managed"`) matches so no
+    /// behaviour change for unset callers.
+    pub llm_mode: RuntimeLlmMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_json: Option<HashMap<String, serde_json::Value>>,
 }
@@ -609,6 +665,10 @@ pub struct RuntimeUpdate {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_hot_swap: Option<bool>,
+    /// PATCH semantics: `None` means "don't change". Set to switch the
+    /// runtime between managed credentials and the BYOK pool.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_mode: Option<RuntimeLlmMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_json: Option<HashMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -945,5 +1005,27 @@ mod tests {
         let page: Paginated<serde_json::Value> = serde_json::from_str(payload).unwrap();
         assert_eq!(page.count, 0);
         assert!(page.next.is_none());
+    }
+
+    #[test]
+    fn runtime_llm_mode_round_trips_known_variants() {
+        let m: RuntimeLlmMode = serde_json::from_str("\"managed\"").unwrap();
+        assert_eq!(m, RuntimeLlmMode::Managed);
+        assert_eq!(serde_json::to_string(&m).unwrap(), "\"managed\"");
+
+        let m: RuntimeLlmMode = serde_json::from_str("\"byok\"").unwrap();
+        assert_eq!(m, RuntimeLlmMode::Byok);
+        assert_eq!(serde_json::to_string(&m).unwrap(), "\"byok\"");
+    }
+
+    #[test]
+    fn runtime_llm_mode_tolerates_unknown_values() {
+        let m: RuntimeLlmMode = serde_json::from_str("\"brand_new_mode\"").unwrap();
+        assert_eq!(m, RuntimeLlmMode::Other("brand_new_mode".to_string()));
+    }
+
+    #[test]
+    fn runtime_llm_mode_default_is_managed() {
+        assert_eq!(RuntimeLlmMode::default(), RuntimeLlmMode::Managed);
     }
 }
