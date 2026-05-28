@@ -1,10 +1,10 @@
-use introspection_sdk::messages::{ContentPart, InputMessage, OutputMessage};
-use introspection_sdk::testing::{setup_test_provider, span_data_to_json, spans_to_json};
+use introspection_sdk::otel::messages::{ContentPart, InputMessage, OutputMessage};
+use introspection_sdk::otel::testing::{setup_test_provider, span_data_to_json, spans_to_json};
 use introspection_sdk::{GenerationUpdate, Observation, ObservationConfig};
 use opentelemetry::trace::{SpanId, TracerProvider};
 
 #[cfg(feature = "openai")]
-use introspection_sdk::openai::traced_chat_completion_stream;
+use introspection_sdk::otel::openai::traced_chat_completion_stream;
 
 // ---------------------------------------------------------------------------
 // Test 1: Generation observation sets request attributes
@@ -154,7 +154,7 @@ fn test_observation_nesting() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_observation_auto_system_inference() {
-    use introspection_sdk::observation::infer_system;
+    use introspection_sdk::otel::observation::infer_system;
 
     assert_eq!(infer_system("gpt-4o-mini"), Some("openai".to_string()));
     assert_eq!(infer_system("gpt-4"), Some("openai".to_string()));
@@ -238,7 +238,7 @@ async fn test_generation_with_wiremock() {
     };
 
     {
-        use introspection_sdk::openai::convert_request_messages;
+        use introspection_sdk::otel::openai::convert_request_messages;
         let mut obs = Observation::start(
             &tracer,
             ObservationConfig::generation("chat", &request.model)
@@ -339,7 +339,9 @@ async fn test_tool_call_with_wiremock() {
         };
 
         {
-            use introspection_sdk::openai::{convert_request_messages, convert_response_choices};
+            use introspection_sdk::otel::openai::{
+                convert_request_messages, convert_response_choices,
+            };
             let mut obs1 = Observation::start(
                 &tracer,
                 ObservationConfig::generation("chat", &request1.model)
@@ -372,7 +374,9 @@ async fn test_tool_call_with_wiremock() {
         };
 
         {
-            use introspection_sdk::openai::{convert_request_messages, convert_response_choices};
+            use introspection_sdk::otel::openai::{
+                convert_request_messages, convert_response_choices,
+            };
             let mut obs2 = Observation::start(
                 &tracer,
                 ObservationConfig::generation("chat", &request2.model)
@@ -629,7 +633,7 @@ async fn test_streaming_generation_nested() {
 #[test]
 fn test_responses_output_merges_function_calls() {
     use async_openai::types::responses::{FunctionToolCall, OutputItem, OutputStatus};
-    use introspection_sdk::openai::convert_responses_output;
+    use introspection_sdk::otel::openai::convert_responses_output;
 
     let output = vec![
         OutputItem::FunctionCall(FunctionToolCall {
@@ -668,7 +672,7 @@ fn test_responses_output_reasoning_merges_into_message() {
         OutputItem, OutputMessage as OAIOutputMessage, OutputStatus, ReasoningItem, SummaryPart,
         SummaryTextContent,
     };
-    use introspection_sdk::openai::convert_responses_output;
+    use introspection_sdk::otel::openai::convert_responses_output;
 
     let output = vec![
         OutputItem::Reasoning(ReasoningItem {
@@ -725,7 +729,7 @@ fn test_responses_output_reasoning_merges_into_message() {
 #[test]
 fn test_responses_input_text() {
     use async_openai::types::responses::InputParam;
-    use introspection_sdk::openai::convert_responses_input;
+    use introspection_sdk::otel::openai::convert_responses_input;
 
     let input = InputParam::Text("Hello world".to_string());
     let messages = convert_responses_input(&input);
@@ -746,7 +750,7 @@ fn test_responses_input_text() {
 #[test]
 fn test_responses_input_function_call_output() {
     use async_openai::types::responses::InputParam;
-    use introspection_sdk::openai::convert_responses_input;
+    use introspection_sdk::otel::openai::convert_responses_input;
 
     let input = InputParam::Items(vec![serde_json::from_value(serde_json::json!({
         "type": "function_call_output",

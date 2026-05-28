@@ -20,7 +20,7 @@ use async_openai::types::responses::{
     ReasoningSummary, Tool, WebSearchTool,
 };
 use async_openai::Client;
-use introspection_sdk::openai::traced_responses_create;
+use introspection_sdk::otel::openai::traced_responses_create;
 use introspection_sdk::{IntrospectionSpanProcessor, SpanProcessorConfig};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;

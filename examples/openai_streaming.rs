@@ -22,7 +22,7 @@ use async_openai::types::chat::{
 };
 use async_openai::Client;
 use futures::StreamExt;
-use introspection_sdk::openai::{traced_chat_completion, traced_chat_completion_stream};
+use introspection_sdk::otel::openai::{traced_chat_completion, traced_chat_completion_stream};
 use introspection_sdk::{
     IntrospectionSpanProcessor, Observation, ObservationConfig, SpanProcessorConfig,
 };
