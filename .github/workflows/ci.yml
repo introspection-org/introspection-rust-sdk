@@ -106,39 +106,39 @@ jobs:
           INTROSPECTION_BASE_URL: ${{ vars.INTROSPECTION_BASE_URL }}
         run: cargo test --features testing,openai --test responses_api_test -- --ignored
 
-  examples:
-    name: Run Examples
-    if: false
-    needs: integration
-    runs-on: ubuntu-latest
-    environment: build
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run examples
-        env:
-          INTROSPECTION_TOKEN: ${{ secrets.INTROSPECTION_TOKEN }}
-          INTROSPECTION_BASE_URL: ${{ vars.INTROSPECTION_BASE_URL }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          echo "==> Running openai_tool_call"
-          cargo run --example openai_tool_call --features openai
-          echo "==> Running openai_streaming"
-          cargo run --example openai_streaming --features openai
-          echo "==> Running responses_api_features"
-          cargo run --example responses_api_features --features openai
+  # examples:
+  #   name: Run Examples
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   needs: integration
+  #   runs-on: ubuntu-latest
+  #   environment: build
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #
+  #     - name: Install Rust stable
+  #       uses: dtolnay/rust-toolchain@stable
+  #
+  #     - name: Cache cargo
+  #       uses: actions/cache@v5
+  #       with:
+  #         path: |
+  #           ~/.cargo/registry
+  #           ~/.cargo/git
+  #           target
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #
+  #     - name: Run examples
+  #       env:
+  #         INTROSPECTION_TOKEN: ${{ secrets.INTROSPECTION_TOKEN }}
+  #         INTROSPECTION_BASE_URL: ${{ vars.INTROSPECTION_BASE_URL }}
+  #         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  #       run: |
+  #         echo "==> Running openai_tool_call"
+  #         cargo run --example openai_tool_call --features openai
+  #         echo "==> Running openai_streaming"
+  #         cargo run --example openai_streaming --features openai
+  #         echo "==> Running responses_api_features"
+  #         cargo run --example responses_api_features --features openai
 
   # ── Create release tag (only on VERSION change) ────────────────────
   create-tag:
