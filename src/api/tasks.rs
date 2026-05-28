@@ -1,0 +1,255 @@
+//! `client.tasks.*` — task lifecycle and cursor-style run streaming.
+
+use std::sync::Arc;
+
+use futures::stream::Stream;
+use futures::StreamExt;
+
+use crate::api::error::ApiResult;
+use crate::api::http::HttpClient;
+use crate::api::paginator::Paginator;
+use crate::api::schemas::{
+    SseEvent, Task, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode,
+    TaskRun, TaskRunCreate, TaskRunResponse, TaskUpdate,
+};
+use crate::api::sse::parse_sse_response;
+
+/// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
+///
+/// Mirrors the Cursor SDK shape: [`Self::stream`] iterates raw SSE events,
+/// [`Self::text`] collects text frames into a string, [`Self::cancel`]
+/// cancels the run.
+#[derive(Clone)]
+pub struct RunHandle {
+    /// The task this run belongs to. `None` when constructed from
+    /// `runs.create(...)` (which only returns the run).
+    pub task: Option<Task>,
+    /// The run itself.
+    pub run: TaskRun,
+    runs: TaskRuns,
+}
+
+impl RunHandle {
+    pub(crate) fn new(task: Option<Task>, run: TaskRun, runs: TaskRuns) -> Self {
+        Self { task, run, runs }
+    }
+
+    /// Stream raw SSE frames from `/v1/tasks/{id}/runs/{rid}/stream`.
+    pub async fn stream(&self) -> ApiResult<impl Stream<Item = ApiResult<SseEvent>>> {
+        self.runs
+            .stream(&self.run.task_id.to_string(), &self.run.id)
+            .await
+    }
+
+    /// Cancel the run.
+    pub async fn cancel(&self) -> ApiResult<TaskCancelResponse> {
+        self.runs
+            .cancel(&self.run.task_id.to_string(), &self.run.id)
+            .await
+    }
+
+    /// Convenience: collect `data` from `event: text` / `event: message`
+    /// frames into a single string. Returns an error on the first
+    /// transport / decode failure.
+    pub async fn text(&self) -> ApiResult<String> {
+        let mut out = String::new();
+        let stream = self.stream().await?;
+        tokio::pin!(stream);
+        while let Some(ev) = stream.next().await {
+            let ev = ev?;
+            if ev.event == "text" || ev.event == "message" {
+                out.push_str(&ev.data);
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// `client.tasks.runs.*`.
+#[derive(Clone)]
+pub struct TaskRuns {
+    http: Arc<HttpClient>,
+}
+
+impl TaskRuns {
+    #[doc(hidden)]
+    pub fn new(http: Arc<HttpClient>) -> Self {
+        Self { http }
+    }
+
+    /// `POST /v1/tasks/{id}/runs` — create a new run on an existing task.
+    pub async fn create(&self, task_id: &str, body: &TaskRunCreate) -> ApiResult<RunHandle> {
+        let path = format!("/v1/tasks/{}/runs", urlencode(task_id));
+        let res: TaskRunResponse = self.http.post_json(&path, body).await?;
+        Ok(RunHandle::new(None, res.run, self.clone()))
+    }
+
+    /// `GET /v1/tasks/{id}/runs/{rid}`.
+    pub async fn get(&self, task_id: &str, run_id: &str) -> ApiResult<TaskRun> {
+        let path = format!(
+            "/v1/tasks/{}/runs/{}",
+            urlencode(task_id),
+            urlencode(run_id)
+        );
+        self.http.get_json(&path, &()).await
+    }
+
+    /// `POST /v1/tasks/{id}/runs/{rid}/cancel`.
+    pub async fn cancel(&self, task_id: &str, run_id: &str) -> ApiResult<TaskCancelResponse> {
+        let path = format!(
+            "/v1/tasks/{}/runs/{}/cancel",
+            urlencode(task_id),
+            urlencode(run_id)
+        );
+        // POST with no body, JSON response — use the same multipart-less JSON
+        // surface by sending an empty `()` body.
+        self.http.post_json(&path, &serde_json::json!({})).await
+    }
+
+    /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of raw
+    /// SSE events.
+    pub async fn stream(
+        &self,
+        task_id: &str,
+        run_id: &str,
+    ) -> ApiResult<impl Stream<Item = ApiResult<SseEvent>>> {
+        let path = format!(
+            "/v1/tasks/{}/runs/{}/stream",
+            urlencode(task_id),
+            urlencode(run_id)
+        );
+        let res = self
+            .http
+            .get_stream(&path, Some("text/event-stream"))
+            .await?;
+        Ok(parse_sse_response(res))
+    }
+}
+
+/// `client.tasks.*`.
+#[derive(Clone)]
+pub struct Tasks {
+    http: Arc<HttpClient>,
+    /// Nested `runs` namespace.
+    pub runs: TaskRuns,
+}
+
+impl Tasks {
+    #[doc(hidden)]
+    pub fn new(http: Arc<HttpClient>) -> Self {
+        let runs = TaskRuns::new(http.clone());
+        Self { http, runs }
+    }
+
+    /// `GET /v1/tasks` — paginator over the list endpoint.
+    ///
+    /// The returned [`Paginator<Task>`] implements
+    /// [`futures::Stream`]`<Item = `[`ApiResult`]`<`[`Task`]`>>` (auto-paginates) and
+    /// also exposes [`Paginator::next_page`] for page-at-a-time access
+    /// (use this when you need the `total_count` envelope).
+    pub fn list(&self, params: &TaskListParams) -> Paginator<Task> {
+        Paginator::new(self.http.clone(), "/v1/tasks", params)
+            .expect("TaskListParams must serialize to a JSON object")
+    }
+
+    /// `POST /v1/tasks` — create a task (and its initial run).
+    pub async fn create(&self, body: &TaskCreate) -> ApiResult<TaskCreateResponse> {
+        self.http.post_json("/v1/tasks", body).await
+    }
+
+    /// `GET /v1/tasks/{id}`.
+    pub async fn get(&self, task_id: &str) -> ApiResult<Task> {
+        let path = format!("/v1/tasks/{}", urlencode(task_id));
+        self.http.get_json(&path, &()).await
+    }
+
+    /// `PATCH /v1/tasks/{id}`.
+    pub async fn update(&self, task_id: &str, body: &TaskUpdate) -> ApiResult<Task> {
+        let path = format!("/v1/tasks/{}", urlencode(task_id));
+        self.http.patch_json(&path, body).await
+    }
+
+    /// `DELETE /v1/tasks/{id}` — soft-delete a task.
+    ///
+    /// Requires the `tasks:delete` scope. Dashboard-minted API keys do
+    /// **not** grant this scope by default (per the cloud PR #678 scope
+    /// model), so calls will return
+    /// [`crate::IntrospectionAPIError::Http`] with `status == 403` unless
+    /// the caller holds a wildcard or explicitly elevated key.
+    pub async fn delete(&self, task_id: &str) -> ApiResult<()> {
+        let path = format!("/v1/tasks/{}", urlencode(task_id));
+        self.http.delete_empty(&path).await
+    }
+
+    /// `POST /v1/tasks/{id}/archive`.
+    pub async fn archive(&self, task_id: &str) -> ApiResult<()> {
+        let path = format!("/v1/tasks/{}/archive", urlencode(task_id));
+        self.http.post_empty(&path).await
+    }
+
+    /// `POST /v1/tasks/{id}/unarchive`.
+    pub async fn unarchive(&self, task_id: &str) -> ApiResult<()> {
+        let path = format!("/v1/tasks/{}/unarchive", urlencode(task_id));
+        self.http.post_empty(&path).await
+    }
+
+    /// Cursor-style sugar: `POST /v1/tasks` with a prompt + return a
+    /// [`RunHandle`] on the initial run.
+    ///
+    /// ```rust,no_run
+    /// # use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
+    /// # use uuid::Uuid;
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = IntrospectionClient::new(ClientConfig::default())?;
+    /// let runtime_id: Uuid = std::env::var("INTROSPECTION_RUNTIME_ID")?.parse()?;
+    /// let runner = client.runtime(runtime_id).run(RunRequest::default()).await?;
+    /// let run = runner.tasks().start_prompt("Summarize this repo").await?;
+    /// let text = run.text().await?;
+    /// println!("{text}");
+    /// # Ok(()) }
+    /// ```
+    pub async fn start_prompt(&self, prompt: impl Into<String>) -> ApiResult<RunHandle> {
+        self.start(&TaskCreate {
+            prompt: Some(prompt.into()),
+            mode: Some(TaskMode::Agent),
+            ..Default::default()
+        })
+        .await
+    }
+
+    /// Cursor-style sugar with a full [`TaskCreate`] body.
+    pub async fn start(&self, body: &TaskCreate) -> ApiResult<RunHandle> {
+        let res = self.create(body).await?;
+        Ok(RunHandle::new(Some(res.task), res.run, self.runs.clone()))
+    }
+}
+
+/// RFC 3986 path-segment percent encoding. We avoid pulling in
+/// `percent-encoding` for one call site and inline a minimal helper here.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn urlencode_passes_safe_chars() {
+        assert_eq!(urlencode("abc-123_.~"), "abc-123_.~");
+    }
+
+    #[test]
+    fn urlencode_escapes_slash_and_space() {
+        assert_eq!(urlencode("a b/c"), "a%20b%2Fc");
+    }
+}
