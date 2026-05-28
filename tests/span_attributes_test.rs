@@ -1,4 +1,4 @@
-use introspection_sdk::testing::{setup_test_provider, span_data_to_json, spans_to_json};
+use introspection_sdk::otel::testing::{setup_test_provider, span_data_to_json, spans_to_json};
 use opentelemetry::trace::{Span, SpanKind, Status, Tracer, TracerProvider};
 use opentelemetry::KeyValue;
 
@@ -174,17 +174,18 @@ async fn test_gen_ai_attributes_with_wiremock() {
 // ---------------------------------------------------------------------------
 #[test]
 fn test_introspection_span_processor_with_provider() {
-    use introspection_sdk::{IntrospectionSpanProcessor, SpanProcessorConfig};
+    use introspection_sdk::otel::{
+        IntrospectionSpanProcessor, SpanProcessorAdvancedOptions, SpanProcessorConfig,
+    };
     use opentelemetry_sdk::trace::SdkTracerProvider;
 
-    let processor =
-        IntrospectionSpanProcessor::new(SpanProcessorConfig::with_token("test-token").advanced(
-            introspection_sdk::AdvancedOptions {
-                base_url: Some("http://localhost:19876/v1/traces".to_string()),
-                ..Default::default()
-            },
-        ))
-        .unwrap();
+    let processor = IntrospectionSpanProcessor::new(
+        SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
+            base_otel_url: Some("http://localhost:19876".to_string()),
+            ..Default::default()
+        }),
+    )
+    .unwrap();
 
     let provider = SdkTracerProvider::builder()
         .with_span_processor(processor)

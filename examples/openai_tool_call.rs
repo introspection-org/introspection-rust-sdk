@@ -20,7 +20,7 @@ use async_openai::types::chat::{
     ChatCompletionTools, CreateChatCompletionRequest, FunctionObject,
 };
 use async_openai::Client;
-use introspection_sdk::openai::traced_chat_completion;
+use introspection_sdk::otel::openai::traced_chat_completion;
 use introspection_sdk::{
     IntrospectionSpanProcessor, Observation, ObservationConfig, SpanProcessorConfig,
 };

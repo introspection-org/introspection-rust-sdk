@@ -28,8 +28,8 @@
 use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 
-use crate::messages::{InputMessage, OutputMessage};
-use crate::types::attr;
+use crate::otel::messages::{InputMessage, OutputMessage};
+use crate::otel::types::attr;
 
 /// The type of observation being recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn test_observation_config_generation() {
         let config = ObservationConfig::generation("chat", "gpt-4o-mini")
-            .with_input(vec![crate::messages::InputMessage::user("hi")]);
+            .with_input(vec![crate::otel::messages::InputMessage::user("hi")]);
         assert_eq!(config.observation_type, ObservationType::Generation);
         assert_eq!(config.model, Some("gpt-4o-mini".to_string()));
         assert_eq!(config.system, Some("openai".to_string()));
@@ -419,7 +419,9 @@ mod tests {
             .with_response_model("gpt-4o-mini")
             .with_response_id("chatcmpl-123")
             .with_usage(10, 5)
-            .with_output(vec![crate::messages::OutputMessage::assistant("hello")]);
+            .with_output(vec![crate::otel::messages::OutputMessage::assistant(
+                "hello",
+            )]);
 
         assert_eq!(update.response_model, Some("gpt-4o-mini".to_string()));
         assert_eq!(update.response_id, Some("chatcmpl-123".to_string()));

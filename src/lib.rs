@@ -1,127 +1,138 @@
 //! # Introspection SDK for Rust
 //!
-//! A Rust client for tracking events and feedback using OTLP Logs.
-//! Uses native OpenTelemetry libraries for batching, export, and baggage propagation.
+//! Rust client for [Introspection](https://introspection.dev). Three
+//! independent surfaces, mix-and-match as needed:
 //!
-//! This SDK provides methods for:
-//! - **Tracking events** - Custom analytics events with properties
-//! - **Identifying users** - Associate events with user identities and traits
-//! - **Collecting feedback** - Track user feedback on AI responses
+//! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
+//!    `Runner`, `tasks`, `files`). Always available, no OpenTelemetry
+//!    dependency. No feature flag required.
+//! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
+//!    `track` / `feedback` / `identify` analytics events. Owns its own
+//!    `SdkLoggerProvider`. Requires the `otel` Cargo feature.
+//! 3. `otel::IntrospectionSpanProcessor` — OTLP **trace** exporter
+//!    you attach to your own `SdkTracerProvider`. Requires the `otel`
+//!    feature.
 //!
-//! ## Quick Start
+//! The three surfaces share no state — construct only what you need.
+//!
+//! ## REST quick start
 //!
 //! ```rust,no_run
-//! use introspection_sdk::{IntrospectionClient, ClientConfig, FeedbackOptions, TrackOptions};
+//! use introspection_sdk::{ClientConfig, IntrospectionClient};
 //!
-//! // Initialize the client
-//! let client = IntrospectionClient::new(
-//!     ClientConfig::with_token("your-token")
-//! ).unwrap();
+//! # async fn main_() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = IntrospectionClient::new(ClientConfig::with_token("your-token"))?;
+//! let runtimes = client.runtimes();
+//! // runtimes.create(...).await?;
+//! # Ok(()) }
+//! ```
 //!
-//! // Track a custom event
-//! client.track(
+//! ## Analytics (logs) quick start
+//!
+//! Requires the `otel` feature.
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "otel")] {
+//! use introspection_sdk::otel::{FeedbackOptions, IntrospectionLogs, TrackOptions};
+//!
+//! let logs = IntrospectionLogs::builder()
+//!     .token("your-token")
+//!     .service_name("my-service")
+//!     .build()
+//!     .unwrap();
+//!
+//! logs.track(
 //!     "Button Clicked",
 //!     Some(TrackOptions::new().with_property("button_id", "submit")),
 //! );
 //!
-//! // Use baggage context for identity and conversation
 //! {
-//!     let _user = client.set_user_id("user_123");
-//!     let _conv = client.set_conversation_id("conv_456");
-//!
-//!     // Events within this scope have user and conversation context
-//!     client.feedback(
+//!     let _user = logs.set_user_id("user_123");
+//!     let _conv = logs.set_conversation_id("conv_456");
+//!     logs.feedback(
 //!         "thumbs_up",
 //!         FeedbackOptions::new().with_comments("Great response!"),
 //!     );
-//! } // Context automatically cleared when guards are dropped
+//! } // Context cleared when guards drop
 //!
-//! // Shutdown gracefully
-//! client.shutdown().unwrap();
+//! logs.shutdown().unwrap();
+//! # }
 //! ```
 //!
-//! ## Configuration
+//! ## Traces quick start
 //!
-//! The client can be configured via the builder pattern or environment variables:
+//! Requires the `otel` feature.
 //!
 //! ```rust,no_run
-//! use introspection_sdk::{AdvancedOptions, IntrospectionClient, ClientConfig};
+//! # #[cfg(feature = "otel")] {
+//! use introspection_sdk::otel::{IntrospectionSpanProcessor, SpanProcessorConfig};
+//! use opentelemetry_sdk::trace::SdkTracerProvider;
 //!
-//! // Using builder
-//! let client = IntrospectionClient::new(
-//!     ClientConfig::builder()
-//!         .token("your-token")
-//!         .service_name("my-service")
-//!         .build()
-//!         .unwrap()
+//! let processor = IntrospectionSpanProcessor::new(
+//!     SpanProcessorConfig::with_token("your-token"),
 //! ).unwrap();
 //!
-//! // With advanced options (custom base URL)
-//! let client = IntrospectionClient::new(
-//!     ClientConfig::builder()
-//!         .token("your-token")
-//!         .advanced(AdvancedOptions {
-//!             base_url: Some("https://api.nuraline.ai".to_string()),
-//!             ..Default::default()
-//!         })
-//!         .build()
-//!         .unwrap()
-//! ).unwrap();
-//!
-//! // Or use environment variables:
-//! // - INTROSPECTION_TOKEN
-//! // - INTROSPECTION_SERVICE_NAME
-//! // - INTROSPECTION_BASE_URL
-//! let client = IntrospectionClient::new(ClientConfig::default()).unwrap();
+//! let provider = SdkTracerProvider::builder()
+//!     .with_span_processor(processor)
+//!     .build();
+//! # let _ = provider;
+//! # }
 //! ```
 //!
-//! ## Context Management with Baggage
+//! ## Environment variables
 //!
-//! Context is managed via OpenTelemetry baggage, which propagates across distributed systems.
-//! Use the `set_*` methods to get guards that automatically clean up when dropped:
-//!
-//! ```rust,no_run
-//! use introspection_sdk::{IntrospectionClient, ClientConfig};
-//!
-//! let client = IntrospectionClient::new(ClientConfig::default()).unwrap();
-//!
-//! // Guards automatically clear context when dropped (like Python's context managers)
-//! {
-//!     let _user_guard = client.set_user_id("user_123");
-//!     let _conv_guard = client.set_conversation_id("conv_456");
-//!     let _agent_guard = client.set_agent("support-bot", Some("agent_789"));
-//!
-//!     // All events here inherit the baggage context
-//!     client.track("Message Sent", None);
-//!     client.feedback("thumbs_up", Default::default());
-//! }
-//! // Context is cleared here
-//! ```
+//! | Variable                        | Purpose                                     |
+//! |---------------------------------|---------------------------------------------|
+//! | `INTROSPECTION_TOKEN`           | Auth token (all surfaces)                   |
+//! | `INTROSPECTION_PROJECT_ID`      | Default project UUID (REST client)          |
+//! | `INTROSPECTION_SERVICE_NAME`    | Service name (logs/traces)                  |
+//! | `INTROSPECTION_BASE_API_URL`    | REST API host (default `api.introspection.dev`) |
+//! | `INTROSPECTION_BASE_OTEL_URL`   | OTLP collector host (default `otel.introspection.dev`) |
 
+pub mod api;
 pub mod client;
-pub mod messages;
-pub mod observation;
-#[cfg(feature = "openai")]
-pub mod openai;
-#[cfg(feature = "openai")]
-pub use openai::TracedStream;
-pub mod span_processor;
-#[cfg(any(feature = "testing", test))]
-pub mod testing;
+#[cfg(feature = "otel")]
+pub mod otel;
+pub mod resources;
+pub mod runner;
 pub mod types;
 
-// Re-export main types for convenience
-pub use client::{BaggageGuard, IntrospectionClient, IntrospectionError, Result, VERSION};
-pub use messages::{
+// Re-export wire types + low-level REST API surface (always available)
+pub use api::{
+    Arm, Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus, ExperimentUpdate,
+    File, FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
+    IntrospectionAPIError, Paginated, PaginationParams, Paginator, Project, ProjectListParams,
+    Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository, RepositoryListParams,
+    RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
+    RunnerDeployment, RunnerIdentity, RunnerRecipeSummary, RunnerSpec, Runtime, RuntimeCreate,
+    RuntimeListParams, RuntimeUpdate, SseEvent, Task, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
+    TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks, UploadSource,
+};
+pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
+pub use resources::{
+    ExperimentHandle, Experiments, Projects, RecipePin, Recipes, Repositories, RuntimeHandle,
+    Runtimes,
+};
+pub use runner::{Runner, RunnerSource};
+pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
+
+// OTel surfaces — gated behind the `otel` feature, re-exported from
+// `crate::otel` for top-level access.
+#[cfg(feature = "otel")]
+pub use otel::{
+    BaggageGuard, FeedbackOptions, GenerationUpdate, IdentifyOptions, IntrospectionLogs,
+    IntrospectionLogsConfig, IntrospectionLogsConfigBuilder, IntrospectionLogsError,
+    IntrospectionSpanProcessor, Observation, ObservationConfig, ObservationType, PropertyValue,
+    SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
+    SpanProcessorError, SpanProcessorResult, TrackOptions, Usage,
+};
+
+#[cfg(feature = "otel")]
+pub use otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
-pub use observation::{GenerationUpdate, Observation, ObservationConfig, ObservationType, Usage};
-pub use span_processor::{
-    IntrospectionSpanProcessor, SpanProcessorConfig, SpanProcessorConfigBuilder,
-    SpanProcessorError, SpanProcessorResult,
-};
-pub use types::{
-    AdvancedOptions, ClientConfig, ClientConfigBuilder, FeedbackOptions, IdentifyOptions,
-    PropertyValue, TrackOptions,
-};
+
+#[cfg(feature = "openai")]
+pub use otel::openai::TracedStream;
