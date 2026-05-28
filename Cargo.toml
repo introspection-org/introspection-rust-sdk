@@ -81,15 +81,22 @@ async-openai = { version = "0.40", features = ["chat-completion"] }
 dotenvy = "0.15"
 
 [[example]]
+name = "runtimes"
+path = "examples/api/runtimes.rs"
+
+[[example]]
 name = "openai_tool_call"
+path = "examples/otel/openai_tool_call.rs"
 required-features = ["openai"]
 
 [[example]]
 name = "openai_streaming"
+path = "examples/otel/openai_streaming.rs"
 required-features = ["openai"]
 
 [[example]]
 name = "responses_api_features"
+path = "examples/otel/responses_api_features.rs"
 required-features = ["openai"]
 
 # Linting configuration

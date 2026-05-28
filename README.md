@@ -71,21 +71,22 @@ HTTPS calls to manage runtimes, experiments, tasks, and files, and to
 drive the `Runner` SSE stream.
 
 ```rust
-use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
-use uuid::Uuid;
+// cargo add introspection-sdk
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let client = IntrospectionClient::new(ClientConfig::with_token("your-token"))?;
+let runner = client.runtime_by_name("customer-agent").await?
+    .run(RunRequest::default()).await?;
 
-let runtime_id: Uuid = std::env::var("INTROSPECTION_RUNTIME_ID")?.parse()?;
-let runner = client.runtime(runtime_id).run(RunRequest::default()).await?;
-let run = runner.tasks().start_prompt("Summarize this repo").await?;
-let text = run.text().await?;
-println!("{text}");
-# Ok(()) }
+let mut events = runner.tasks()
+    .start_prompt("Say hello in one sentence.").await?
+    .into_stream().await?;
+
+while let Some(event) = events.next().await {
+    let event = event?;
+    println!("[{}] {}", event.event, event.data);
+}
 ```
 
-See [`examples/tasks_files.rs`](examples/tasks_files.rs) for a longer
+See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
 
 ### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)

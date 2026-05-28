@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::api::error::ApiResult;
+use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
@@ -61,6 +61,33 @@ impl Runtimes {
     pub async fn delete(&self, runtime_id: Uuid, project_id: Uuid) -> ApiResult<()> {
         let path = format!("/v1/runtimes/{}?project_id={}", runtime_id, project_id);
         self.http.delete_empty(&path).await
+    }
+
+    /// Look up a runtime by name and return a [`RuntimeHandle`].
+    ///
+    /// Queries `GET /v1/runtimes?name=…&only_active=true` and returns a
+    /// handle to the first match. The server infers the project from the
+    /// API token. Returns `IntrospectionAPIError::Http` with status 404
+    /// if no active runtime with that name exists.
+    pub async fn by_name(&self, name: &str) -> ApiResult<RuntimeHandle> {
+        let mut paginator = self.list(&RuntimeListParams {
+            name: Some(name.to_string()),
+            only_active: Some(true),
+            limit: Some(1),
+            ..Default::default()
+        });
+        let runtime = paginator
+            .next_page()
+            .await?
+            .and_then(|p| p.records.into_iter().next())
+            .ok_or_else(|| IntrospectionAPIError::Http {
+                message: format!("no active runtime named '{name}'"),
+                status: 404,
+                code: None,
+                request_id: None,
+                body: None,
+            })?;
+        Ok(self.handle(runtime.id))
     }
 
     /// Build a [`RuntimeHandle`] for `runtime_id`. The handle is the
