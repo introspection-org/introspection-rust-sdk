@@ -1,5 +1,6 @@
 //! `client.tasks.*` — task lifecycle and cursor-style run streaming.
 
+use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::stream::Stream;
@@ -39,6 +40,17 @@ impl RunHandle {
         self.runs
             .stream(&self.run.task_id.to_string(), &self.run.id)
             .await
+    }
+
+    /// Consume this handle and return a pinned stream of SSE events.
+    ///
+    /// Unlike [`Self::stream`] the returned stream is `Pin<Box<…>>` so
+    /// callers can iterate without `tokio::pin!`.
+    pub async fn into_stream(
+        self,
+    ) -> ApiResult<Pin<Box<dyn Stream<Item = ApiResult<SseEvent>> + Send>>> {
+        let s = self.stream().await?;
+        Ok(Box::pin(s))
     }
 
     /// Cancel the run.

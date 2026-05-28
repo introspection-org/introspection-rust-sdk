@@ -677,7 +677,8 @@ pub struct RuntimeUpdate {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeListParams {
-    pub project_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -905,13 +906,6 @@ pub struct RunRequest {
     pub recipe_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct RunnerRecipeSummary {
-    pub repository_id: Uuid,
-    pub git_ref: String,
-    pub git_commit_sha: String,
-}
-
 /// Resolved context attached to a [`RunnerSpec`] — the runtime / arm /
 /// identity CP picked. Surfaced on `runner.context()` for telemetry.
 #[derive(Debug, Clone, Deserialize)]
@@ -920,7 +914,12 @@ pub struct RunnerContext {
     #[serde(default)]
     pub experiment_id: Option<Uuid>,
     pub recipe_id: Uuid,
-    pub recipe: RunnerRecipeSummary,
+    #[serde(default)]
+    pub recipe_repository_id: Option<Uuid>,
+    #[serde(default)]
+    pub recipe_git_ref: Option<String>,
+    #[serde(default)]
+    pub recipe_git_commit_sha: Option<String>,
     #[serde(default)]
     pub arm_label: Option<String>,
     #[serde(default)]

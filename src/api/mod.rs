@@ -147,7 +147,7 @@ pub use schemas::{
     ExperimentUpdate, File, FileCreateText, FileListParams, FileType, FileUpdate, Paginated,
     PaginationParams, Project, ProjectListParams, Recipe, RecipeCreate, RecipeListParams,
     RecipeUpdate, Repository, RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage,
-    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerRecipeSummary, RunnerSpec,
+    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec,
     Runtime, RuntimeCreate, RuntimeListParams, RuntimeUpdate, SseEvent, Task, TaskCancelResponse,
     TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
     TaskRunResponse, TaskStatus, TaskUpdate,
