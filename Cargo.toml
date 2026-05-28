@@ -39,7 +39,7 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macr
 # Gated by the `otel` feature so REST-only installs don't pull them.
 opentelemetry = { version = "0.30.0", default-features = false, features = ["logs", "trace"], optional = true }
 opentelemetry_sdk = { version = "0.30.0", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
-opentelemetry-otlp = { version = "0.30.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-client"], optional = true }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-client"], optional = true }
 
 # HTTP client — async + multipart + streaming for the REST API; `blocking`
 # kept on for the otel BatchSpanProcessor's dedicated thread when the
