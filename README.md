@@ -25,7 +25,7 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 
 | Surface | What it does | Cargo feature |
 | --- | --- | --- |
-| [`IntrospectionClient`](#1-introspectionclient--rest) | REST: runtimes, experiments, runner, tasks, files | _none_ (default) |
+| [`IntrospectionClient`](#1-introspectionclient--introspection-api) | Introspection API: runtimes, experiments, runner, tasks, files | _none_ (default) |
 | [`IntrospectionLogs`](#2-introspectionlogs--analytics-events) | OTLP **logs**: `track` / `feedback` / `identify` | `otel` |
 | [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--otel-traces) | OTLP **traces** exporter for your `TracerProvider` | `otel` |
 
@@ -33,7 +33,7 @@ They share no state. Construct the ones you want, configure independently, mix a
 
 ## Installation
 
-REST-only (no OpenTelemetry pulled in):
+Default install — `IntrospectionClient` only (no OpenTelemetry pulled in):
 
 ```toml
 [dependencies]
@@ -64,11 +64,11 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 
 ## Three surfaces
 
-### 1. `IntrospectionClient` — REST
+### 1. `IntrospectionClient` — Introspection API (runtimes, tasks, files)
 
-No OpenTelemetry dependency; just HTTPS calls to the DP REST API. Use it
-to manage runtimes, experiments, tasks, and files, and to drive the
-`Runner` SSE stream.
+The main Introspection API surface. No OpenTelemetry dependency; just
+HTTPS calls to manage runtimes, experiments, tasks, and files, and to
+drive the `Runner` SSE stream.
 
 ```rust
 use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
