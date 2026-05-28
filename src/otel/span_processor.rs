@@ -2,7 +2,9 @@
 
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::error::OTelSdkError;
-use opentelemetry_sdk::trace::{BatchSpanProcessor, SpanData, SpanProcessor as OtelSpanProcessor};
+use opentelemetry_sdk::trace::{
+    BatchSpanProcessor, SimpleSpanProcessor, SpanData, SpanProcessor as OtelSpanProcessor,
+};
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -10,7 +12,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, info};
 
-use crate::types::AdvancedOptions;
+use crate::otel::types;
 use crate::VERSION;
 
 /// Create a `reqwest::blocking::Client` on a dedicated thread.
@@ -51,7 +53,35 @@ impl From<OTelSdkError> for SpanProcessorError {
 /// Result type for SpanProcessor operations.
 pub type SpanProcessorResult<T> = std::result::Result<T, SpanProcessorError>;
 
-// AdvancedOptions is now imported from crate::types
+/// Advanced options for [`IntrospectionSpanProcessor`].
+///
+/// Independent from the REST [`crate::AdvancedOptions`] — the span
+/// processor talks to the OTLP traces endpoint, which is a different
+/// host from the DP REST API.
+#[derive(Clone, Debug, Default)]
+pub struct SpanProcessorAdvancedOptions {
+    /// OTLP collector base URL. If unset, falls back to
+    /// `INTROSPECTION_BASE_OTEL_URL`, then to
+    /// `https://otel.introspection.dev`.
+    pub base_otel_url: Option<String>,
+
+    /// Additional HTTP headers attached to the OTLP export.
+    pub additional_headers: Option<HashMap<String, String>>,
+
+    /// Custom span exporter (bypasses default OTLP exporter) — primarily
+    /// for tests.
+    pub span_exporter: Option<Arc<SpanExporter>>,
+
+    /// Flush interval in milliseconds for the batch processor.
+    /// Lower values reduce latency but increase network requests.
+    /// Default: 5000
+    pub flush_interval_ms: Option<u64>,
+
+    /// Maximum batch size before auto-flush. Set to `1` for sequential
+    /// (immediate) export — useful for multi-turn conversations.
+    /// Default: uses the OTel SDK default.
+    pub max_batch_size: Option<usize>,
+}
 
 /// Configuration for the Introspection span processor.
 #[derive(Clone, Debug, Default)]
@@ -61,7 +91,7 @@ pub struct SpanProcessorConfig {
     /// Service name (default: "introspection-client")
     pub service_name: Option<String>,
     /// Advanced options for configuration and testing
-    pub advanced: Option<AdvancedOptions>,
+    pub advanced: Option<SpanProcessorAdvancedOptions>,
 }
 
 impl SpanProcessorConfig {
@@ -74,7 +104,7 @@ impl SpanProcessorConfig {
     }
 
     /// Set advanced options.
-    pub fn advanced(mut self, advanced: AdvancedOptions) -> Self {
+    pub fn advanced(mut self, advanced: SpanProcessorAdvancedOptions) -> Self {
         self.advanced = Some(advanced);
         self
     }
@@ -90,7 +120,7 @@ impl SpanProcessorConfig {
 pub struct SpanProcessorConfigBuilder {
     token: Option<String>,
     service_name: Option<String>,
-    advanced: Option<AdvancedOptions>,
+    advanced: Option<SpanProcessorAdvancedOptions>,
 }
 
 impl SpanProcessorConfigBuilder {
@@ -104,7 +134,7 @@ impl SpanProcessorConfigBuilder {
         self
     }
 
-    pub fn advanced(mut self, advanced: AdvancedOptions) -> Self {
+    pub fn advanced(mut self, advanced: SpanProcessorAdvancedOptions) -> Self {
         self.advanced = Some(advanced);
         self
     }
@@ -118,15 +148,29 @@ impl SpanProcessorConfigBuilder {
     }
 }
 
+/// Inner processor type — either batch (default) or simple (for sequential export).
+#[derive(Debug)]
+enum InnerProcessor {
+    Batch(BatchSpanProcessor),
+    Simple(SimpleSpanProcessor<SpanExporter>),
+}
+
 /// Span processor that sends traces to the introspection API.
 ///
-/// This wraps OpenTelemetry's BatchSpanProcessor and configures it to send
-/// traces to the introspection backend via OTLP.
+/// This wraps OpenTelemetry's BatchSpanProcessor (default) or SimpleSpanProcessor
+/// (when `max_batch_size = Some(1)`) and configures it to send traces to the
+/// introspection backend via OTLP.
+///
+/// Set `max_batch_size` to `1` to export each span individually on end, ensuring
+/// sequential processing by the backend. This is useful for multi-turn conversations
+/// where each turn must be ingested before the next arrives.
 ///
 /// # Example
 ///
 /// ```rust,no_run
-/// use introspection_sdk::{AdvancedOptions, span_processor::{IntrospectionSpanProcessor, SpanProcessorConfig}};
+/// use introspection_sdk::otel::{
+///     IntrospectionSpanProcessor, SpanProcessorAdvancedOptions, SpanProcessorConfig,
+/// };
 /// use opentelemetry_sdk::trace::SdkTracerProvider;
 ///
 /// // Simple usage
@@ -134,13 +178,11 @@ impl SpanProcessorConfigBuilder {
 ///     SpanProcessorConfig::with_token("your-token")
 /// ).unwrap();
 ///
-/// // With advanced options
+/// // Sequential export for multi-turn conversations
 /// let span_processor = IntrospectionSpanProcessor::new(
 ///     SpanProcessorConfig::with_token("your-token")
-///         .advanced(AdvancedOptions {
-///             base_url: Some("http://localhost:5418/v1/traces".to_string()),
-///             additional_headers: None,
-///             span_exporter: None,
+///         .advanced(SpanProcessorAdvancedOptions {
+///             max_batch_size: Some(1),
 ///             ..Default::default()
 ///         })
 /// ).unwrap();
@@ -151,14 +193,13 @@ impl SpanProcessorConfigBuilder {
 /// ```
 #[derive(Debug)]
 pub struct IntrospectionSpanProcessor {
-    inner: BatchSpanProcessor,
+    inner: InnerProcessor,
     _exporter: Arc<SpanExporter>,
 }
 
 impl IntrospectionSpanProcessor {
     /// Create a new IntrospectionSpanProcessor with the given configuration.
     pub fn new(config: SpanProcessorConfig) -> SpanProcessorResult<Self> {
-        // Use defaults if not provided
         let advanced = config.advanced.unwrap_or_default();
 
         let token = config
@@ -169,7 +210,7 @@ impl IntrospectionSpanProcessor {
         let service_name = config
             .service_name
             .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
-            .unwrap_or_else(|| "introspection-client".to_string());
+            .unwrap_or_else(|| crate::types::defaults::SERVICE_NAME.to_string());
 
         // Note: BatchSpanProcessor::builder takes ownership of SpanExporter (not Arc)
         // So we need to handle custom exporters differently - we can't extract from Arc
@@ -177,10 +218,6 @@ impl IntrospectionSpanProcessor {
         // is stored in _exporter for reference
         let (exporter, exporter_for_processor): (Arc<SpanExporter>, SpanExporter) =
             if let Some(custom_exporter) = advanced.span_exporter {
-                // Use provided exporter (for testing)
-                // Create a dummy exporter for the processor (won't be used since we have custom)
-                // This is a limitation - we can't extract SpanExporter from Arc
-                // The real exporter is stored in _exporter for reference
                 let dummy_exporter = SpanExporter::builder()
                     .with_http()
                     .with_http_client(new_blocking_http_client(Duration::from_secs(30)))
@@ -190,17 +227,19 @@ impl IntrospectionSpanProcessor {
                     .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?;
                 (custom_exporter.clone(), dummy_exporter)
             } else {
-                // Create default OTLP exporter
                 let base_url = advanced
-                    .base_url
-                    .or_else(|| env::var("INTROSPECTION_BASE_URL").ok())
-                    .unwrap_or_else(|| "https://api.nuraline.ai".to_string());
+                    .base_otel_url
+                    .or_else(|| env::var("INTROSPECTION_BASE_OTEL_URL").ok())
+                    .unwrap_or_else(|| types::defaults::BASE_OTEL_URL.to_string());
 
-                // Construct endpoint URL
-                let endpoint = if base_url.ends_with("/v1/traces") {
+                let endpoint = if base_url.ends_with(types::api_path::TRACES) {
                     base_url.clone()
                 } else {
-                    format!("{}/v1/traces", base_url.trim_end_matches('/'))
+                    format!(
+                        "{}{}",
+                        base_url.trim_end_matches('/'),
+                        types::api_path::TRACES
+                    )
                 };
 
                 info!(
@@ -208,7 +247,6 @@ impl IntrospectionSpanProcessor {
                     service_name, endpoint
                 );
 
-                // Build headers
                 let mut headers = HashMap::new();
                 headers.insert(
                     "User-Agent".to_string(),
@@ -219,11 +257,8 @@ impl IntrospectionSpanProcessor {
                     headers.extend(additional);
                 }
 
-                // Clone headers for storage exporter
                 let headers_clone = headers.clone();
 
-                // Create OTLP span exporter for processor
-                // Note: with_http() is required to specify HTTP transport protocol
                 let http_client = new_blocking_http_client(Duration::from_secs(30));
 
                 let exporter_for_processor = SpanExporter::builder()
@@ -249,11 +284,36 @@ impl IntrospectionSpanProcessor {
                 (exporter, exporter_for_processor)
             };
 
-        // Create batch span processor
-        let processor = BatchSpanProcessor::builder(exporter_for_processor).build();
+        // Use SimpleSpanProcessor for sequential export when max_batch_size=1.
+        // This ensures each span is exported immediately on end(), which is
+        // required for multi-turn conversations where each turn must be
+        // ingested before the next arrives.
+        // Default to sequential export for dev/staging tokens.
+        let max_batch_size = advanced.max_batch_size.or_else(|| {
+            if token.starts_with("intro_dev") || token.starts_with("intro_staging") {
+                Some(1)
+            } else {
+                None
+            }
+        });
+        let flush_interval = Duration::from_millis(advanced.flush_interval_ms.unwrap_or(5000));
+        let inner = if max_batch_size == Some(1) {
+            InnerProcessor::Simple(SimpleSpanProcessor::new(exporter_for_processor))
+        } else {
+            let mut batch_config = opentelemetry_sdk::trace::BatchConfigBuilder::default()
+                .with_scheduled_delay(flush_interval);
+            if let Some(batch_size) = max_batch_size {
+                batch_config = batch_config.with_max_export_batch_size(batch_size);
+            }
+            InnerProcessor::Batch(
+                BatchSpanProcessor::builder(exporter_for_processor)
+                    .with_batch_config(batch_config.build())
+                    .build(),
+            )
+        };
 
         Ok(Self {
-            inner: processor,
+            inner,
             _exporter: exporter,
         })
     }
@@ -261,32 +321,50 @@ impl IntrospectionSpanProcessor {
 
 impl OtelSpanProcessor for IntrospectionSpanProcessor {
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        self.inner.set_resource(resource);
+        match &mut self.inner {
+            InnerProcessor::Batch(p) => p.set_resource(resource),
+            InnerProcessor::Simple(p) => p.set_resource(resource),
+        }
     }
 
     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {
         debug!("Starting introspection span");
-        self.inner.on_start(span, cx);
+        match &self.inner {
+            InnerProcessor::Batch(p) => p.on_start(span, cx),
+            InnerProcessor::Simple(p) => p.on_start(span, cx),
+        }
     }
 
     fn on_end(&self, span: SpanData) {
         debug!("Ending introspection span");
-        self.inner.on_end(span);
+        match &self.inner {
+            InnerProcessor::Batch(p) => p.on_end(span),
+            InnerProcessor::Simple(p) => p.on_end(span),
+        }
     }
 
     fn shutdown(&self) -> Result<(), OTelSdkError> {
         info!("Shutting down introspection span processor");
-        self.inner.shutdown()
+        match &self.inner {
+            InnerProcessor::Batch(p) => p.shutdown(),
+            InnerProcessor::Simple(p) => p.shutdown(),
+        }
     }
 
     fn shutdown_with_timeout(&self, timeout: Duration) -> Result<(), OTelSdkError> {
         info!("Shutting down introspection span processor with timeout");
-        self.inner.shutdown_with_timeout(timeout)
+        match &self.inner {
+            InnerProcessor::Batch(p) => p.shutdown_with_timeout(timeout),
+            InnerProcessor::Simple(p) => p.shutdown_with_timeout(timeout),
+        }
     }
 
     fn force_flush(&self) -> Result<(), OTelSdkError> {
         info!("Flushing introspection span processor");
-        self.inner.force_flush()
+        match &self.inner {
+            InnerProcessor::Batch(p) => p.force_flush(),
+            InnerProcessor::Simple(p) => p.force_flush(),
+        }
     }
 }
 
@@ -296,13 +374,16 @@ mod tests {
     use opentelemetry::trace::{Span, SpanKind, Status, Tracer, TracerProvider};
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::trace::SdkTracerProvider;
+    use std::sync::Mutex;
+
+    /// Mutex to serialize tests that manipulate environment variables.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_span_processor_creation_with_token() {
         let processor =
             IntrospectionSpanProcessor::new(SpanProcessorConfig::with_token("test-token")).unwrap();
 
-        // Verify processor was created successfully
         assert!(processor.force_flush().is_ok());
     }
 
@@ -312,23 +393,21 @@ mod tests {
         custom_headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
 
         let processor = IntrospectionSpanProcessor::new(
-            SpanProcessorConfig::with_token("test-token").advanced(AdvancedOptions {
-                base_url: Some("http://localhost:5418/v1/traces".to_string()),
+            SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
+                base_otel_url: Some("http://localhost:5418".to_string()),
                 additional_headers: Some(custom_headers),
                 span_exporter: None,
-                ..Default::default()
+                flush_interval_ms: None,
+                max_batch_size: None,
             }),
         )
         .unwrap();
 
-        // Verify processor was created successfully with custom options
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_span_processor_with_custom_exporter() {
-        // Create a test exporter pointing to a non-existent endpoint
-        // This allows us to test the exporter injection without actually sending data
         let test_exporter = Arc::new(
             SpanExporter::builder()
                 .with_http()
@@ -339,35 +418,32 @@ mod tests {
         );
 
         let processor = IntrospectionSpanProcessor::new(
-            SpanProcessorConfig::with_token("test-token").advanced(AdvancedOptions {
+            SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
                 span_exporter: Some(test_exporter),
                 ..Default::default()
             }),
         )
         .unwrap();
 
-        // Verify processor was created successfully with custom exporter
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_span_processor_processes_spans() {
         let processor = IntrospectionSpanProcessor::new(
-            SpanProcessorConfig::with_token("test-token").advanced(AdvancedOptions {
-                base_url: Some("http://localhost:9999/v1/traces".to_string()),
+            SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
+                base_otel_url: Some("http://localhost:9999".to_string()),
                 ..Default::default()
             }),
         )
         .unwrap();
 
-        // Create a tracer provider with our processor
         let provider = SdkTracerProvider::builder()
             .with_span_processor(processor)
             .build();
 
         let tracer = provider.tracer("test-tracer");
 
-        // Create and end a span - this should be processed by our processor
         let mut span = tracer
             .span_builder("test-span")
             .with_kind(SpanKind::Server)
@@ -376,9 +452,6 @@ mod tests {
         span.set_attribute(KeyValue::new("test.key", "test.value"));
         span.end();
 
-        // Force flush to ensure spans are processed
-        // This may fail to send (endpoint doesn't exist) but validates the processor works
-        // We don't care about the result - just that it was attempted
         let _ = provider.force_flush();
 
         provider.shutdown().unwrap();
@@ -389,7 +462,6 @@ mod tests {
         let processor =
             IntrospectionSpanProcessor::new(SpanProcessorConfig::with_token("test-token")).unwrap();
 
-        // Test shutdown
         assert!(processor.shutdown().is_ok());
     }
 
@@ -398,7 +470,6 @@ mod tests {
         let processor =
             IntrospectionSpanProcessor::new(SpanProcessorConfig::with_token("test-token")).unwrap();
 
-        // Test shutdown with timeout
         assert!(processor
             .shutdown_with_timeout(Duration::from_secs(1))
             .is_ok());
@@ -406,11 +477,10 @@ mod tests {
 
     #[test]
     fn test_span_processor_requires_token() {
-        // When no token is provided and env var is not set, creation should fail.
-        // Skip if INTROSPECTION_TOKEN happens to be set in the environment.
-        if std::env::var("INTROSPECTION_TOKEN").is_ok() {
-            return;
-        }
+        let _lock = ENV_MUTEX.lock().unwrap();
+
+        let old_token = std::env::var("INTROSPECTION_TOKEN").ok();
+        std::env::remove_var("INTROSPECTION_TOKEN");
 
         let config = SpanProcessorConfig {
             token: None,
@@ -419,16 +489,22 @@ mod tests {
         };
 
         let result = IntrospectionSpanProcessor::new(config);
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "Expected TokenRequired error when no token is provided."
+        );
         assert!(matches!(
             result.unwrap_err(),
             SpanProcessorError::TokenRequired
         ));
+
+        if let Some(token) = old_token {
+            std::env::set_var("INTROSPECTION_TOKEN", token);
+        }
     }
 
     #[test]
     fn test_span_processor_with_explicit_token() {
-        // Verify that an explicitly provided token works regardless of env state
         let config = SpanProcessorConfig {
             token: Some("explicit-token".to_string()),
             service_name: None,
@@ -437,5 +513,22 @@ mod tests {
 
         let processor = IntrospectionSpanProcessor::new(config);
         assert!(processor.is_ok());
+    }
+
+    #[test]
+    fn test_span_processor_uses_env_token() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+
+        let old_token = std::env::var("INTROSPECTION_TOKEN").ok();
+        std::env::set_var("INTROSPECTION_TOKEN", "env-token");
+
+        let processor = IntrospectionSpanProcessor::new(SpanProcessorConfig::default());
+        assert!(processor.is_ok());
+
+        if let Some(token) = old_token {
+            std::env::set_var("INTROSPECTION_TOKEN", token);
+        } else {
+            std::env::remove_var("INTROSPECTION_TOKEN");
+        }
     }
 }

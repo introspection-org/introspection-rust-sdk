@@ -15,7 +15,7 @@ use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
 };
 use async_openai::Client;
-use introspection_sdk::testing::{InMemorySpanExporter, SimpleSpanProcessor, SpanData};
+use introspection_sdk::otel::testing::{InMemorySpanExporter, SimpleSpanProcessor, SpanData};
 use opentelemetry::trace::SpanId;
 use std::collections::BTreeMap;
 use wiremock::matchers::{method, path};
@@ -134,7 +134,7 @@ fn wiremock_openai_client(server: &MockServer) -> Client<OpenAIConfig> {
 /// Each section resets the exporter before running its assertions.
 #[tokio::test]
 async fn test_logfire_tracing_pipeline() {
-    use introspection_sdk::openai::tracing_traced_chat_completion;
+    use introspection_sdk::otel::openai::tracing_traced_chat_completion;
 
     let exporter = InMemorySpanExporter::default();
     let processor = SimpleSpanProcessor::new(exporter.clone());
@@ -482,7 +482,7 @@ async fn test_logfire_observation_tool_call() {
         };
 
         {
-            use introspection_sdk::openai::convert_request_messages;
+            use introspection_sdk::otel::openai::convert_request_messages;
             let mut obs1 = Observation::start(
                 &tracer,
                 ObservationConfig::generation("chat", &request1.model)
@@ -511,7 +511,9 @@ async fn test_logfire_observation_tool_call() {
         };
 
         {
-            use introspection_sdk::openai::{convert_request_messages, convert_response_choices};
+            use introspection_sdk::otel::openai::{
+                convert_request_messages, convert_response_choices,
+            };
             let mut obs2 = Observation::start(
                 &tracer,
                 ObservationConfig::generation("chat", &request2.model)
@@ -537,7 +539,7 @@ async fn test_logfire_observation_tool_call() {
         "Expected 3 Observation spans (2 generations + 1 pipeline)"
     );
 
-    let json = introspection_sdk::testing::spans_to_json(&obs_spans);
+    let json = introspection_sdk::otel::testing::spans_to_json(&obs_spans);
     insta::assert_json_snapshot!("logfire_observation_tool_call", json, {
         ".**.trace_id" => "[trace_id]",
         ".**.span_id" => "[span_id]",
@@ -552,7 +554,7 @@ async fn test_logfire_observation_tool_call() {
 /// Single `traced_chat_completion` (Observation-based) with standalone provider.
 #[tokio::test]
 async fn test_dual_export_observation_with_wiremock() {
-    use introspection_sdk::openai::traced_chat_completion;
+    use introspection_sdk::otel::openai::traced_chat_completion;
     use opentelemetry::trace::TracerProvider;
 
     let exporter = InMemorySpanExporter::default();
@@ -606,7 +608,7 @@ async fn test_dual_export_observation_with_wiremock() {
         "Observation generation spans should be SpanKind::Client"
     );
 
-    let json = introspection_sdk::testing::span_data_to_json(&spans[0]);
+    let json = introspection_sdk::otel::testing::span_data_to_json(&spans[0]);
     insta::assert_json_snapshot!("dual_export_observation", json, {
         ".**.trace_id" => "[trace_id]",
         ".**.span_id" => "[span_id]",
@@ -621,7 +623,7 @@ async fn test_dual_export_observation_with_wiremock() {
 /// Full tool call pipeline via Observation API with standalone provider.
 #[tokio::test]
 async fn test_dual_export_tool_call_pipeline() {
-    use introspection_sdk::openai::traced_chat_completion;
+    use introspection_sdk::otel::openai::traced_chat_completion;
     use introspection_sdk::{Observation, ObservationConfig};
     use opentelemetry::trace::TracerProvider;
 
@@ -706,7 +708,7 @@ async fn test_dual_export_tool_call_pipeline() {
         );
     }
 
-    let json = introspection_sdk::testing::spans_to_json(&spans);
+    let json = introspection_sdk::otel::testing::spans_to_json(&spans);
     insta::assert_json_snapshot!("dual_export_tool_call_pipeline", json, {
         ".**.trace_id" => "[trace_id]",
         ".**.span_id" => "[span_id]",

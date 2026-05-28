@@ -23,7 +23,7 @@ use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
 };
 use async_openai::Client;
-use introspection_sdk::openai::traced_chat_completion;
+use introspection_sdk::otel::openai::traced_chat_completion;
 use introspection_sdk::{IntrospectionSpanProcessor, SpanProcessorConfig};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};

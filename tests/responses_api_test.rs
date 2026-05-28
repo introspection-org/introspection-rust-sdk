@@ -9,8 +9,8 @@
 //! cargo test --features testing,openai --test responses_api_test -- --ignored
 //! ```
 
-use introspection_sdk::openai::traced_responses_create;
-use introspection_sdk::testing::{setup_test_provider, span_data_to_json};
+use introspection_sdk::otel::openai::traced_responses_create;
+use introspection_sdk::otel::testing::{setup_test_provider, span_data_to_json};
 use opentelemetry::trace::TracerProvider;
 
 // ---------------------------------------------------------------------------
