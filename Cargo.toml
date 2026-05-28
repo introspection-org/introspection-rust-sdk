@@ -38,7 +38,7 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macr
 # OpenTelemetry — pinned to 0.30.x (logfire 0.9 requires opentelemetry 0.30).
 # Gated by the `otel` feature so REST-only installs don't pull them.
 opentelemetry = { version = "0.30.0", default-features = false, features = ["logs", "trace"], optional = true }
-opentelemetry_sdk = { version = "0.30.0", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
+opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
 opentelemetry-otlp = { version = "0.30.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-client"], optional = true }
 
 # HTTP client — async + multipart + streaming for the REST API; `blocking`
