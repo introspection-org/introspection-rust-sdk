@@ -80,14 +80,12 @@ impl Runtimes {
             .next_page()
             .await?
             .and_then(|p| p.records.into_iter().next())
-            .ok_or_else(|| {
-                IntrospectionAPIError::Http {
-                    message: format!("no active runtime named '{name}'"),
-                    status: 404,
-                    code: None,
-                    request_id: None,
-                    body: None,
-                }
+            .ok_or_else(|| IntrospectionAPIError::Http {
+                message: format!("no active runtime named '{name}'"),
+                status: 404,
+                code: None,
+                request_id: None,
+                body: None,
             })?;
         Ok(self.handle(runtime.id))
     }
