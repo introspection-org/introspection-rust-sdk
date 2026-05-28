@@ -37,11 +37,12 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macr
 # OpenTelemetry — gated by the `otel` feature so REST-only installs don't pull them.
 opentelemetry = { version = "0.32.0", default-features = false, features = ["logs", "trace"], optional = true }
 opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-client"], optional = true }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-blocking-client"], optional = true }
 
-# HTTP client — async + multipart + streaming for the REST API and the
-# OTLP exporter (under the `otel` feature, on top of `rt-tokio`).
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream", "rustls-tls-native-roots"] }
+# HTTP client — async + multipart + streaming for the REST API; `blocking`
+# is required by the OTLP `reqwest-blocking-client` exporter under the
+# `otel` feature (the BatchSpanProcessor runs on a non-tokio thread).
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "stream", "rustls-tls-native-roots"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

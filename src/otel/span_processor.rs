@@ -15,16 +15,24 @@ use tracing::{debug, info};
 use crate::otel::types;
 use crate::VERSION;
 
-/// Create an async `reqwest::Client` for the OTLP HTTP exporter.
+/// Create a `reqwest::blocking::Client` on a dedicated thread.
 ///
-/// opentelemetry-http 0.32 dropped the `HttpClient` impl for
-/// `reqwest::blocking::Client`; the exporter now drives requests on
-/// the `rt-tokio` runtime that backs `BatchSpanProcessor`.
-fn new_http_client(timeout: Duration) -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+/// `BatchSpanProcessor` exports on a background thread without a
+/// tokio runtime, so the OTLP exporter needs the blocking reqwest
+/// client (gated by `opentelemetry-otlp/reqwest-blocking-client` ->
+/// `opentelemetry-http/reqwest-blocking`). The blocking client
+/// spawns an internal tokio runtime which panics if constructed
+/// inside an existing async runtime — building it on a short-lived
+/// thread avoids the "cannot drop a runtime …" issue.
+fn new_blocking_http_client(timeout: Duration) -> reqwest::blocking::Client {
+    std::thread::spawn(move || {
+        reqwest::blocking::Client::builder()
+            .timeout(timeout)
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new())
+    })
+    .join()
+    .expect("failed to create blocking HTTP client")
 }
 
 /// Errors that can occur in the Introspection span processor.
@@ -216,7 +224,7 @@ impl IntrospectionSpanProcessor {
             if let Some(custom_exporter) = advanced.span_exporter {
                 let dummy_exporter = SpanExporter::builder()
                     .with_http()
-                    .with_http_client(new_http_client(Duration::from_secs(30)))
+                    .with_http_client(new_blocking_http_client(Duration::from_secs(30)))
                     .with_endpoint("http://localhost/v1/traces")
                     .with_timeout(Duration::from_secs(30))
                     .build()
@@ -255,7 +263,7 @@ impl IntrospectionSpanProcessor {
 
                 let headers_clone = headers.clone();
 
-                let http_client = new_http_client(Duration::from_secs(30));
+                let http_client = new_blocking_http_client(Duration::from_secs(30));
 
                 let exporter_for_processor = SpanExporter::builder()
                     .with_http()
@@ -269,7 +277,7 @@ impl IntrospectionSpanProcessor {
                 let exporter = Arc::new(
                     SpanExporter::builder()
                         .with_http()
-                        .with_http_client(new_http_client(Duration::from_secs(30)))
+                        .with_http_client(new_blocking_http_client(Duration::from_secs(30)))
                         .with_endpoint(&endpoint)
                         .with_headers(headers_clone)
                         .with_timeout(Duration::from_secs(30))
