@@ -642,6 +642,7 @@ fn test_responses_output_merges_function_calls() {
             arguments: r#"{"city":"Boston"}"#.to_string(),
             id: Some("fc_1".to_string()),
             status: Some(OutputStatus::Completed),
+            namespace: None,
         }),
         OutputItem::FunctionCall(FunctionToolCall {
             call_id: "call_2".to_string(),
@@ -649,6 +650,7 @@ fn test_responses_output_merges_function_calls() {
             arguments: r#"{"city":"Atlanta"}"#.to_string(),
             id: Some("fc_2".to_string()),
             status: Some(OutputStatus::Completed),
+            namespace: None,
         }),
     ];
 
@@ -676,7 +678,7 @@ fn test_responses_output_reasoning_merges_into_message() {
 
     let output = vec![
         OutputItem::Reasoning(ReasoningItem {
-            id: "rs_1".to_string(),
+            id: Some("rs_1".to_string()),
             summary: vec![SummaryPart::SummaryText(SummaryTextContent {
                 text: "Thinking step by step...".to_string(),
             })],
@@ -694,6 +696,7 @@ fn test_responses_output_reasoning_merges_into_message() {
             }))
             .unwrap()],
             role: serde_json::from_value(serde_json::json!("assistant")).unwrap(),
+            phase: None,
         }),
     ];
 
