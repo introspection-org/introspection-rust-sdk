@@ -13,7 +13,7 @@
 <div align="center">
   <a href="https://introspection.dev"><img src="https://img.shields.io/badge/website-introspection.dev-blue" alt="Website"></a>
   <a href="https://crates.io/crates/introspection-sdk"><img src="https://img.shields.io/crates/v/introspection-sdk?label=%20" alt="crates.io version"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
   <a href="https://x.com/IntrospectionAI"><img src="https://img.shields.io/twitter/follow/IntrospectionAI" alt="Follow on X"></a>
 </div>
 
@@ -219,13 +219,15 @@ Streaming variant `traced_chat_completion_stream` and the
 
 ## Environment variables
 
-| Variable                      | Used by | Default                            |
-| ----------------------------- | ------- | ---------------------------------- |
-| `INTROSPECTION_TOKEN`         | all surfaces | _none_ — required for the auth header |
-| `INTROSPECTION_PROJECT_ID`    | `IntrospectionClient` (REST) | _none_ — default project for API calls |
-| `INTROSPECTION_SERVICE_NAME`  | logs, traces | `introspection-client`         |
-| `INTROSPECTION_BASE_API_URL`  | `IntrospectionClient` (REST) | `https://api.introspection.dev` |
-| `INTROSPECTION_BASE_OTEL_URL` | `IntrospectionLogs`, `IntrospectionSpanProcessor` | `https://otel.introspection.dev` |
+```shell
+# Introspection API (IntrospectionClient)
+export INTROSPECTION_TOKEN="intro_xxx"
+export INTROSPECTION_BASE_API_URL="https://api.introspection.dev"   # optional
+
+# OTel (IntrospectionLogs + IntrospectionSpanProcessor)
+export INTROSPECTION_BASE_OTEL_URL="https://otel.introspection.dev" # optional
+export INTROSPECTION_SERVICE_NAME="my-service"                      # optional
+```
 
 All env values can be overridden programmatically via the matching
 builder method or advanced-options struct.
@@ -236,4 +238,4 @@ Full documentation is available at [docs.introspection.dev](https://docs.introsp
 
 ## License
 
-MIT
+Apache-2.0
