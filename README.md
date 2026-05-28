@@ -60,7 +60,6 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 | --------- | ------------------------------------------------------------------ |
 | `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
 | `openai`  | `async-openai` integration — `traced_chat_completion` and friends (implies `otel`) |
-| `logfire` | Logfire integration for dual-export pipelines (implies `otel`)     |
 | `testing` | In-memory span exporter and test helpers (implies `otel`)          |
 
 ## Three surfaces
@@ -217,29 +216,6 @@ let response = traced_chat_completion(&tracer, &client, request).await?;
 
 Streaming variant `traced_chat_completion_stream` and the
 `tracing`-based `tracing_traced_chat_completion` are also available.
-
-### Logfire dual-export
-
-Logfire routes spans through the `tracing` crate. For dual-export
-(Logfire **and** Introspection), build a `SdkTracerProvider` with both
-processors:
-
-```rust
-use introspection_sdk::otel::{IntrospectionSpanProcessor, SpanProcessorConfig};
-use opentelemetry_sdk::trace::SdkTracerProvider;
-
-let introspection = IntrospectionSpanProcessor::new(
-    SpanProcessorConfig::with_token("your-introspection-token"),
-).unwrap();
-
-let provider = SdkTracerProvider::builder()
-    .with_span_processor(introspection)
-    // .with_span_processor(logfire_processor)
-    .build();
-```
-
-See [`examples/logfire_dual_export.rs`](examples/logfire_dual_export.rs)
-and [`examples/logfire_introspection.rs`](examples/logfire_introspection.rs).
 
 ## Environment variables
 

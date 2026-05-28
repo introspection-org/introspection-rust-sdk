@@ -76,7 +76,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests (all features)
-        run: cargo test --features testing,openai,logfire
+        run: cargo test --features testing,openai
 
   integration:
     name: Integration Tests

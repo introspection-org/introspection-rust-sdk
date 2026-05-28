@@ -195,8 +195,8 @@ pub fn convert_response_choices(
 /// Wraps an OpenAI chat completion call with `tracing` spans carrying
 /// gen_ai semantic convention attributes.
 ///
-/// Use this when your spans need to flow through a tracing-based pipeline
-/// (e.g. logfire). For direct OTel pipelines, use [`traced_chat_completion`].
+/// Use this when your spans need to flow through a tracing-based pipeline.
+/// For direct OTel pipelines, use [`traced_chat_completion`].
 pub async fn tracing_traced_chat_completion(
     client: &Client<OpenAIConfig>,
     request: CreateChatCompletionRequest,
