@@ -72,7 +72,10 @@ drive the `Runner` SSE stream.
 
 ```rust
 // cargo add introspection-sdk
+use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
+use futures::StreamExt;
 
+let client = IntrospectionClient::new(ClientConfig::default())?;
 let runner = client.runtime_by_name("customer-agent").await?
     .run(RunRequest::default()).await?;
 
