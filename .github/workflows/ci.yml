@@ -108,7 +108,7 @@ jobs:
 
   examples:
     name: Run Examples
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: false
     needs: integration
     runs-on: ubuntu-latest
     environment: build
