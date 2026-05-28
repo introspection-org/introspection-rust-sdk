@@ -12,7 +12,7 @@
 //!     CreateChatCompletionRequest,
 //! };
 //! use async_openai::Client;
-//! use introspection_sdk::openai::traced_chat_completion;
+//! use introspection_sdk::otel::openai::traced_chat_completion;
 //! use opentelemetry::trace::TracerProvider;
 //! use opentelemetry_sdk::trace::SdkTracerProvider;
 //!
@@ -57,11 +57,11 @@ use futures::Stream;
 use opentelemetry::trace::{Span, Tracer};
 use opentelemetry::KeyValue;
 
-use crate::messages::{
+use crate::otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
-use crate::{GenerationUpdate, Observation, ObservationConfig};
+use crate::otel::observation::{GenerationUpdate, Observation, ObservationConfig};
 
 /// Convert a slice of OpenAI request messages to typed [`InputMessage`] structs.
 pub fn convert_request_messages(messages: &[ChatCompletionRequestMessage]) -> Vec<InputMessage> {
@@ -203,7 +203,7 @@ pub async fn tracing_traced_chat_completion(
 ) -> Result<CreateChatCompletionResponse, OpenAIError> {
     let span = tracing::info_span!(
         "chat",
-        "gen_ai.system" = crate::observation::infer_system(&request.model)
+        "gen_ai.system" = crate::otel::observation::infer_system(&request.model)
             .as_deref()
             .unwrap_or("unknown"),
         "gen_ai.operation.name" = "chat",
@@ -281,7 +281,7 @@ pub async fn traced_chat_completion<S: Span, T: Tracer<Span = S>>(
         .collect();
     if !sys_instructions.is_empty() {
         obs.set_attribute(KeyValue::new(
-            crate::types::attr::GEN_AI_SYSTEM_INSTRUCTIONS,
+            crate::otel::types::attr::GEN_AI_SYSTEM_INSTRUCTIONS,
             serde_json::to_string(&sys_instructions).unwrap_or_default(),
         ));
     }
@@ -300,7 +300,7 @@ pub async fn traced_chat_completion<S: Span, T: Tracer<Span = S>>(
             })
             .collect();
         obs.set_attribute(KeyValue::new(
-            crate::types::attr::GEN_AI_TOOL_DEFINITIONS,
+            crate::otel::types::attr::GEN_AI_TOOL_DEFINITIONS,
             serde_json::to_string(&tool_defs).unwrap_or_default(),
         ));
     }
@@ -455,7 +455,7 @@ impl<S: Span> Drop for TracedStream<S> {
 /// };
 /// use async_openai::Client;
 /// use futures::StreamExt;
-/// use introspection_sdk::openai::traced_chat_completion_stream;
+/// use introspection_sdk::otel::openai::traced_chat_completion_stream;
 /// use opentelemetry::trace::TracerProvider;
 /// use opentelemetry_sdk::trace::SdkTracerProvider;
 ///
@@ -546,7 +546,7 @@ pub async fn traced_responses_create<S: Span, T: Tracer<Span = S>>(
     if let Some(ref instructions) = request.instructions {
         let sys = serde_json::json!([{"type": "text", "content": instructions}]);
         obs.set_attribute(KeyValue::new(
-            crate::types::attr::GEN_AI_SYSTEM_INSTRUCTIONS,
+            crate::otel::types::attr::GEN_AI_SYSTEM_INSTRUCTIONS,
             sys.to_string(),
         ));
     }
@@ -580,7 +580,7 @@ pub async fn traced_responses_create<S: Span, T: Tracer<Span = S>>(
             .collect();
         if !tool_defs.is_empty() {
             obs.set_attribute(KeyValue::new(
-                crate::types::attr::GEN_AI_TOOL_DEFINITIONS,
+                crate::otel::types::attr::GEN_AI_TOOL_DEFINITIONS,
                 serde_json::to_string(&tool_defs).unwrap_or_default(),
             ));
         }
@@ -654,7 +654,9 @@ pub fn convert_responses_input(
 }
 
 /// Convert Responses API output items to typed OutputMessage structs.
-pub fn convert_responses_output(output: &[OutputItem]) -> Vec<crate::messages::OutputMessage> {
+pub fn convert_responses_output(
+    output: &[OutputItem],
+) -> Vec<crate::otel::messages::OutputMessage> {
     let mut messages = vec![];
     let mut prefix_parts: Vec<ContentPart> = vec![];
     let mut pending_tool_calls: Vec<ContentPart> = vec![];
@@ -665,7 +667,7 @@ pub fn convert_responses_output(output: &[OutputItem]) -> Vec<crate::messages::O
             OutputItem::Message(msg) => {
                 // Flush any pending tool calls first
                 if !pending_tool_calls.is_empty() {
-                    messages.push(crate::messages::OutputMessage {
+                    messages.push(crate::otel::messages::OutputMessage {
                         role: "assistant".to_string(),
                         parts: std::mem::take(&mut pending_tool_calls),
                         finish_reason: Some("tool-calls".to_string()),
@@ -711,7 +713,7 @@ pub fn convert_responses_output(output: &[OutputItem]) -> Vec<crate::messages::O
                     } else {
                         None
                     };
-                messages.push(crate::messages::OutputMessage {
+                messages.push(crate::otel::messages::OutputMessage {
                     role: "assistant".to_string(),
                     parts,
                     finish_reason,
@@ -781,7 +783,7 @@ pub fn convert_responses_output(output: &[OutputItem]) -> Vec<crate::messages::O
 
     // Flush any remaining pending tool calls
     if !pending_tool_calls.is_empty() {
-        messages.push(crate::messages::OutputMessage {
+        messages.push(crate::otel::messages::OutputMessage {
             role: "assistant".to_string(),
             parts: pending_tool_calls,
             finish_reason: Some("tool-calls".to_string()),
@@ -790,7 +792,7 @@ pub fn convert_responses_output(output: &[OutputItem]) -> Vec<crate::messages::O
 
     // If we have prefix parts but no message, wrap them
     if !prefix_parts.is_empty() {
-        messages.push(crate::messages::OutputMessage {
+        messages.push(crate::otel::messages::OutputMessage {
             role: "assistant".to_string(),
             parts: prefix_parts,
             finish_reason: None,
