@@ -66,7 +66,7 @@ derive_builder = "0.20"
 logfire = { version = "0.9.0", optional = true }
 
 # Optional: async-openai integration (requires `otel`)
-async-openai = { version = "0.33", features = ["chat-completion", "responses"], optional = true }
+async-openai = { version = "0.40", features = ["chat-completion", "responses"], optional = true }
 
 # Streaming support (StreamExt for async-openai streams)
 futures = "0.3"
@@ -79,7 +79,7 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
-async-openai = { version = "0.33", features = ["chat-completion"] }
+async-openai = { version = "0.40", features = ["chat-completion"] }
 dotenvy = "0.15"
 
 [[example]]
