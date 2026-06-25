@@ -23,9 +23,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runtime =
         std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 
-    // 1) Look up the runtime by slug and open a Runner.
+    // 1) Look up the runtime by slug or id and open a Runner.
     let runner = client
-        .runtime_by_slug(&runtime)
+        .runtime_ref(&runtime)
         .await?
         .run(RunRequest {
             ttl_seconds: Some(3600),

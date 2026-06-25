@@ -471,7 +471,7 @@ pub struct Project {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ProjectListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub project: Option<String>,
     #[serde(flatten)]
     pub pagination: PaginationParams,
 }
@@ -677,9 +677,9 @@ pub struct RuntimeUpdate {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<Uuid>,
-    #[serde(rename = "name", skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
+    pub project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -755,7 +755,6 @@ pub struct Experiment {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    #[serde(rename = "runtime_name")]
     pub runtime: String,
     pub status: ExperimentStatus,
     pub arms: Vec<Arm>,
@@ -773,7 +772,6 @@ pub struct Experiment {
 pub struct ExperimentCreate {
     pub project_id: Uuid,
     pub name: String,
-    #[serde(rename = "runtime_name")]
     pub runtime: String,
     pub arms: Vec<Arm>,
     pub goal_json: HashMap<String, serde_json::Value>,
@@ -802,7 +800,7 @@ pub struct ExperimentUpdate {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
     pub project_id: Uuid,
-    #[serde(rename = "runtime_name", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ExperimentStatus>,
@@ -1027,5 +1025,31 @@ mod tests {
     #[test]
     fn runtime_llm_mode_default_is_managed() {
         assert_eq!(RuntimeLlmMode::default(), RuntimeLlmMode::Managed);
+    }
+
+    #[test]
+    fn runtime_list_params_serialize_runtime_not_name_or_slug() {
+        let value = serde_json::to_value(RuntimeListParams {
+            runtime: Some("customer-agent".to_string()),
+            ..Default::default()
+        })
+        .expect("runtime list params serialize");
+
+        assert_eq!(value["runtime"], "customer-agent");
+        assert!(value.get("name").is_none());
+        assert!(value.get("slug").is_none());
+    }
+
+    #[test]
+    fn project_list_params_serialize_project_not_name_or_slug() {
+        let value = serde_json::to_value(ProjectListParams {
+            project: Some("main".to_string()),
+            ..Default::default()
+        })
+        .expect("project list params serialize");
+
+        assert_eq!(value["project"], "main");
+        assert!(value.get("name").is_none());
+        assert!(value.get("slug").is_none());
     }
 }
