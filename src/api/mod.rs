@@ -31,14 +31,13 @@
 //! ```rust,no_run
 //! use futures::StreamExt;
 //! use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
-//! use uuid::Uuid;
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::default())?;
-//! let runtime_id: Uuid = std::env::var("INTROSPECTION_RUNTIME_ID")?.parse()?;
+//! let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 //!
 //! // Open a runner against the runtime; spawn a task and stream its run.
-//! let runner = client.runtime(runtime_id).run(RunRequest::default()).await?;
+//! let runner = client.runtime_ref(&runtime).await?.run(RunRequest::default()).await?;
 //! let run = runner.tasks().start_prompt("Summarize this repo").await?;
 //! let stream = run.stream().await?;
 //! tokio::pin!(stream);
@@ -60,12 +59,11 @@
 //! use introspection_sdk::{
 //!     ClientConfig, FileCreateText, FileUpload, FileType, IntrospectionClient, RunRequest,
 //! };
-//! use uuid::Uuid;
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::default())?;
-//! let runtime_id: Uuid = std::env::var("INTROSPECTION_RUNTIME_ID")?.parse()?;
-//! let runner = client.runtime(runtime_id).run(RunRequest::default()).await?;
+//! let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
+//! let runner = client.runtime_ref(&runtime).await?.run(RunRequest::default()).await?;
 //!
 //! // Multipart upload from a local path.
 //! let file = runner.files().upload(

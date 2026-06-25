@@ -84,7 +84,6 @@
 //! | Variable                        | Purpose                                     |
 //! |---------------------------------|---------------------------------------------|
 //! | `INTROSPECTION_TOKEN`           | Auth token (all surfaces)                   |
-//! | `INTROSPECTION_PROJECT_ID`      | Default project UUID (REST client)          |
 //! | `INTROSPECTION_SERVICE_NAME`    | Service name (logs/traces)                  |
 //! | `INTROSPECTION_BASE_API_URL`    | REST API host (default `api.introspection.dev`) |
 //! | `INTROSPECTION_BASE_OTEL_URL`   | OTLP collector host (default `otel.introspection.dev`) |

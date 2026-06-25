@@ -210,11 +210,10 @@ impl Tasks {
     ///
     /// ```rust,no_run
     /// # use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
-    /// # use uuid::Uuid;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = IntrospectionClient::new(ClientConfig::default())?;
-    /// let runtime_id: Uuid = std::env::var("INTROSPECTION_RUNTIME_ID")?.parse()?;
-    /// let runner = client.runtime(runtime_id).run(RunRequest::default()).await?;
+    /// let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
+    /// let runner = client.runtime_ref(&runtime).await?.run(RunRequest::default()).await?;
     /// let run = runner.tasks().start_prompt("Summarize this repo").await?;
     /// let text = run.text().await?;
     /// println!("{text}");

@@ -82,11 +82,7 @@ impl IntrospectionClient {
             .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
             .unwrap_or_else(|| types::defaults::SERVICE_NAME.to_string());
 
-        let project_id = config.project_id.or_else(|| {
-            env::var("INTROSPECTION_PROJECT_ID")
-                .ok()
-                .and_then(|s| s.parse::<uuid::Uuid>().ok())
-        });
+        let project_id = config.project_id;
 
         let advanced = config.advanced.unwrap_or_default();
 
@@ -136,8 +132,7 @@ impl IntrospectionClient {
         })
     }
 
-    /// The default project ID, resolved from [`ClientConfig::project_id`]
-    /// or `INTROSPECTION_PROJECT_ID`.
+    /// The resolved project ID from [`ClientConfig::project_id`], if supplied.
     pub fn project_id(&self) -> Option<uuid::Uuid> {
         self.project_id
     }
