@@ -1,11 +1,11 @@
 //! CP-side resources reachable from [`crate::IntrospectionClient`].
 //!
 //! - [`Runtimes`] — `GET/POST/PATCH/DELETE /v1/runtimes`; obtain a
-//!   [`RuntimeHandle`] via `client.runtime(id)` for `.run()` /
+//!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()` /
 //!   `.activate()` / `.pin(recipe)`.
 //! - [`Experiments`] — `GET/POST/PATCH/DELETE /v1/experiments` plus
 //!   lifecycle (`/start` / `/conclude` / `/cancel`); obtain an
-//!   [`ExperimentHandle`] via `client.experiment(id, project_id)` for
+//!   [`ExperimentHandle`] via `client.experiment(id, project)` for
 //!   `.run()`.
 //! - [`Recipes`] — `GET/POST/PATCH/DELETE /v1/recipes`. Pure CRUD —
 //!   recipes describe a (repo, git_ref, git_commit_sha) tuple that

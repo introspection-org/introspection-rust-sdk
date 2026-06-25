@@ -84,7 +84,6 @@
 //! | Variable                        | Purpose                                     |
 //! |---------------------------------|---------------------------------------------|
 //! | `INTROSPECTION_TOKEN`           | Auth token (all surfaces)                   |
-//! | `INTROSPECTION_PROJECT_ID`      | Default project UUID (REST client)          |
 //! | `INTROSPECTION_SERVICE_NAME`    | Service name (logs/traces)                  |
 //! | `INTROSPECTION_BASE_API_URL`    | REST API host (default `api.introspection.dev`) |
 //! | `INTROSPECTION_BASE_OTEL_URL`   | OTLP collector host (default `otel.introspection.dev`) |
@@ -105,9 +104,9 @@ pub use api::{
     Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository, RepositoryListParams,
     RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
     RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
-    RuntimeUpdate, SseEvent, Task, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunResponse, TaskRuns,
-    TaskStatus, TaskUpdate, Tasks, UploadSource,
+    RuntimeUpdate, SseEvent, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
+    TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks, UploadSource,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use resources::{

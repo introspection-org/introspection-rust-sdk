@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::files::Files;
 use crate::api::http::{HttpClient, HttpConfig};
-use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpec};
+use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpec, StringOrUuid};
 use crate::api::tasks::Tasks;
 use crate::types::defaults;
 
@@ -37,7 +37,7 @@ pub enum RunnerSource {
     Experiment {
         cp_http: Arc<HttpClient>,
         experiment_id: Uuid,
-        project_id: Uuid,
+        project: StringOrUuid,
         ctx: RunRequest,
     },
 }
@@ -56,13 +56,10 @@ impl RunnerSource {
             Self::Experiment {
                 cp_http,
                 experiment_id,
-                project_id,
+                project,
                 ctx,
             } => {
-                let path = format!(
-                    "/v1/experiments/{}/run?project_id={}",
-                    experiment_id, project_id
-                );
+                let path = format!("/v1/experiments/{}/run?project={}", experiment_id, project);
                 cp_http.post_json(&path, ctx).await
             }
         }

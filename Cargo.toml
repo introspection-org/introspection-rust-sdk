@@ -45,7 +45,7 @@ opentelemetry-otlp = { version = "0.32.0", default-features = false, features = 
 # Pinned to 0.13 to match opentelemetry-otlp 0.32 (avoids a duplicate
 # reqwest in the dep graph and the resulting HttpClient trait-bound
 # mismatch).
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "stream", "rustls", "rustls-native-certs"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

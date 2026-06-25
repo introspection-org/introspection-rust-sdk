@@ -76,7 +76,7 @@ use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
 use futures::StreamExt;
 
 let client = IntrospectionClient::new(ClientConfig::default())?;
-let runner = client.runtime_by_name("customer-agent").await?
+let runner = client.runtime("customer-agent").await?
     .run(RunRequest::default()).await?;
 
 let mut events = runner.tasks()

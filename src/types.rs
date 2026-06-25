@@ -76,9 +76,9 @@ pub struct ClientConfig {
     #[builder(setter(into))]
     pub service_name: Option<String>,
 
-    /// Default project ID (env: `INTROSPECTION_PROJECT_ID`).
-    /// When set, used as the default for API calls that require a
-    /// `project_id` parameter.
+    /// Resolved project ID for callers that need to carry an internal project
+    /// UUID. User-facing project selectors are passed as `project` on the
+    /// resource methods.
     #[builder(setter(into, strip_option), default)]
     pub project_id: Option<uuid::Uuid>,
 

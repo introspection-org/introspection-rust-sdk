@@ -15,7 +15,56 @@ use serde::de::Deserializer;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringOrUuid {
+    String(String),
+    Uuid(Uuid),
+}
+
+impl Default for StringOrUuid {
+    fn default() -> Self {
+        Self::String(String::new())
+    }
+}
+
+impl From<String> for StringOrUuid {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for StringOrUuid {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_string())
+    }
+}
+
+impl From<Uuid> for StringOrUuid {
+    fn from(value: Uuid) -> Self {
+        Self::Uuid(value)
+    }
+}
+
+impl fmt::Display for StringOrUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String(value) => f.write_str(value),
+            Self::Uuid(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+impl Serialize for StringOrUuid {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::String(value) => serializer.serialize_str(value),
+            Self::Uuid(value) => serializer.serialize_str(&value.to_string()),
+        }
+    }
+}
 
 // ----- enums -----------------------------------------------------------------
 
@@ -471,7 +520,7 @@ pub struct Project {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ProjectListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub project: Option<String>,
     #[serde(flatten)]
     pub pagination: PaginationParams,
 }
@@ -522,7 +571,7 @@ pub struct Recipe {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct RecipeCreate {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     pub repository_id: Uuid,
     pub name: String,
     pub git_ref: String,
@@ -545,7 +594,7 @@ pub struct RecipeUpdate {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct RecipeListParams {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -618,8 +667,7 @@ pub struct Runtime {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
+    pub slug: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -638,7 +686,7 @@ pub struct Runtime {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeCreate {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     pub recipe_id: Uuid,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -678,9 +726,9 @@ pub struct RuntimeUpdate {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<Uuid>,
+    pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub runtime: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -756,7 +804,7 @@ pub struct Experiment {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    pub runtime_name: String,
+    pub runtime: String,
     pub status: ExperimentStatus,
     pub arms: Vec<Arm>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -771,9 +819,9 @@ pub struct Experiment {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExperimentCreate {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     pub name: String,
-    pub runtime_name: String,
+    pub runtime: StringOrUuid,
     pub arms: Vec<Arm>,
     pub goal_json: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -800,9 +848,9 @@ pub struct ExperimentUpdate {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_name: Option<String>,
+    pub runtime: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ExperimentStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -897,7 +945,7 @@ pub struct RunRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
     /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
-    /// present, CP resolves the runtime row in this runtime's name whose
+    /// present, CP resolves the runtime row in this runtime's slug whose
     /// `recipe_id == recipe_id` and opens the runner against that row —
     /// the "canary a previous version" flow from the SDK design doc.
     /// Defaults to `None`; the regular `runtime(id).run()` path leaves
@@ -1026,5 +1074,51 @@ mod tests {
     #[test]
     fn runtime_llm_mode_default_is_managed() {
         assert_eq!(RuntimeLlmMode::default(), RuntimeLlmMode::Managed);
+    }
+
+    #[test]
+    fn runtime_list_params_serialize_runtime_not_name_or_slug() {
+        let value = serde_json::to_value(RuntimeListParams {
+            runtime: Some("customer-agent".into()),
+            ..Default::default()
+        })
+        .expect("runtime list params serialize");
+
+        assert_eq!(value["runtime"], "customer-agent");
+        assert!(value.get("name").is_none());
+        assert!(value.get("slug").is_none());
+    }
+
+    #[test]
+    fn project_list_params_serialize_project_not_name_or_slug() {
+        let value = serde_json::to_value(ProjectListParams {
+            project: Some("main".to_string()),
+            ..Default::default()
+        })
+        .expect("project list params serialize");
+
+        assert_eq!(value["project"], "main");
+        assert!(value.get("name").is_none());
+        assert!(value.get("slug").is_none());
+    }
+
+    #[test]
+    fn runtime_create_accepts_project_string_or_uuid() {
+        let uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000123").unwrap();
+        let by_slug = serde_json::to_value(RuntimeCreate {
+            project: "main".into(),
+            name: "agent".to_string(),
+            ..Default::default()
+        })
+        .expect("runtime create serializes slug project");
+        let by_uuid = serde_json::to_value(RuntimeCreate {
+            project: uuid.into(),
+            name: "agent".to_string(),
+            ..Default::default()
+        })
+        .expect("runtime create serializes uuid project");
+
+        assert_eq!(by_slug["project"], "main");
+        assert_eq!(by_uuid["project"], uuid.to_string());
     }
 }

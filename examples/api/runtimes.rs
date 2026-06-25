@@ -1,4 +1,4 @@
-//! End-to-end walkthrough — look up a runtime by name, open a Runner,
+//! End-to-end walkthrough — look up a runtime by runtime group slug, open a Runner,
 //! spawn a task, stream its run, then upload a file.
 //!
 //! Run with:
@@ -20,12 +20,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().ok();
     let client = IntrospectionClient::new(ClientConfig::default())?;
 
-    let runtime_name =
-        std::env::var("INTROSPECTION_RUNTIME_NAME").unwrap_or_else(|_| "customer-agent".into());
+    let runtime =
+        std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 
-    // 1) Look up the runtime by name and open a Runner.
+    // 1) Look up the runtime by runtime group slug or ID and open a Runner.
     let runner = client
-        .runtime_by_name(&runtime_name)
+        .runtime(&runtime)
         .await?
         .run(RunRequest {
             ttl_seconds: Some(3600),

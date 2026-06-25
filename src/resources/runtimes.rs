@@ -1,5 +1,5 @@
-//! `client.runtimes` (CP) — runtime CRUD + `runtime(id).run()` to open
-//! a [`crate::Runner`].
+//! `client.runtimes` (CP) — runtime CRUD + `runtimes().handle(id).run()`
+//! to open a [`crate::Runner`].
 
 use std::sync::Arc;
 
@@ -11,6 +11,7 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
     Recipe, RunRequest, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams, RuntimeUpdate,
+    StringOrUuid,
 };
 use crate::runner::{Runner, RunnerSource};
 
@@ -31,14 +32,25 @@ impl Runtimes {
             .expect("RuntimeListParams must serialize to a JSON object")
     }
 
-    /// `GET /v1/runtimes/{id}?project_id=...`.
-    pub async fn get(&self, runtime_id: Uuid, project_id: Uuid) -> ApiResult<Runtime> {
+    /// `GET /v1/runtimes/{id}?project=...`.
+    pub async fn get(
+        &self,
+        runtime_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<Runtime> {
         #[derive(Serialize)]
         struct Q {
-            project_id: Uuid,
+            project: StringOrUuid,
         }
         let path = format!("/v1/runtimes/{}", runtime_id);
-        self.http.get_json(&path, &Q { project_id }).await
+        self.http
+            .get_json(
+                &path,
+                &Q {
+                    project: project.into(),
+                },
+            )
+            .await
     }
 
     /// `POST /v1/runtimes`.
@@ -46,32 +58,36 @@ impl Runtimes {
         self.http.post_json("/v1/runtimes", body).await
     }
 
-    /// `PATCH /v1/runtimes/{id}?project_id=...`.
+    /// `PATCH /v1/runtimes/{id}?project=...`.
     pub async fn update(
         &self,
         runtime_id: Uuid,
-        project_id: Uuid,
+        project: impl Into<StringOrUuid>,
         body: &RuntimeUpdate,
     ) -> ApiResult<Runtime> {
-        let path = format!("/v1/runtimes/{}?project_id={}", runtime_id, project_id);
+        let path = format!("/v1/runtimes/{}?project={}", runtime_id, project.into());
         self.http.patch_json(&path, body).await
     }
 
-    /// `DELETE /v1/runtimes/{id}?project_id=...`.
-    pub async fn delete(&self, runtime_id: Uuid, project_id: Uuid) -> ApiResult<()> {
-        let path = format!("/v1/runtimes/{}?project_id={}", runtime_id, project_id);
+    /// `DELETE /v1/runtimes/{id}?project=...`.
+    pub async fn delete(
+        &self,
+        runtime_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<()> {
+        let path = format!("/v1/runtimes/{}?project={}", runtime_id, project.into());
         self.http.delete_empty(&path).await
     }
 
-    /// Look up a runtime by name and return a [`RuntimeHandle`].
+    /// Look up a runtime by runtime group slug or ID and return a [`RuntimeHandle`].
     ///
-    /// Queries `GET /v1/runtimes?name=…&only_active=true` and returns a
+    /// Queries `GET /v1/runtimes?runtime=…&only_active=true` and returns a
     /// handle to the first match. The server infers the project from the
     /// API token. Returns `IntrospectionAPIError::Http` with status 404
-    /// if no active runtime with that name exists.
-    pub async fn by_name(&self, name: &str) -> ApiResult<RuntimeHandle> {
+    /// if no active runtime with that runtime group slug or ID exists.
+    pub async fn resolve(&self, runtime: &str) -> ApiResult<RuntimeHandle> {
         let mut paginator = self.list(&RuntimeListParams {
-            name: Some(name.to_string()),
+            runtime: Some(runtime.into()),
             only_active: Some(true),
             limit: Some(1),
             ..Default::default()
@@ -81,7 +97,7 @@ impl Runtimes {
             .await?
             .and_then(|p| p.records.into_iter().next())
             .ok_or_else(|| IntrospectionAPIError::Http {
-                message: format!("no active runtime named '{name}'"),
+                message: format!("no active runtime '{runtime}'"),
                 status: 404,
                 code: None,
                 request_id: None,
@@ -97,7 +113,7 @@ impl Runtimes {
     }
 }
 
-/// Handle returned by `client.runtime(id)`. Opens a [`Runner`] via
+/// Handle returned by `client.runtimes().handle(id)`. Opens a [`Runner`] via
 /// [`Self::run`] or activates the row via [`Self::activate`]. Use
 /// [`Self::pin`] to derive a child handle that opens runners against a
 /// specific historical recipe (the "canary a previous version" flow).
@@ -123,17 +139,18 @@ impl RuntimeHandle {
 
     /// The recipe this handle is pinned to, if any. Set by
     /// [`Self::pin`]; unset on handles minted directly via
-    /// `client.runtime(id)`.
+    /// `client.runtimes().handle(id)`.
     pub fn pinned_recipe_id(&self) -> Option<Uuid> {
         self.recipe_id
     }
 
     /// `POST /v1/runtimes/{id}/activate`.
-    pub async fn activate(&self, project_id: Option<Uuid>) -> ApiResult<Runtime> {
-        let path = match project_id {
-            Some(pid) => format!(
-                "/v1/runtimes/{}/activate?project_id={}",
-                self.runtime_id, pid
+    pub async fn activate(&self, project: Option<impl Into<StringOrUuid>>) -> ApiResult<Runtime> {
+        let path = match project {
+            Some(project) => format!(
+                "/v1/runtimes/{}/activate?project={}",
+                self.runtime_id,
+                project.into()
             ),
             None => format!("/v1/runtimes/{}/activate", self.runtime_id),
         };
