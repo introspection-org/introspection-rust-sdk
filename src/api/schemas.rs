@@ -946,7 +946,7 @@ pub struct RunRequest {
     pub ttl_seconds: Option<u32>,
     /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
     /// present, CP resolves the runtime row in this runtime's slug whose
-    /// `recipe_id == recipe.id` and opens the runner against that row —
+    /// `recipe_id == recipe_id` and opens the runner against that row —
     /// the "canary a previous version" flow from the SDK design doc.
     /// Defaults to `None`; the regular `runtime(id).run()` path leaves
     /// it unset and CP uses the row's current `recipe_id`.
