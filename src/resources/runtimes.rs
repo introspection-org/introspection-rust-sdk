@@ -11,6 +11,7 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
     Recipe, RunRequest, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams, RuntimeUpdate,
+    StringOrUuid,
 };
 use crate::runner::{Runner, RunnerSource};
 
@@ -31,14 +32,25 @@ impl Runtimes {
             .expect("RuntimeListParams must serialize to a JSON object")
     }
 
-    /// `GET /v1/runtimes/{id}?project_id=...`.
-    pub async fn get(&self, runtime_id: Uuid, project_id: Uuid) -> ApiResult<Runtime> {
+    /// `GET /v1/runtimes/{id}?project=...`.
+    pub async fn get(
+        &self,
+        runtime_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<Runtime> {
         #[derive(Serialize)]
         struct Q {
-            project_id: Uuid,
+            project: StringOrUuid,
         }
         let path = format!("/v1/runtimes/{}", runtime_id);
-        self.http.get_json(&path, &Q { project_id }).await
+        self.http
+            .get_json(
+                &path,
+                &Q {
+                    project: project.into(),
+                },
+            )
+            .await
     }
 
     /// `POST /v1/runtimes`.
@@ -46,20 +58,24 @@ impl Runtimes {
         self.http.post_json("/v1/runtimes", body).await
     }
 
-    /// `PATCH /v1/runtimes/{id}?project_id=...`.
+    /// `PATCH /v1/runtimes/{id}?project=...`.
     pub async fn update(
         &self,
         runtime_id: Uuid,
-        project_id: Uuid,
+        project: impl Into<StringOrUuid>,
         body: &RuntimeUpdate,
     ) -> ApiResult<Runtime> {
-        let path = format!("/v1/runtimes/{}?project_id={}", runtime_id, project_id);
+        let path = format!("/v1/runtimes/{}?project={}", runtime_id, project.into());
         self.http.patch_json(&path, body).await
     }
 
-    /// `DELETE /v1/runtimes/{id}?project_id=...`.
-    pub async fn delete(&self, runtime_id: Uuid, project_id: Uuid) -> ApiResult<()> {
-        let path = format!("/v1/runtimes/{}?project_id={}", runtime_id, project_id);
+    /// `DELETE /v1/runtimes/{id}?project=...`.
+    pub async fn delete(
+        &self,
+        runtime_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<()> {
+        let path = format!("/v1/runtimes/{}?project={}", runtime_id, project.into());
         self.http.delete_empty(&path).await
     }
 
@@ -129,11 +145,12 @@ impl RuntimeHandle {
     }
 
     /// `POST /v1/runtimes/{id}/activate`.
-    pub async fn activate(&self, project_id: Option<Uuid>) -> ApiResult<Runtime> {
-        let path = match project_id {
-            Some(pid) => format!(
-                "/v1/runtimes/{}/activate?project_id={}",
-                self.runtime_id, pid
+    pub async fn activate(&self, project: Option<impl Into<StringOrUuid>>) -> ApiResult<Runtime> {
+        let path = match project {
+            Some(project) => format!(
+                "/v1/runtimes/{}/activate?project={}",
+                self.runtime_id,
+                project.into()
             ),
             None => format!("/v1/runtimes/{}/activate", self.runtime_id),
         };

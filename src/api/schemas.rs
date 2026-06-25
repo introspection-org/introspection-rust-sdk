@@ -15,6 +15,7 @@ use serde::de::Deserializer;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +45,15 @@ impl From<&str> for StringOrUuid {
 impl From<Uuid> for StringOrUuid {
     fn from(value: Uuid) -> Self {
         Self::Uuid(value)
+    }
+}
+
+impl fmt::Display for StringOrUuid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String(value) => f.write_str(value),
+            Self::Uuid(value) => write!(f, "{value}"),
+        }
     }
 }
 
@@ -809,7 +819,7 @@ pub struct Experiment {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExperimentCreate {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     pub name: String,
     pub runtime: String,
     pub arms: Vec<Arm>,
@@ -838,7 +848,7 @@ pub struct ExperimentUpdate {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

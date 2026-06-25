@@ -2,7 +2,7 @@
 //!
 //! Always available with no OpenTelemetry dependency. Exposes
 //! `client.runtimes()` / `client.experiments()` / `client.runtime(id)` /
-//! `client.experiment(id, project_id)` accessors over the Introspection
+//! `client.experiment(id, project)` accessors over the Introspection
 //! DP REST API.
 //!
 //! For analytics events (`track` / `feedback` / `identify`), construct
@@ -186,9 +186,9 @@ impl IntrospectionClient {
     pub fn experiment(
         &self,
         experiment_id: uuid::Uuid,
-        project_id: uuid::Uuid,
+        project: impl Into<crate::api::schemas::StringOrUuid>,
     ) -> ExperimentHandle {
-        self.experiments().handle(experiment_id, project_id)
+        self.experiments().handle(experiment_id, project)
     }
 
     pub fn try_projects(&self) -> Option<&Projects> {
