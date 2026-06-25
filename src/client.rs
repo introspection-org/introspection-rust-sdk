@@ -176,7 +176,7 @@ impl IntrospectionClient {
         self.runtimes().handle(runtime_id)
     }
 
-    /// Look up an active runtime by slug or id. The server infers the
+    /// Look up an active runtime by runtime group slug or ID. The server infers the
     /// project from the API token. Equivalent to
     /// `client.runtimes().resolve(runtime)`.
     pub async fn runtime_ref(&self, runtime: &str) -> crate::api::error::ApiResult<RuntimeHandle> {

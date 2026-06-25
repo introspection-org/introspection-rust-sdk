@@ -79,12 +79,12 @@ impl Runtimes {
         self.http.delete_empty(&path).await
     }
 
-    /// Look up a runtime by slug or id and return a [`RuntimeHandle`].
+    /// Look up a runtime by runtime group slug or ID and return a [`RuntimeHandle`].
     ///
     /// Queries `GET /v1/runtimes?runtime=…&only_active=true` and returns a
     /// handle to the first match. The server infers the project from the
     /// API token. Returns `IntrospectionAPIError::Http` with status 404
-    /// if no active runtime with that slug or id exists.
+    /// if no active runtime with that runtime group slug or ID exists.
     pub async fn resolve(&self, runtime: &str) -> ApiResult<RuntimeHandle> {
         let mut paginator = self.list(&RuntimeListParams {
             runtime: Some(runtime.to_string()),
