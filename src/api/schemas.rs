@@ -561,7 +561,7 @@ pub struct Recipe {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct RecipeCreate {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     pub repository_id: Uuid,
     pub name: String,
     pub git_ref: String,
@@ -584,7 +584,7 @@ pub struct RecipeUpdate {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct RecipeListParams {
-    pub project_id: Uuid,
+    pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -676,7 +676,7 @@ pub struct Runtime {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeCreate {
-    pub project_id: StringOrUuid,
+    pub project: StringOrUuid,
     pub recipe_id: Uuid,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1096,19 +1096,19 @@ mod tests {
     fn runtime_create_accepts_project_string_or_uuid() {
         let uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000123").unwrap();
         let by_slug = serde_json::to_value(RuntimeCreate {
-            project_id: "main".into(),
+            project: "main".into(),
             name: "agent".to_string(),
             ..Default::default()
         })
         .expect("runtime create serializes slug project");
         let by_uuid = serde_json::to_value(RuntimeCreate {
-            project_id: uuid.into(),
+            project: uuid.into(),
             name: "agent".to_string(),
             ..Default::default()
         })
         .expect("runtime create serializes uuid project");
 
-        assert_eq!(by_slug["project_id"], "main");
-        assert_eq!(by_uuid["project_id"], uuid.to_string());
+        assert_eq!(by_slug["project"], "main");
+        assert_eq!(by_uuid["project"], uuid.to_string());
     }
 }
