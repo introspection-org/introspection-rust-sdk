@@ -17,6 +17,45 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringOrUuid {
+    String(String),
+    Uuid(Uuid),
+}
+
+impl Default for StringOrUuid {
+    fn default() -> Self {
+        Self::String(String::new())
+    }
+}
+
+impl From<String> for StringOrUuid {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for StringOrUuid {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_string())
+    }
+}
+
+impl From<Uuid> for StringOrUuid {
+    fn from(value: Uuid) -> Self {
+        Self::Uuid(value)
+    }
+}
+
+impl Serialize for StringOrUuid {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::String(value) => serializer.serialize_str(value),
+            Self::Uuid(value) => serializer.serialize_str(&value.to_string()),
+        }
+    }
+}
+
 // ----- enums -----------------------------------------------------------------
 
 /// Mode of a task — mirrors the DP `TaskMode` enum.
@@ -637,7 +676,7 @@ pub struct Runtime {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeCreate {
-    pub project_id: Uuid,
+    pub project_id: StringOrUuid,
     pub recipe_id: Uuid,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1051,5 +1090,25 @@ mod tests {
         assert_eq!(value["project"], "main");
         assert!(value.get("name").is_none());
         assert!(value.get("slug").is_none());
+    }
+
+    #[test]
+    fn runtime_create_accepts_project_string_or_uuid() {
+        let uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000123").unwrap();
+        let by_slug = serde_json::to_value(RuntimeCreate {
+            project_id: "main".into(),
+            name: "agent".to_string(),
+            ..Default::default()
+        })
+        .expect("runtime create serializes slug project");
+        let by_uuid = serde_json::to_value(RuntimeCreate {
+            project_id: uuid.into(),
+            name: "agent".to_string(),
+            ..Default::default()
+        })
+        .expect("runtime create serializes uuid project");
+
+        assert_eq!(by_slug["project_id"], "main");
+        assert_eq!(by_uuid["project_id"], uuid.to_string());
     }
 }

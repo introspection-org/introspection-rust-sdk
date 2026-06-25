@@ -148,9 +148,9 @@ pub use schemas::{
     PaginationParams, Project, ProjectListParams, Recipe, RecipeCreate, RecipeListParams,
     RecipeUpdate, Repository, RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage,
     RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeCreate, RuntimeListParams, RuntimeUpdate, SseEvent, Task, TaskCancelResponse,
-    TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
-    TaskRunResponse, TaskStatus, TaskUpdate,
+    RuntimeCreate, RuntimeListParams, RuntimeUpdate, SseEvent, StringOrUuid, Task,
+    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
+    TaskRun, TaskRunCreate, TaskRunResponse, TaskStatus, TaskUpdate,
 };
 pub use sse::parse_sse_response;
 pub use tasks::{RunHandle, TaskRuns, Tasks};

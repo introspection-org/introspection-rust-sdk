@@ -105,9 +105,9 @@ pub use api::{
     Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository, RepositoryListParams,
     RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
     RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
-    RuntimeUpdate, SseEvent, Task, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunResponse, TaskRuns,
-    TaskStatus, TaskUpdate, Tasks, UploadSource,
+    RuntimeUpdate, SseEvent, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
+    TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks, UploadSource,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use resources::{
