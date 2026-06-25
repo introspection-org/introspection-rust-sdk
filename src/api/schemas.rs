@@ -618,8 +618,7 @@ pub struct Runtime {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
+    pub slug: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -679,8 +678,8 @@ pub struct RuntimeUpdate {
 pub struct RuntimeListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    #[serde(rename = "name", skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -756,7 +755,8 @@ pub struct Experiment {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    pub runtime_name: String,
+    #[serde(rename = "runtime_name")]
+    pub runtime: String,
     pub status: ExperimentStatus,
     pub arms: Vec<Arm>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -773,7 +773,8 @@ pub struct Experiment {
 pub struct ExperimentCreate {
     pub project_id: Uuid,
     pub name: String,
-    pub runtime_name: String,
+    #[serde(rename = "runtime_name")]
+    pub runtime: String,
     pub arms: Vec<Arm>,
     pub goal_json: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -801,8 +802,8 @@ pub struct ExperimentUpdate {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
     pub project_id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_name: Option<String>,
+    #[serde(rename = "runtime_name", skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ExperimentStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -897,7 +898,7 @@ pub struct RunRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
     /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
-    /// present, CP resolves the runtime row in this runtime's name whose
+    /// present, CP resolves the runtime row in this runtime's slug whose
     /// `recipe_id == recipe_id` and opens the runner against that row —
     /// the "canary a previous version" flow from the SDK design doc.
     /// Defaults to `None`; the regular `runtime(id).run()` path leaves

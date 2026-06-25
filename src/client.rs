@@ -176,10 +176,10 @@ impl IntrospectionClient {
         self.runtimes().handle(runtime_id)
     }
 
-    /// Look up an active runtime by name. The server infers the project
-    /// from the API token. Equivalent to `client.runtimes().by_name(name)`.
-    pub async fn runtime_by_name(&self, name: &str) -> crate::api::error::ApiResult<RuntimeHandle> {
-        self.runtimes().by_name(name).await
+    /// Look up an active runtime by slug. The server infers the project
+    /// from the API token. Equivalent to `client.runtimes().by_slug(slug)`.
+    pub async fn runtime_by_slug(&self, slug: &str) -> crate::api::error::ApiResult<RuntimeHandle> {
+        self.runtimes().by_slug(slug).await
     }
 
     pub fn experiment(
