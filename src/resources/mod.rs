@@ -1,7 +1,7 @@
 //! CP-side resources reachable from [`crate::IntrospectionClient`].
 //!
 //! - [`Runtimes`] — `GET/POST/PATCH/DELETE /v1/runtimes`; obtain a
-//!   [`RuntimeHandle`] via `client.runtime(id)` for `.run()` /
+//!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()` /
 //!   `.activate()` / `.pin(recipe)`.
 //! - [`Experiments`] — `GET/POST/PATCH/DELETE /v1/experiments` plus
 //!   lifecycle (`/start` / `/conclude` / `/cancel`); obtain an

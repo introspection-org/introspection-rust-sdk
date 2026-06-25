@@ -1,5 +1,5 @@
-//! `client.runtimes` (CP) — runtime CRUD + `runtime(id).run()` to open
-//! a [`crate::Runner`].
+//! `client.runtimes` (CP) — runtime CRUD + `runtimes().handle(id).run()`
+//! to open a [`crate::Runner`].
 
 use std::sync::Arc;
 
@@ -87,7 +87,7 @@ impl Runtimes {
     /// if no active runtime with that runtime group slug or ID exists.
     pub async fn resolve(&self, runtime: &str) -> ApiResult<RuntimeHandle> {
         let mut paginator = self.list(&RuntimeListParams {
-            runtime: Some(runtime.to_string()),
+            runtime: Some(runtime.into()),
             only_active: Some(true),
             limit: Some(1),
             ..Default::default()
@@ -113,7 +113,7 @@ impl Runtimes {
     }
 }
 
-/// Handle returned by `client.runtime(id)`. Opens a [`Runner`] via
+/// Handle returned by `client.runtimes().handle(id)`. Opens a [`Runner`] via
 /// [`Self::run`] or activates the row via [`Self::activate`]. Use
 /// [`Self::pin`] to derive a child handle that opens runners against a
 /// specific historical recipe (the "canary a previous version" flow).
@@ -139,7 +139,7 @@ impl RuntimeHandle {
 
     /// The recipe this handle is pinned to, if any. Set by
     /// [`Self::pin`]; unset on handles minted directly via
-    /// `client.runtime(id)`.
+    /// `client.runtimes().handle(id)`.
     pub fn pinned_recipe_id(&self) -> Option<Uuid> {
         self.recipe_id
     }

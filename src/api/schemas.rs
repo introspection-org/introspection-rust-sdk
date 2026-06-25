@@ -728,7 +728,7 @@ pub struct RuntimeListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<String>,
+    pub runtime: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -821,7 +821,7 @@ pub struct Experiment {
 pub struct ExperimentCreate {
     pub project: StringOrUuid,
     pub name: String,
-    pub runtime: String,
+    pub runtime: StringOrUuid,
     pub arms: Vec<Arm>,
     pub goal_json: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -850,7 +850,7 @@ pub struct ExperimentUpdate {
 pub struct ExperimentListParams {
     pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<String>,
+    pub runtime: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ExperimentStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -946,7 +946,7 @@ pub struct RunRequest {
     pub ttl_seconds: Option<u32>,
     /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
     /// present, CP resolves the runtime row in this runtime's slug whose
-    /// `recipe_id == recipe_id` and opens the runner against that row —
+    /// `recipe_id == recipe.id` and opens the runner against that row —
     /// the "canary a previous version" flow from the SDK design doc.
     /// Defaults to `None`; the regular `runtime(id).run()` path leaves
     /// it unset and CP uses the row's current `recipe_id`.
@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn runtime_list_params_serialize_runtime_not_name_or_slug() {
         let value = serde_json::to_value(RuntimeListParams {
-            runtime: Some("customer-agent".to_string()),
+            runtime: Some("customer-agent".into()),
             ..Default::default()
         })
         .expect("runtime list params serialize");

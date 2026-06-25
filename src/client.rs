@@ -1,7 +1,7 @@
 //! Introspection Client — REST-only surface.
 //!
 //! Always available with no OpenTelemetry dependency. Exposes
-//! `client.runtimes()` / `client.experiments()` / `client.runtime(id)` /
+//! `client.runtimes()` / `client.experiments()` / `client.runtimes().handle(id)` /
 //! `client.experiment(id, project)` accessors over the Introspection
 //! DP REST API.
 //!
@@ -167,14 +167,13 @@ impl IntrospectionClient {
         )
     }
 
-    pub fn runtime(&self, runtime_id: uuid::Uuid) -> RuntimeHandle {
-        self.runtimes().handle(runtime_id)
-    }
-
     /// Look up an active runtime by runtime group slug or ID. The server infers the
     /// project from the API token. Equivalent to
     /// `client.runtimes().resolve(runtime)`.
-    pub async fn runtime_ref(&self, runtime: &str) -> crate::api::error::ApiResult<RuntimeHandle> {
+    ///
+    /// To build a handle for a concrete runtime UUID without a lookup, use
+    /// `client.runtimes().handle(runtime_id)`.
+    pub async fn runtime(&self, runtime: &str) -> crate::api::error::ApiResult<RuntimeHandle> {
         self.runtimes().resolve(runtime).await
     }
 
