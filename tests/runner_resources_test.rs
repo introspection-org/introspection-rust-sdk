@@ -504,3 +504,51 @@ async fn task_get_surfaces_429_after_exhausting_retries() {
         IntrospectionAPIError::Http { status: 429, .. }
     ));
 }
+
+#[tokio::test]
+async fn get_retries_on_503_then_succeeds() {
+    // A transient 503 on a GET (idempotent) is retried: 503 served once
+    // (higher priority, single use), then the 200 wins.
+    let server = MockServer::start().await;
+    let tasks = Tasks::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks/abc"))
+        .respond_with(
+            ResponseTemplate::new(503).set_body_json(json!({"detail": "sandbox unavailable"})),
+        )
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks/abc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_response("running")))
+        .mount(&server)
+        .await;
+
+    let task = tasks.get("abc").await.unwrap();
+    assert_eq!(task.id.to_string(), "00000000-0000-0000-0000-000000000001");
+}
+
+#[tokio::test]
+async fn write_does_not_retry_on_503() {
+    // A 503 on a non-idempotent write (POST /v1/tasks) is surfaced immediately,
+    // never re-sent.
+    let server = MockServer::start().await;
+    let tasks = Tasks::new(build_http(&server)); // max_retries = 2
+
+    Mock::given(method("POST"))
+        .and(path("/v1/tasks"))
+        .respond_with(ResponseTemplate::new(503).set_body_json(json!({"detail": "unavailable"})))
+        .mount(&server)
+        .await;
+
+    let err = tasks.create(&TaskCreate::default()).await.unwrap_err();
+    assert!(matches!(
+        err,
+        IntrospectionAPIError::Http { status: 503, .. }
+    ));
+    // Exactly one attempt — no retry for a write.
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
