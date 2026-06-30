@@ -115,6 +115,13 @@ pub mod defaults {
     pub const BASE_API_URL: &str = "https://api.introspection.dev";
     /// Default HTTP timeout for REST API calls.
     pub const API_TIMEOUT_SECS: u64 = 30;
+    /// Default number of automatic retries on a `429 Too Many Requests`
+    /// response for unary REST calls (honouring `Retry-After`). `0` disables
+    /// retrying. Streaming has its own resume budget (see
+    /// [`crate::api::resumable`]).
+    pub const API_MAX_RETRIES: u32 = 2;
+    /// Default base step (ms) of the capped-exponential `429` retry backoff.
+    pub const API_RETRY_BASE_MS: u64 = 500;
 }
 
 #[cfg(test)]

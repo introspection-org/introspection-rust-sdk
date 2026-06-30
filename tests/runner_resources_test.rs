@@ -26,6 +26,8 @@ fn build_http(server: &MockServer) -> Arc<HttpClient> {
         token: "intro_test".to_string(),
         additional_headers: HashMap::new(),
         timeout: Duration::from_secs(5),
+        max_retries: 2,
+        retry_base: Duration::from_millis(1),
     };
     Arc::new(HttpClient::from_parts(reqwest::Client::new(), cfg))
 }
@@ -436,4 +438,69 @@ fn file_response(name: &str) -> serde_json::Value {
         "mime_type": "application/octet-stream",
         "size_bytes": 5,
     })
+}
+
+fn task_response(status: &str) -> serde_json::Value {
+    json!({
+        "id": "00000000-0000-0000-0000-000000000001",
+        "org_id": "00000000-0000-0000-0000-00000000aaaa",
+        "project_id": "00000000-0000-0000-0000-00000000bbbb",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "mode": "agent",
+        "status": status,
+        "is_archived": false,
+    })
+}
+
+#[tokio::test]
+async fn task_get_retries_on_429_then_succeeds() {
+    // A status poll that trips the rate limit is retried transparently: the
+    // 429 is served once (higher priority, single use), then the 200 wins.
+    let server = MockServer::start().await;
+    let tasks = Tasks::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks/abc"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "0")
+                .set_body_json(json!({"detail": "rate limited"})),
+        )
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks/abc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_response("running")))
+        .mount(&server)
+        .await;
+
+    let task = tasks.get("abc").await.unwrap();
+    assert_eq!(task.id.to_string(), "00000000-0000-0000-0000-000000000001");
+}
+
+#[tokio::test]
+async fn task_get_surfaces_429_after_exhausting_retries() {
+    // A persistent 429 is retried up to the budget, then surfaced as a typed
+    // HTTP error rather than looping forever.
+    let server = MockServer::start().await;
+    let tasks = Tasks::new(build_http(&server)); // max_retries = 2
+
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks/def"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "0")
+                .set_body_json(json!({"detail": "rate limited"})),
+        )
+        .mount(&server)
+        .await;
+
+    let err = tasks.get("def").await.unwrap_err();
+    assert!(matches!(
+        err,
+        IntrospectionAPIError::Http { status: 429, .. }
+    ));
 }

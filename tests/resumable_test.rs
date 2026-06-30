@@ -107,6 +107,10 @@ fn http_for(url: &str) -> Arc<HttpClient> {
         token: "intro_test".to_string(),
         additional_headers: std::collections::HashMap::new(),
         timeout: Duration::from_secs(5),
+        // Streaming uses its own resume budget (get_stream_raw), not the unary
+        // 429 retry; these values are irrelevant to these tests.
+        max_retries: 0,
+        retry_base: Duration::from_millis(1),
     };
     Arc::new(HttpClient::from_parts(reqwest::Client::new(), cfg))
 }

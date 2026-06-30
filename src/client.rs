@@ -106,6 +106,8 @@ impl IntrospectionClient {
                 token: token.clone(),
                 additional_headers: api_headers,
                 timeout: Duration::from_secs(types::defaults::API_TIMEOUT_SECS),
+                max_retries: types::defaults::API_MAX_RETRIES,
+                retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
             };
             let http = HttpClient::new(http_cfg)
                 .map_err(|e| IntrospectionError::OpenTelemetry(e.to_string()))?;

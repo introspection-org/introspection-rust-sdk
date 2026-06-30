@@ -143,6 +143,17 @@ while let Some(event) = stream.next().await {
 The same `introspection.reconnect` marker rides the `CUSTOM` channel in the JS
 and Python SDKs, so it is expressible identically across all three.
 
+#### Rate limits (429)
+
+The unary calls — `tasks.get` (status polling), lists, create, cancel, delete,
+file metadata/content — **auto-retry on `429 Too Many Requests`**, honouring the
+server's `Retry-After` as the floor of a capped-exponential backoff. A status
+poller that trips the limit slows down and keeps working instead of erroring.
+Retries are bounded (`HttpConfig::max_retries`, default 2); once the budget is
+spent the `429` surfaces as a normal `IntrospectionAPIError::Http { status: 429,
+.. }` so the caller can back off further. Streaming has its own resume budget
+(above); multipart uploads are not auto-retried.
+
 ### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)
 
 Owns its own `SdkLoggerProvider` and emits `track` / `feedback` /
