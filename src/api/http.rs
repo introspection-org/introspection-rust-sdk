@@ -117,24 +117,31 @@ impl HttpClient {
         }
     }
 
-    /// Send a unary request, transparently retrying on `429 Too Many Requests`.
+    /// Send a unary request, transparently retrying on a rejected-but-retryable
+    /// status, honouring `Retry-After` as the floor of a capped-exponential
+    /// backoff.
     ///
     /// `build` is invoked once per attempt (so the request is rebuilt rather
-    /// than cloned). On a `429` with retries remaining, the `Retry-After`
-    /// header is honoured as the floor of a capped-exponential backoff and the
-    /// request is re-sent; once the retry budget is spent the `429` is mapped
-    /// to a typed error by [`expect_ok`] like any other non-2xx. Used by every
-    /// unary method below — a status poller that trips the limit slows down
-    /// instead of erroring. Streaming has its own resume budget and does not
-    /// go through here (see [`crate::api::resumable`]).
-    async fn send_retrying<F>(&self, build: F) -> ApiResult<Response>
+    /// than cloned). Retry policy:
+    /// - **`429 Too Many Requests`** is retried for **any** method — the
+    ///   request was rejected and never processed, so re-sending is
+    ///   side-effect-safe even for writes.
+    /// - **`502` / `503` / `504`** are retried **only when `idempotent`** is
+    ///   set (i.e. the caller is a `GET`), since a transient gateway/upstream
+    ///   error on a non-idempotent write can't be safely re-sent.
+    ///
+    /// Once the retry budget is spent the status is mapped to a typed error by
+    /// [`expect_ok`] like any other non-2xx. Streaming has its own resume
+    /// budget and does not go through here (see [`crate::api::resumable`]).
+    async fn send_retrying<F>(&self, idempotent: bool, build: F) -> ApiResult<Response>
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
         let mut attempt: u32 = 0;
         loop {
             let res = build().send().await?;
-            if res.status() == StatusCode::TOO_MANY_REQUESTS && attempt < self.cfg.max_retries {
+            let retryable = is_retryable_status(res.status(), idempotent);
+            if retryable && attempt < self.cfg.max_retries {
                 let delay = retry_delay(
                     attempt,
                     self.cfg.retry_base,
@@ -155,7 +162,7 @@ impl HttpClient {
         query: &Q,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(|| self.inner.get(self.url(path)).query(query))
+            .send_retrying(true, || self.inner.get(self.url(path)).query(query))
             .await?;
         decode_json(res).await
     }
@@ -167,7 +174,7 @@ impl HttpClient {
         body: &B,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(|| self.inner.post(self.url(path)).json(body))
+            .send_retrying(false, || self.inner.post(self.url(path)).json(body))
             .await?;
         decode_json(res).await
     }
@@ -179,21 +186,21 @@ impl HttpClient {
         body: &B,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(|| self.inner.patch(self.url(path)).json(body))
+            .send_retrying(false, || self.inner.patch(self.url(path)).json(body))
             .await?;
         decode_json(res).await
     }
 
     /// POST with no body, no response body.
     pub async fn post_empty(&self, path: &str) -> ApiResult<()> {
-        self.send_retrying(|| self.inner.post(self.url(path)))
+        self.send_retrying(false, || self.inner.post(self.url(path)))
             .await?;
         Ok(())
     }
 
     /// DELETE, no response body.
     pub async fn delete_empty(&self, path: &str) -> ApiResult<()> {
-        self.send_retrying(|| self.inner.delete(self.url(path)))
+        self.send_retrying(false, || self.inner.delete(self.url(path)))
             .await?;
         Ok(())
     }
@@ -220,7 +227,7 @@ impl HttpClient {
     /// GET binary content into memory.
     pub async fn get_bytes(&self, path: &str) -> ApiResult<Bytes> {
         let res = self
-            .send_retrying(|| self.inner.get(self.url(path)))
+            .send_retrying(true, || self.inner.get(self.url(path)))
             .await?;
         Ok(res.bytes().await?)
     }
@@ -259,6 +266,19 @@ impl HttpClient {
             req = req.header("last-event-id", id);
         }
         Ok(req.send().await?)
+    }
+}
+
+/// Whether a non-2xx status should be retried. `429` is always retryable (the
+/// request was rejected, not processed); transient gateway/upstream errors
+/// (`502`/`503`/`504`) are retryable only for `idempotent` (GET) calls.
+fn is_retryable_status(status: StatusCode, idempotent: bool) -> bool {
+    match status {
+        StatusCode::TOO_MANY_REQUESTS => true,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT => {
+            idempotent
+        }
+        _ => false,
     }
 }
 
@@ -352,4 +372,37 @@ fn extract_message(value: &serde_json::Value) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_policy_429_any_method_5xx_get_only() {
+        // 429: retryable regardless of idempotency (rejected, not processed).
+        assert!(is_retryable_status(StatusCode::TOO_MANY_REQUESTS, false));
+        assert!(is_retryable_status(StatusCode::TOO_MANY_REQUESTS, true));
+
+        // 502/503/504: retryable only for idempotent (GET) calls.
+        for status in [
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT,
+        ] {
+            assert!(is_retryable_status(status, true), "{status} GET");
+            assert!(!is_retryable_status(status, false), "{status} write");
+        }
+
+        // Everything else is never retried.
+        for status in [
+            StatusCode::OK,
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(!is_retryable_status(status, true));
+            assert!(!is_retryable_status(status, false));
+        }
+    }
 }

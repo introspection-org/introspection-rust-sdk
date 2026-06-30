@@ -143,16 +143,22 @@ while let Some(event) = stream.next().await {
 The same `introspection.reconnect` marker rides the `CUSTOM` channel in the JS
 and Python SDKs, so it is expressible identically across all three.
 
-#### Rate limits (429)
+#### Retries (429 / 5xx)
 
-The unary calls — `tasks.get` (status polling), lists, create, cancel, delete,
-file metadata/content — **auto-retry on `429 Too Many Requests`**, honouring the
-server's `Retry-After` as the floor of a capped-exponential backoff. A status
-poller that trips the limit slows down and keeps working instead of erroring.
+Unary calls auto-retry on transient, retryable statuses with a capped-exponential
+backoff (the server's `Retry-After` is honoured as a floor when present; absent,
+it's pure exponential — the retry happens either way):
+
+- **`429 Too Many Requests`** — retried for **every** method (the request was
+  rejected, not processed, so re-sending is safe even for writes). Covers
+  `tasks.get` (status polling), lists, create, cancel, delete, file metadata.
+- **`502` / `503` / `504`** — retried for **GET only** (idempotent reads), since
+  re-sending a non-idempotent write on a transient gateway error isn't safe.
+
 Retries are bounded (`HttpConfig::max_retries`, default 2); once the budget is
-spent the `429` surfaces as a normal `IntrospectionAPIError::Http { status: 429,
-.. }` so the caller can back off further. Streaming has its own resume budget
-(above); multipart uploads are not auto-retried.
+spent the status surfaces as a normal `IntrospectionAPIError::Http { status, .. }`
+so the caller can inspect it and back off further. Streaming has its own resume
+budget (above); multipart uploads are not auto-retried.
 
 ### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)
 
