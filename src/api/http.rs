@@ -13,6 +13,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use reqwest::{Response, StatusCode};
 use serde::Serialize;
 
+use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 
 /// Resolved HTTP configuration used by every REST API call.
@@ -33,9 +34,6 @@ pub struct HttpConfig {
     /// [`crate::ClientConfig`].
     pub retry_base: Duration,
 }
-
-/// Cap on the `429` retry backoff.
-const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 impl HttpConfig {
     fn build_default_headers(&self) -> ApiResult<HeaderMap> {
@@ -142,7 +140,7 @@ impl HttpClient {
             let res = build().send().await?;
             let retryable = is_retryable_status(res.status(), idempotent);
             if retryable && attempt < self.cfg.max_retries {
-                let delay = retry_delay(
+                let delay = backoff_delay(
                     attempt,
                     self.cfg.retry_base,
                     retry_after_from(res.headers()),
@@ -280,25 +278,6 @@ fn is_retryable_status(status: StatusCode, idempotent: bool) -> bool {
         }
         _ => false,
     }
-}
-
-/// Parse a `Retry-After` header as a delay. Only the delta-seconds form is
-/// honoured (what the DP emits); an HTTP-date value is ignored.
-fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .filter(|secs| secs.is_finite() && *secs >= 0.0)
-        .map(Duration::from_secs_f64)
-}
-
-/// `Retry-After` as the floor of a capped-exponential step (`base * 2^attempt`).
-fn retry_delay(attempt: u32, base: Duration, retry_after: Option<Duration>) -> Duration {
-    let factor = 1u64.checked_shl(attempt.min(20)).unwrap_or(u64::MAX);
-    let exp = Duration::from_millis((base.as_millis() as u64).saturating_mul(factor))
-        .min(RETRY_MAX_BACKOFF);
-    retry_after.map(|ra| ra.max(exp)).unwrap_or(exp)
 }
 
 async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {
