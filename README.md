@@ -97,6 +97,52 @@ while let Some(event) = events.next().await {
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
 
+#### Resilient streaming
+
+`stream()` resumes **transparently** across a mid-turn disconnect — gateway
+idle-timeout, load-balancer recycle, network blip. On a drop it re-attaches with
+the SSE-standard `Last-Event-ID` so the server replays the frames the client
+missed, yielding one gap-free `Stream` of `AgUiEvent`. There is no
+consumer-visible change: the loop above just keeps working, ending when the turn
+finishes and yielding a terminal `Err` only once recovery is exhausted. Readiness
+folds in the same way — while a run is not yet attachable the server answers with
+`429` + `Retry-After`, which the stream honours as a backoff floor and retries,
+never surfaced to the caller.
+
+Use `stream_with` to tune the recovery bounds, or to opt into an
+`introspection.reconnect` `CUSTOM` event on each reconnect / readiness wait (off
+by default — the stream is otherwise fully transparent):
+
+```rust
+use introspection_sdk::{AgUiEvent, StreamOptions};
+use introspection_sdk::agui::introspection::RECONNECT_EVENT_NAME;
+use std::time::Duration;
+
+let stream = runner.tasks().runs.stream_with(
+    &task_id,
+    &run_id,
+    StreamOptions {
+        max_reconnects: 5,
+        timeout: Duration::from_secs(300),
+        emit_reconnect_events: true,
+        ..Default::default()
+    },
+);
+futures::pin_mut!(stream);
+while let Some(event) = stream.next().await {
+    match event? {
+        AgUiEvent::TextMessageContent(e) => print!("{}", e.delta),
+        AgUiEvent::Custom(c) if c.name == RECONNECT_EVENT_NAME => {
+            eprintln!("reconnecting… ({})", c.value["reason"]);
+        }
+        _ => {}
+    }
+}
+```
+
+The same `introspection.reconnect` marker rides the `CUSTOM` channel in the JS
+and Python SDKs, so it is expressible identically across all three.
+
 ### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)
 
 Owns its own `SdkLoggerProvider` and emits `track` / `feedback` /

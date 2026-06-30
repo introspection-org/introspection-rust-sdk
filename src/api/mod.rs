@@ -121,6 +121,15 @@
 //! [`RunHandle::text`] is a convenience that concatenates the `delta` of
 //! [`Event::TextMessageContent`] events into a single string.
 //!
+//! The stream also resumes **transparently** across a mid-turn disconnect
+//! (gateway idle-timeout, load-balancer recycle, network blip): it re-attaches
+//! with the SSE-standard `Last-Event-ID` so the server replays the frames the
+//! client missed, yielding one gap-free [`Event`] sequence (INT-252, see
+//! [`resumable`]). Readiness folds in the same way — a not-yet-attachable run
+//! answers with `429` + `Retry-After`, honoured as a backoff floor and retried,
+//! never surfaced. Use [`TaskRuns::stream_with`] to tune the recovery bounds or
+//! opt into an `introspection.reconnect` `CUSTOM` event on each reconnect.
+//!
 //! The raw frame layer ([`parse_sse_response`] /
 //! [`crate::SseEvent`]) remains available for advanced callers who want the
 //! untyped `event` / `data` / `id` wire shape.
@@ -128,6 +137,7 @@
 //! [`Event`]: crate::agui::Event
 //! [`Event::Unknown`]: crate::agui::Event::Unknown
 //! [`Event::TextMessageContent`]: crate::agui::Event::TextMessageContent
+//! [`TaskRuns::stream_with`]: tasks::TaskRuns::stream_with
 //!
 //! # Errors
 //!
@@ -144,6 +154,7 @@ pub mod error;
 pub mod files;
 pub mod http;
 pub mod paginator;
+pub mod resumable;
 pub mod schemas;
 pub mod sse;
 pub mod tasks;
@@ -152,6 +163,7 @@ pub use error::{ApiResult, IntrospectionAPIError};
 pub use files::{FileUpload, FileVersions, Files, UploadSource};
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
+pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
     AgentInfo, Arm, Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus,
     ExperimentUpdate, File, FileCreateText, FileListParams, FileType, FileUpdate, Paginated,

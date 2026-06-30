@@ -179,6 +179,31 @@ impl HttpClient {
         let res = req.send().await?;
         expect_ok(res).await
     }
+
+    /// GET returning the raw [`Response`] **without** the non-2xx → error
+    /// translation [`get_stream`] applies. The caller inspects `status()` and
+    /// headers itself — used by the resumable stream's `429` readiness handling
+    /// (see [`crate::api::resumable`]), where a `429` is a retry signal, not a
+    /// failure. Only a transport-level failure yields `Err`.
+    ///
+    /// [`get_stream`]: Self::get_stream
+    pub async fn get_stream_raw(
+        &self,
+        path: &str,
+        accept: Option<&str>,
+        last_event_id: Option<&str>,
+    ) -> ApiResult<Response> {
+        let mut req = self.inner.get(self.url(path));
+        if let Some(a) = accept {
+            req = req.header(reqwest::header::ACCEPT, a);
+        }
+        if let Some(id) = last_event_id {
+            // SSE-standard resume cursor — the DP replays content frames after
+            // this id so a reconnect is gap-free (see `crate::api::resumable`).
+            req = req.header("last-event-id", id);
+        }
+        Ok(req.send().await?)
+    }
 }
 
 async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {

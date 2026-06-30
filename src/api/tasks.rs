@@ -10,11 +10,11 @@ use crate::agui::Event;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
+use crate::api::resumable::{stream_resumable, StreamOptions};
 use crate::api::schemas::{
     Task, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskRun,
     TaskRunCreate, TaskRunResponse, TaskUpdate,
 };
-use crate::api::sse::parse_agui_response;
 
 /// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
 ///
@@ -37,10 +37,21 @@ impl RunHandle {
     }
 
     /// Stream typed AG-UI [`Event`]s from `/v1/tasks/{id}/runs/{rid}/stream`.
+    ///
+    /// The stream resumes **transparently** across a mid-turn disconnect
+    /// (gateway idle-timeout, load-balancer recycle, network blip): see
+    /// [`TaskRuns::stream`]. Use [`Self::stream_with`] to tune the recovery
+    /// bounds or opt into reconnect events.
     pub async fn stream(&self) -> ApiResult<impl Stream<Item = ApiResult<Event>>> {
         self.runs
             .stream(&self.run.task_id.to_string(), &self.run.id)
             .await
+    }
+
+    /// [`Self::stream`] with explicit recovery bounds ([`StreamOptions`]).
+    pub fn stream_with(&self, opts: StreamOptions) -> impl Stream<Item = ApiResult<Event>> {
+        self.runs
+            .stream_with(&self.run.task_id.to_string(), &self.run.id, opts)
     }
 
     /// Consume this handle and return a pinned stream of AG-UI [`Event`]s.
@@ -120,21 +131,31 @@ impl TaskRuns {
 
     /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of typed
     /// AG-UI [`Event`]s.
+    ///
+    /// The stream resumes **transparently** across a mid-turn disconnect
+    /// (gateway idle-timeout, load-balancer recycle, network blip): it
+    /// re-attaches with the SSE-standard `Last-Event-ID` so the server replays
+    /// the frames the client missed, yielding a single gap-free sequence
+    /// (INT-252, see [`crate::api::resumable`]). It ends when the turn finishes
+    /// and yields a terminal `Err` only once recovery is exhausted — no
+    /// consumer-visible change from a plain stream. Use [`Self::stream_with`]
+    /// to tune the recovery bounds or opt into reconnect events.
     pub async fn stream(
         &self,
         task_id: &str,
         run_id: &str,
     ) -> ApiResult<impl Stream<Item = ApiResult<Event>>> {
-        let path = format!(
-            "/v1/tasks/{}/runs/{}/stream",
-            urlencode(task_id),
-            urlencode(run_id)
-        );
-        let res = self
-            .http
-            .get_stream(&path, Some("text/event-stream"))
-            .await?;
-        Ok(parse_agui_response(res))
+        Ok(self.stream_with(task_id, run_id, StreamOptions::default()))
+    }
+
+    /// [`Self::stream`] with explicit recovery bounds ([`StreamOptions`]).
+    pub fn stream_with(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        opts: StreamOptions,
+    ) -> impl Stream<Item = ApiResult<Event>> {
+        stream_resumable(self.http.clone(), task_id, run_id, opts)
     }
 }
 
