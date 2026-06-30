@@ -150,6 +150,7 @@
 //!
 //! [`RunHandle::text`]: tasks::RunHandle::text
 
+pub mod backoff;
 pub mod error;
 pub mod files;
 pub mod http;
