@@ -12,7 +12,7 @@ use std::error::Error;
 
 use futures::StreamExt;
 use introspection_sdk::{
-    ClientConfig, FileCreateText, FileUpload, IntrospectionClient, RunRequest,
+    AgUiEvent, ClientConfig, FileCreateText, FileUpload, IntrospectionClient, RunRequest,
 };
 
 #[tokio::main]
@@ -53,9 +53,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let stream = run.stream().await?;
     tokio::pin!(stream);
     while let Some(event) = stream.next().await {
-        let event = event?;
-        println!("[{}] {}", event.event, event.data);
+        // Typed AG-UI events — print streamed assistant text as it arrives.
+        if let AgUiEvent::TextMessageContent(e) = event? {
+            print!("{}", e.delta);
+        }
     }
+    println!();
 
     // 3) Upload files via the runner.
     let files = runner.files();

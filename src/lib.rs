@@ -88,6 +88,7 @@
 //! | `INTROSPECTION_BASE_API_URL`    | REST API host (default `api.introspection.dev`) |
 //! | `INTROSPECTION_BASE_OTEL_URL`   | OTLP collector host (default `otel.introspection.dev`) |
 
+pub mod agui;
 pub mod api;
 pub mod client;
 #[cfg(feature = "otel")]
@@ -108,6 +109,10 @@ pub use api::{
     TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
     TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks, UploadSource,
 };
+// AG-UI protocol event surface yielded by the task-run stream. The full
+// taxonomy lives in `crate::agui`; these aliases give the common types a
+// discoverable name at the crate root (`Event` alone would be ambiguous).
+pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use resources::{
     ExperimentHandle, Experiments, Projects, RecipePin, Recipes, Repositories, RuntimeHandle,

@@ -42,8 +42,10 @@
 //! let stream = run.stream().await?;
 //! tokio::pin!(stream);
 //! while let Some(event) = stream.next().await {
-//!     let event = event?;
-//!     println!("[{}] {}", event.event, event.data);
+//!     // Typed AG-UI events — branch on the variant.
+//!     if let introspection_sdk::AgUiEvent::TextMessageContent(e) = event? {
+//!         print!("{}", e.delta);
+//!     }
 //! }
 //!
 //! // Or collect text frames into a single string:
@@ -110,12 +112,22 @@
 //!
 //! # Streaming
 //!
-//! [`TaskRuns::stream`] returns `impl Stream<Item = `[`ApiResult`]`<`[`SseEvent`]`>>`.
-//! The DP proxies frames verbatim from the agents-worker — the SDK does
-//! **not** define the event taxonomy. Branch on `event` and parse `data`
-//! yourself (typically `serde_json::from_str(&ev.data)`).
-//! [`RunHandle::text`] is a convenience that concatenates `data` from
-//! `event: text` and `event: message` frames.
+//! [`TaskRuns::stream`] returns `impl Stream<Item = `[`ApiResult`]`<`[`Event`]`>>`,
+//! where [`Event`] is the typed AG-UI protocol event (see [`crate::agui`]).
+//! The stream yields only protocol events — transport frames (`heartbeat`,
+//! `done`, `result`) are handled internally — so callers branch on the
+//! [`Event`] variant directly. An unrecognised future event `type` surfaces
+//! as [`Event::Unknown`] rather than failing the stream.
+//! [`RunHandle::text`] is a convenience that concatenates the `delta` of
+//! [`Event::TextMessageContent`] events into a single string.
+//!
+//! The raw frame layer ([`parse_sse_response`] /
+//! [`crate::SseEvent`]) remains available for advanced callers who want the
+//! untyped `event` / `data` / `id` wire shape.
+//!
+//! [`Event`]: crate::agui::Event
+//! [`Event::Unknown`]: crate::agui::Event::Unknown
+//! [`Event::TextMessageContent`]: crate::agui::Event::TextMessageContent
 //!
 //! # Errors
 //!
@@ -150,5 +162,5 @@ pub use schemas::{
     TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
     TaskRun, TaskRunCreate, TaskRunResponse, TaskStatus, TaskUpdate,
 };
-pub use sse::parse_sse_response;
+pub use sse::{parse_agui_response, parse_sse_response};
 pub use tasks::{RunHandle, TaskRuns, Tasks};

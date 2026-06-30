@@ -15,6 +15,7 @@ use introspection_sdk::api::{
     HttpConfig, IntrospectionAPIError, PaginationParams, TaskCreate, TaskListParams, TaskMode,
     TaskRunCreate, TaskRuns, TaskUpdate, Tasks,
 };
+use introspection_sdk::AgUiEvent;
 use serde_json::json;
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -176,12 +177,18 @@ async fn tasks_delete_surfaces_403_as_api_error() {
 }
 
 #[tokio::test]
-async fn run_handle_streams_sse_text() {
+async fn run_handle_streams_typed_agui_events() {
     let server = MockServer::start().await;
     let http = build_http(&server);
     let runs = TaskRuns::new(http);
 
-    let body = "event: text\ndata: hello \n\nevent: text\ndata: world\n\n";
+    // `ag_ui` frames carry typed AG-UI events; the heartbeat is a transport
+    // frame the typed layer drops. Message ids are the worker's non-UUID
+    // `{run_id}:text:0` shape.
+    let body = "\
+event: ag_ui\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"run_001:text:0\",\"delta\":\"hello \"}\n\n\
+event: heartbeat\ndata: {\"runId\":\"run_001\"}\n\n\
+event: ag_ui\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"run_001:text:0\",\"delta\":\"world\"}\n\n";
     Mock::given(method("GET"))
         .and(path(
             "/v1/tasks/00000000-0000-0000-0000-000000000001/runs/run_001/stream",
@@ -199,12 +206,16 @@ async fn run_handle_streams_sse_text() {
         .await
         .unwrap();
     let events: Vec<_> = stream.collect().await;
+    // Two typed events; the heartbeat transport frame is not surfaced.
     assert_eq!(events.len(), 2);
-    let ev0 = events[0].as_ref().unwrap();
-    let ev1 = events[1].as_ref().unwrap();
-    assert_eq!(ev0.event, "text");
-    assert_eq!(ev0.data, "hello ");
-    assert_eq!(ev1.data, "world");
+    let deltas: Vec<String> = events
+        .iter()
+        .map(|ev| match ev.as_ref().unwrap() {
+            AgUiEvent::TextMessageContent(e) => e.delta.clone(),
+            other => panic!("expected TextMessageContent, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(deltas, ["hello ", "world"]);
 }
 
 #[tokio::test]
