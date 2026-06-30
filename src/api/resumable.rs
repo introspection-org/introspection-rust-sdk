@@ -34,12 +34,10 @@ use futures::StreamExt;
 use serde_json::json;
 
 use crate::agui::{introspection::reconnect_event, Event};
+use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::sse::{decode_agui_event, parse_sse_response, AG_UI_FRAME};
-
-/// Cap on the reconnect/readiness backoff.
-const MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 /// Options controlling the resilient run stream ([`stream_resumable`]).
 #[derive(Debug, Clone)]
@@ -69,14 +67,6 @@ impl Default for StreamOptions {
             emit_reconnect_events: false,
         }
     }
-}
-
-/// `Retry-After` as the floor of a capped-exponential step (`base * 2^n`).
-fn retry_backoff(n: u32, retry_after: Option<Duration>, base: Duration) -> Duration {
-    let factor = 1u64.checked_shl(n.min(20)).unwrap_or(u64::MAX);
-    let exp_ms = (base.as_millis() as u64).saturating_mul(factor);
-    let exp = Duration::from_millis(exp_ms).min(MAX_BACKOFF);
-    retry_after.map(|ra| ra.max(exp)).unwrap_or(exp)
 }
 
 /// A numeric SSE `id:` is a resumable content-frame cursor; control frames
@@ -114,12 +104,7 @@ pub fn stream_resumable(
             {
                 Ok(res) if res.status().as_u16() == 429 => {
                     // Not attachable yet — a readiness wait, not a failed attempt.
-                    let retry_after = res
-                        .headers()
-                        .get(reqwest::header::RETRY_AFTER)
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.trim().parse::<f64>().ok())
-                        .map(Duration::from_secs_f64);
+                    let retry_after = retry_after_from(res.headers());
                     let phase = readiness_phase(res).await;
                     let remaining = opts.timeout.checked_sub(start.elapsed());
                     match remaining {
@@ -138,7 +123,7 @@ pub fn stream_resumable(
                                 })));
                             }
                             tokio::time::sleep(
-                                retry_backoff(reconnects, retry_after, opts.backoff).min(rem),
+                                backoff_delay(reconnects, opts.backoff, retry_after).min(rem),
                             )
                             .await;
                             continue;
@@ -202,7 +187,7 @@ pub fn stream_resumable(
                             }
                             let rem = opts.timeout.saturating_sub(start.elapsed());
                             tokio::time::sleep(
-                                retry_backoff(reconnects, None, opts.backoff).min(rem),
+                                backoff_delay(reconnects, opts.backoff, None).min(rem),
                             )
                             .await;
                             continue;
@@ -240,7 +225,7 @@ pub fn stream_resumable(
                             "last_event_id": last_event_id,
                         })));
                     }
-                    tokio::time::sleep(retry_backoff(reconnects, None, opts.backoff)).await;
+                    tokio::time::sleep(backoff_delay(reconnects, opts.backoff, None)).await;
                     continue;
                 }
             }
