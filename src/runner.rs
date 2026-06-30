@@ -215,6 +215,8 @@ fn build_dp_http(dp_endpoint: &str, bearer: &str) -> ApiResult<HttpClient> {
         token: bearer.to_string(),
         additional_headers: HashMap::new(),
         timeout: Duration::from_secs(defaults::API_TIMEOUT_SECS),
+        max_retries: defaults::API_MAX_RETRIES,
+        retry_base: Duration::from_millis(defaults::API_RETRY_BASE_MS),
     };
     HttpClient::new(cfg)
 }

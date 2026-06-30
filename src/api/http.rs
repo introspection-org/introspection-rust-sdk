@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
@@ -21,7 +22,20 @@ pub struct HttpConfig {
     pub token: String,
     pub additional_headers: HashMap<String, String>,
     pub timeout: std::time::Duration,
+    /// Automatic retries on a `429 Too Many Requests` for unary REST calls
+    /// (honouring `Retry-After`). `0` disables retrying. Defaults to
+    /// [`crate::types::defaults::API_MAX_RETRIES`] when built from
+    /// [`crate::ClientConfig`].
+    pub max_retries: u32,
+    /// Base step of the capped-exponential `429` retry backoff (`Retry-After`
+    /// is the floor). Defaults to
+    /// [`crate::types::defaults::API_RETRY_BASE_MS`] when built from
+    /// [`crate::ClientConfig`].
+    pub retry_base: Duration,
 }
+
+/// Cap on the `429` retry backoff.
+const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 impl HttpConfig {
     fn build_default_headers(&self) -> ApiResult<HeaderMap> {
@@ -103,14 +117,47 @@ impl HttpClient {
         }
     }
 
+    /// Send a unary request, transparently retrying on `429 Too Many Requests`.
+    ///
+    /// `build` is invoked once per attempt (so the request is rebuilt rather
+    /// than cloned). On a `429` with retries remaining, the `Retry-After`
+    /// header is honoured as the floor of a capped-exponential backoff and the
+    /// request is re-sent; once the retry budget is spent the `429` is mapped
+    /// to a typed error by [`expect_ok`] like any other non-2xx. Used by every
+    /// unary method below — a status poller that trips the limit slows down
+    /// instead of erroring. Streaming has its own resume budget and does not
+    /// go through here (see [`crate::api::resumable`]).
+    async fn send_retrying<F>(&self, build: F) -> ApiResult<Response>
+    where
+        F: Fn() -> reqwest::RequestBuilder,
+    {
+        let mut attempt: u32 = 0;
+        loop {
+            let res = build().send().await?;
+            if res.status() == StatusCode::TOO_MANY_REQUESTS && attempt < self.cfg.max_retries {
+                let delay = retry_delay(
+                    attempt,
+                    self.cfg.retry_base,
+                    retry_after_from(res.headers()),
+                );
+                attempt += 1;
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            return expect_ok(res).await;
+        }
+    }
+
     /// GET that returns JSON. Pass `&()` for no query string.
     pub async fn get_json<Q: Serialize, R: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         query: &Q,
     ) -> ApiResult<R> {
-        let res = self.inner.get(self.url(path)).query(query).send().await?;
-        decode_json(expect_ok(res).await?).await
+        let res = self
+            .send_retrying(|| self.inner.get(self.url(path)).query(query))
+            .await?;
+        decode_json(res).await
     }
 
     /// POST a JSON body, decode JSON response.
@@ -119,8 +166,10 @@ impl HttpClient {
         path: &str,
         body: &B,
     ) -> ApiResult<R> {
-        let res = self.inner.post(self.url(path)).json(body).send().await?;
-        decode_json(expect_ok(res).await?).await
+        let res = self
+            .send_retrying(|| self.inner.post(self.url(path)).json(body))
+            .await?;
+        decode_json(res).await
     }
 
     /// PATCH a JSON body, decode JSON response.
@@ -129,25 +178,31 @@ impl HttpClient {
         path: &str,
         body: &B,
     ) -> ApiResult<R> {
-        let res = self.inner.patch(self.url(path)).json(body).send().await?;
-        decode_json(expect_ok(res).await?).await
+        let res = self
+            .send_retrying(|| self.inner.patch(self.url(path)).json(body))
+            .await?;
+        decode_json(res).await
     }
 
     /// POST with no body, no response body.
     pub async fn post_empty(&self, path: &str) -> ApiResult<()> {
-        let res = self.inner.post(self.url(path)).send().await?;
-        expect_ok(res).await?;
+        self.send_retrying(|| self.inner.post(self.url(path)))
+            .await?;
         Ok(())
     }
 
     /// DELETE, no response body.
     pub async fn delete_empty(&self, path: &str) -> ApiResult<()> {
-        let res = self.inner.delete(self.url(path)).send().await?;
-        expect_ok(res).await?;
+        self.send_retrying(|| self.inner.delete(self.url(path)))
+            .await?;
         Ok(())
     }
 
     /// POST multipart, decode JSON response.
+    ///
+    /// Not auto-retried on `429`: a multipart [`Form`](reqwest::multipart::Form)
+    /// is consumed on send and can't be rebuilt per attempt, and uploads are
+    /// not the high-frequency path the retry policy targets.
     pub async fn post_multipart<R: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -164,8 +219,9 @@ impl HttpClient {
 
     /// GET binary content into memory.
     pub async fn get_bytes(&self, path: &str) -> ApiResult<Bytes> {
-        let res = self.inner.get(self.url(path)).send().await?;
-        let res = expect_ok(res).await?;
+        let res = self
+            .send_retrying(|| self.inner.get(self.url(path)))
+            .await?;
         Ok(res.bytes().await?)
     }
 
@@ -179,6 +235,50 @@ impl HttpClient {
         let res = req.send().await?;
         expect_ok(res).await
     }
+
+    /// GET returning the raw [`Response`] **without** the non-2xx → error
+    /// translation [`get_stream`] applies. The caller inspects `status()` and
+    /// headers itself — used by the resumable stream's `429` readiness handling
+    /// (see [`crate::api::resumable`]), where a `429` is a retry signal, not a
+    /// failure. Only a transport-level failure yields `Err`.
+    ///
+    /// [`get_stream`]: Self::get_stream
+    pub async fn get_stream_raw(
+        &self,
+        path: &str,
+        accept: Option<&str>,
+        last_event_id: Option<&str>,
+    ) -> ApiResult<Response> {
+        let mut req = self.inner.get(self.url(path));
+        if let Some(a) = accept {
+            req = req.header(reqwest::header::ACCEPT, a);
+        }
+        if let Some(id) = last_event_id {
+            // SSE-standard resume cursor — the DP replays content frames after
+            // this id so a reconnect is gap-free (see `crate::api::resumable`).
+            req = req.header("last-event-id", id);
+        }
+        Ok(req.send().await?)
+    }
+}
+
+/// Parse a `Retry-After` header as a delay. Only the delta-seconds form is
+/// honoured (what the DP emits); an HTTP-date value is ignored.
+fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|secs| secs.is_finite() && *secs >= 0.0)
+        .map(Duration::from_secs_f64)
+}
+
+/// `Retry-After` as the floor of a capped-exponential step (`base * 2^attempt`).
+fn retry_delay(attempt: u32, base: Duration, retry_after: Option<Duration>) -> Duration {
+    let factor = 1u64.checked_shl(attempt.min(20)).unwrap_or(u64::MAX);
+    let exp = Duration::from_millis((base.as_millis() as u64).saturating_mul(factor))
+        .min(RETRY_MAX_BACKOFF);
+    retry_after.map(|ra| ra.max(exp)).unwrap_or(exp)
 }
 
 async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {

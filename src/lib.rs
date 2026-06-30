@@ -105,7 +105,7 @@ pub use api::{
     Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository, RepositoryListParams,
     RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
     RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
-    RuntimeUpdate, SseEvent, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
+    RuntimeUpdate, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
     TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
     TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks, UploadSource,
 };

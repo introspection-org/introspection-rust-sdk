@@ -20,7 +20,19 @@ use crate::api::schemas::SseEvent;
 /// The SSE `event:` name carrying an AG-UI protocol event. Every other frame
 /// name (`heartbeat`, `done`, `result`) is transport-level and skipped by the
 /// typed layer.
-const AG_UI_FRAME: &str = "ag_ui";
+pub(crate) const AG_UI_FRAME: &str = "ag_ui";
+
+/// Decode an `ag_ui` frame's `data` payload into a typed [`Event`].
+///
+/// An unrecognised event `type` decodes to [`Event::Unknown`] (never an
+/// error); a structurally invalid payload yields
+/// [`IntrospectionAPIError::Decode`]. Shared by the plain typed layer
+/// ([`parse_agui_frames`]) and the resumable stream (`crate::api::resumable`),
+/// which tracks frame ids itself but reuses this for the decode step.
+pub(crate) fn decode_agui_event(data: &str) -> ApiResult<Event> {
+    serde_json::from_str::<Event>(data)
+        .map_err(|e| IntrospectionAPIError::Decode(format!("failed to decode AG-UI event: {e}")))
+}
 
 /// Wrap a byte stream from a `text/event-stream` response in an async
 /// [`Stream`] of parsed events.
@@ -154,12 +166,10 @@ where
             if frame.event != AG_UI_FRAME {
                 continue;
             }
-            match serde_json::from_str::<Event>(&frame.data) {
+            match decode_agui_event(&frame.data) {
                 Ok(event) => yield Ok(event),
                 Err(e) => {
-                    yield Err(IntrospectionAPIError::Decode(format!(
-                        "failed to decode AG-UI event: {e}"
-                    )));
+                    yield Err(e);
                     return;
                 }
             }
