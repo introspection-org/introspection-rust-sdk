@@ -72,7 +72,7 @@ drive the `Runner` SSE stream.
 
 ```rust
 // cargo add introspection-sdk
-use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest};
+use introspection_sdk::{AgUiEvent, ClientConfig, IntrospectionClient, RunRequest};
 use futures::StreamExt;
 
 let client = IntrospectionClient::new(ClientConfig::default())?;
@@ -83,9 +83,14 @@ let mut events = runner.tasks()
     .start_prompt("Say hello in one sentence.").await?
     .into_stream().await?;
 
+// `stream()` yields typed AG-UI protocol events (see `introspection_sdk::agui`),
+// matching the JS (`@ag-ui/core`) and Python SDKs. Transport frames
+// (heartbeats) are handled internally; an unknown future event type surfaces
+// as `AgUiEvent::Unknown` rather than failing the stream.
 while let Some(event) = events.next().await {
-    let event = event?;
-    println!("[{}] {}", event.event, event.data);
+    if let AgUiEvent::TextMessageContent(e) = event? {
+        print!("{}", e.delta);
+    }
 }
 ```
 

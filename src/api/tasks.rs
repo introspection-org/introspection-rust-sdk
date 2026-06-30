@@ -6,20 +6,21 @@ use std::sync::Arc;
 use futures::stream::Stream;
 use futures::StreamExt;
 
+use crate::agui::Event;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    SseEvent, Task, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode,
-    TaskRun, TaskRunCreate, TaskRunResponse, TaskUpdate,
+    Task, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskRun,
+    TaskRunCreate, TaskRunResponse, TaskUpdate,
 };
-use crate::api::sse::parse_sse_response;
+use crate::api::sse::parse_agui_response;
 
 /// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
 ///
-/// Mirrors the Cursor SDK shape: [`Self::stream`] iterates raw SSE events,
-/// [`Self::text`] collects text frames into a string, [`Self::cancel`]
-/// cancels the run.
+/// Mirrors the Cursor SDK shape: [`Self::stream`] iterates typed AG-UI
+/// [`Event`]s, [`Self::text`] collects the assistant's text into a string,
+/// [`Self::cancel`] cancels the run.
 #[derive(Clone)]
 pub struct RunHandle {
     /// The task this run belongs to. `None` when constructed from
@@ -35,20 +36,20 @@ impl RunHandle {
         Self { task, run, runs }
     }
 
-    /// Stream raw SSE frames from `/v1/tasks/{id}/runs/{rid}/stream`.
-    pub async fn stream(&self) -> ApiResult<impl Stream<Item = ApiResult<SseEvent>>> {
+    /// Stream typed AG-UI [`Event`]s from `/v1/tasks/{id}/runs/{rid}/stream`.
+    pub async fn stream(&self) -> ApiResult<impl Stream<Item = ApiResult<Event>>> {
         self.runs
             .stream(&self.run.task_id.to_string(), &self.run.id)
             .await
     }
 
-    /// Consume this handle and return a pinned stream of SSE events.
+    /// Consume this handle and return a pinned stream of AG-UI [`Event`]s.
     ///
     /// Unlike [`Self::stream`] the returned stream is `Pin<Box<…>>` so
     /// callers can iterate without `tokio::pin!`.
     pub async fn into_stream(
         self,
-    ) -> ApiResult<Pin<Box<dyn Stream<Item = ApiResult<SseEvent>> + Send>>> {
+    ) -> ApiResult<Pin<Box<dyn Stream<Item = ApiResult<Event>> + Send>>> {
         let s = self.stream().await?;
         Ok(Box::pin(s))
     }
@@ -60,17 +61,16 @@ impl RunHandle {
             .await
     }
 
-    /// Convenience: collect `data` from `event: text` / `event: message`
-    /// frames into a single string. Returns an error on the first
-    /// transport / decode failure.
+    /// Convenience: concatenate the assistant's streamed text — the `delta`
+    /// of every [`Event::TextMessageContent`] — into a single string. Returns
+    /// an error on the first transport / decode failure.
     pub async fn text(&self) -> ApiResult<String> {
         let mut out = String::new();
         let stream = self.stream().await?;
         tokio::pin!(stream);
         while let Some(ev) = stream.next().await {
-            let ev = ev?;
-            if ev.event == "text" || ev.event == "message" {
-                out.push_str(&ev.data);
+            if let Event::TextMessageContent(e) = ev? {
+                out.push_str(&e.delta);
             }
         }
         Ok(out)
@@ -118,13 +118,13 @@ impl TaskRuns {
         self.http.post_json(&path, &serde_json::json!({})).await
     }
 
-    /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of raw
-    /// SSE events.
+    /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of typed
+    /// AG-UI [`Event`]s.
     pub async fn stream(
         &self,
         task_id: &str,
         run_id: &str,
-    ) -> ApiResult<impl Stream<Item = ApiResult<SseEvent>>> {
+    ) -> ApiResult<impl Stream<Item = ApiResult<Event>>> {
         let path = format!(
             "/v1/tasks/{}/runs/{}/stream",
             urlencode(task_id),
@@ -134,7 +134,7 @@ impl TaskRuns {
             .http
             .get_stream(&path, Some("text/event-stream"))
             .await?;
-        Ok(parse_sse_response(res))
+        Ok(parse_agui_response(res))
     }
 }
 
