@@ -289,6 +289,10 @@ pub mod attr {
     pub const GEN_AI_OUTPUT_MESSAGES: &str = "gen_ai.output.messages";
     pub const GEN_AI_SYSTEM_INSTRUCTIONS: &str = "gen_ai.system_instructions";
     pub const GEN_AI_TOOL_DEFINITIONS: &str = "gen_ai.tool.definitions";
+    pub const GEN_AI_RESPONSE_FINISH_REASONS: &str = "gen_ai.response.finish_reasons";
+
+    // Introspection-specific span attributes
+    pub const INTROSPECTION_TERMINATION_REASON: &str = "introspection.termination_reason";
 
     // Prefixes for dynamic keys
     pub const PROPERTIES_PREFIX: &str = "properties.";
