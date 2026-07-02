@@ -55,7 +55,7 @@ use async_openai::types::responses::{CreateResponse, OutputItem, Response as Res
 use async_openai::Client;
 use futures::Stream;
 use opentelemetry::trace::{Span, Tracer};
-use opentelemetry::KeyValue;
+use opentelemetry::{KeyValue, StringValue, Value};
 
 use crate::otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
@@ -305,6 +305,9 @@ pub async fn traced_chat_completion<S: Span, T: Tracer<Span = S>>(
         ));
     }
 
+    // If this future is cancelled (dropped mid-await), `obs` drops before
+    // either set_ok/set_error runs, so the span is left Unset — the correct
+    // "caller abort" outcome for the non-streaming path, no RAII guard needed.
     let result = client.chat().create(request).await;
 
     match &result {
@@ -351,6 +354,11 @@ pub struct TracedStream<S: Span> {
     final_usage: Option<CompletionUsage>,
     had_error: bool,
     finalized: bool,
+    /// Set once the stream reaches a terminal state under our control: any
+    /// choice carries a `finish_reason`, or the underlying stream yields
+    /// `Poll::Ready(None)`. If the wrapper is dropped before this flips true,
+    /// the consumer stopped driving the stream early — a caller abort.
+    stream_completed: bool,
 }
 
 impl<S: Span> TracedStream<S> {
@@ -381,8 +389,25 @@ impl<S: Span> TracedStream<S> {
 
             if self.had_error {
                 obs.set_error("stream encountered an error");
-            } else {
+            } else if self.stream_completed {
+                // Normal completion: a terminal finish_reason arrived or the
+                // underlying stream ended cleanly.
                 obs.set_ok();
+            } else {
+                // Caller abort: the wrapper was dropped before the model
+                // finished (no terminal finish_reason, no Poll::Ready(None)).
+                // Leave the span status Unset — this is a deliberate stop, not
+                // a failure or a false success — and stamp the abort markers so
+                // the read layer can exclude it from error/success counts.
+                // Mirrors the JS SDK's caller-abort handling.
+                obs.set_attribute(KeyValue::new(
+                    crate::otel::types::attr::GEN_AI_RESPONSE_FINISH_REASONS,
+                    Value::Array(vec![StringValue::from("aborted")].into()),
+                ));
+                obs.set_attribute(KeyValue::new(
+                    crate::otel::types::attr::INTROSPECTION_TERMINATION_REASON,
+                    "cancelled",
+                ));
             }
         }
     }
@@ -412,6 +437,11 @@ impl<S: Span> Stream for TracedStream<S> {
                     if let Some(ref content) = choice.delta.content {
                         this.accumulated_content.push_str(content);
                     }
+                    // A terminal finish_reason means the model finished this
+                    // choice — the stream completed under our control.
+                    if choice.finish_reason.is_some() {
+                        this.stream_completed = true;
+                    }
                 }
 
                 // Capture usage from the final chunk
@@ -423,6 +453,8 @@ impl<S: Span> Stream for TracedStream<S> {
                 this.had_error = true;
             }
             Poll::Ready(None) => {
+                // Underlying stream ended cleanly — normal completion.
+                this.stream_completed = true;
                 this.finalize();
             }
             Poll::Pending => {}
@@ -519,6 +551,7 @@ pub async fn traced_chat_completion_stream<S: Span, T: Tracer<Span = S>>(
         final_usage: None,
         had_error: false,
         finalized: false,
+        stream_completed: false,
     })
 }
 
@@ -800,4 +833,146 @@ pub fn convert_responses_output(
     }
 
     messages
+}
+
+#[cfg(all(test, feature = "openai"))]
+mod tests {
+    use super::*;
+    use crate::otel::testing::setup_test_provider;
+    use crate::otel::types::attr;
+    use futures::StreamExt;
+    use opentelemetry::trace::{Status, TracerProvider};
+
+    /// Parse a single SSE chunk JSON into a stream response.
+    fn chunk(json: &str) -> CreateChatCompletionStreamResponse {
+        serde_json::from_str(json).expect("valid chunk fixture")
+    }
+
+    /// Build a [`TracedStream`] over a fixed set of chunks, mirroring what
+    /// `traced_chat_completion_stream` produces but without a network round-trip.
+    fn traced_stream_over<S: Span>(
+        obs: Observation<S>,
+        chunks: Vec<CreateChatCompletionStreamResponse>,
+    ) -> TracedStream<S> {
+        let inner: ChatCompletionResponseStream =
+            Box::pin(futures::stream::iter(chunks.into_iter().map(Ok)));
+        TracedStream {
+            inner,
+            observation: Some(obs),
+            accumulated_content: String::new(),
+            response_id: None,
+            response_model: None,
+            final_usage: None,
+            had_error: false,
+            finalized: false,
+            stream_completed: false,
+        }
+    }
+
+    fn attr_value<'a>(
+        span: &'a opentelemetry_sdk::trace::SpanData,
+        key: &str,
+    ) -> Option<&'a Value> {
+        span.attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| &kv.value)
+    }
+
+    // A stream dropped before any terminal finish_reason (and before
+    // Poll::Ready(None)) is a caller abort: status stays Unset and the abort
+    // markers are stamped.
+    #[tokio::test]
+    async fn dropped_stream_is_annotated_as_cancelled() {
+        let (provider, exporter) = setup_test_provider();
+        let tracer = provider.tracer("test");
+
+        {
+            let obs = Observation::start(
+                &tracer,
+                ObservationConfig::generation("chat", "gpt-4o-mini"),
+            );
+            let mut stream = traced_stream_over(
+                obs,
+                vec![
+                    chunk(
+                        r#"{"id":"chatcmpl-abort","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"},"finish_reason":null}],"usage":null}"#,
+                    ),
+                    chunk(
+                        r#"{"id":"chatcmpl-abort","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":null}],"usage":null}"#,
+                    ),
+                ],
+            );
+
+            // Consume the two content chunks but never reach Poll::Ready(None):
+            // the consumer stopped driving the stream early.
+            assert!(stream.next().await.is_some());
+            assert!(stream.next().await.is_some());
+            // stream dropped here → finalize() takes the cancel branch.
+        }
+
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+
+        assert_eq!(span.status, Status::Unset, "aborted span must stay Unset");
+
+        let finish_reasons = attr_value(span, attr::GEN_AI_RESPONSE_FINISH_REASONS)
+            .expect("finish_reasons attribute present");
+        assert_eq!(
+            *finish_reasons,
+            Value::Array(vec![StringValue::from("aborted")].into()),
+        );
+
+        let termination = attr_value(span, attr::INTROSPECTION_TERMINATION_REASON)
+            .expect("termination_reason attribute present");
+        assert_eq!(*termination, Value::String(StringValue::from("cancelled")));
+
+        provider.shutdown().unwrap();
+    }
+
+    // A stream that reaches a terminal finish_reason and drains to
+    // Poll::Ready(None) completes normally: status OK, no abort markers.
+    #[tokio::test]
+    async fn completed_stream_stays_ok_without_termination_marker() {
+        let (provider, exporter) = setup_test_provider();
+        let tracer = provider.tracer("test");
+
+        {
+            let obs = Observation::start(
+                &tracer,
+                ObservationConfig::generation("chat", "gpt-4o-mini"),
+            );
+            let mut stream = traced_stream_over(
+                obs,
+                vec![
+                    chunk(
+                        r#"{"id":"chatcmpl-ok","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}],"usage":null}"#,
+                    ),
+                    chunk(
+                        r#"{"id":"chatcmpl-ok","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":null}"#,
+                    ),
+                ],
+            );
+
+            // Drain fully, reaching Poll::Ready(None).
+            while stream.next().await.is_some() {}
+        }
+
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+
+        assert_eq!(span.status, Status::Ok, "completed span must be OK");
+        assert!(
+            attr_value(span, attr::INTROSPECTION_TERMINATION_REASON).is_none(),
+            "completed span must not carry a termination_reason",
+        );
+        assert!(
+            attr_value(span, attr::GEN_AI_RESPONSE_FINISH_REASONS).is_none(),
+            "completed span must not carry the aborted finish_reasons marker",
+        );
+
+        provider.shutdown().unwrap();
+    }
 }
