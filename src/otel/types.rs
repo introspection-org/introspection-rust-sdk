@@ -285,6 +285,7 @@ pub mod attr {
     pub const GEN_AI_USAGE_INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
     pub const GEN_AI_USAGE_OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
     pub const GEN_AI_USAGE_TOTAL_TOKENS: &str = "gen_ai.usage.total_tokens";
+    pub const GEN_AI_USAGE_REASONING_TOKENS: &str = "gen_ai.usage.reasoning_tokens";
     pub const GEN_AI_INPUT_MESSAGES: &str = "gen_ai.input.messages";
     pub const GEN_AI_OUTPUT_MESSAGES: &str = "gen_ai.output.messages";
     pub const GEN_AI_SYSTEM_INSTRUCTIONS: &str = "gen_ai.system_instructions";
@@ -293,6 +294,11 @@ pub mod attr {
 
     // Introspection-specific span attributes
     pub const INTROSPECTION_TERMINATION_REASON: &str = "introspection.termination_reason";
+    /// Provider-reported total cost in USD (e.g. OpenRouter `usage.cost`).
+    pub const INTROSPECTION_LLM_COST_USD: &str = "introspection.llm.cost_usd";
+    /// Provider-reported upstream inference cost in USD
+    /// (e.g. OpenRouter `usage.cost_details.upstream_inference_cost`).
+    pub const INTROSPECTION_LLM_UPSTREAM_COST_USD: &str = "introspection.llm.upstream_cost_usd";
 
     // Prefixes for dynamic keys
     pub const PROPERTIES_PREFIX: &str = "properties.";
