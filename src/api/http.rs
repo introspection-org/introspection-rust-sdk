@@ -13,6 +13,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use reqwest::{Response, StatusCode};
 use serde::Serialize;
 
+use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 
 /// Resolved HTTP configuration used by every REST API call.
@@ -33,9 +34,6 @@ pub struct HttpConfig {
     /// [`crate::ClientConfig`].
     pub retry_base: Duration,
 }
-
-/// Cap on the `429` retry backoff.
-const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 impl HttpConfig {
     fn build_default_headers(&self) -> ApiResult<HeaderMap> {
@@ -117,25 +115,32 @@ impl HttpClient {
         }
     }
 
-    /// Send a unary request, transparently retrying on `429 Too Many Requests`.
+    /// Send a unary request, transparently retrying on a rejected-but-retryable
+    /// status, honouring `Retry-After` as the floor of a capped-exponential
+    /// backoff.
     ///
     /// `build` is invoked once per attempt (so the request is rebuilt rather
-    /// than cloned). On a `429` with retries remaining, the `Retry-After`
-    /// header is honoured as the floor of a capped-exponential backoff and the
-    /// request is re-sent; once the retry budget is spent the `429` is mapped
-    /// to a typed error by [`expect_ok`] like any other non-2xx. Used by every
-    /// unary method below — a status poller that trips the limit slows down
-    /// instead of erroring. Streaming has its own resume budget and does not
-    /// go through here (see [`crate::api::resumable`]).
-    async fn send_retrying<F>(&self, build: F) -> ApiResult<Response>
+    /// than cloned). Retry policy:
+    /// - **`429 Too Many Requests`** is retried for **any** method — the
+    ///   request was rejected and never processed, so re-sending is
+    ///   side-effect-safe even for writes.
+    /// - **`502` / `503` / `504`** are retried **only when `idempotent`** is
+    ///   set (i.e. the caller is a `GET`), since a transient gateway/upstream
+    ///   error on a non-idempotent write can't be safely re-sent.
+    ///
+    /// Once the retry budget is spent the status is mapped to a typed error by
+    /// [`expect_ok`] like any other non-2xx. Streaming has its own resume
+    /// budget and does not go through here (see [`crate::api::resumable`]).
+    async fn send_retrying<F>(&self, idempotent: bool, build: F) -> ApiResult<Response>
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
         let mut attempt: u32 = 0;
         loop {
             let res = build().send().await?;
-            if res.status() == StatusCode::TOO_MANY_REQUESTS && attempt < self.cfg.max_retries {
-                let delay = retry_delay(
+            let retryable = is_retryable_status(res.status(), idempotent);
+            if retryable && attempt < self.cfg.max_retries {
+                let delay = backoff_delay(
                     attempt,
                     self.cfg.retry_base,
                     retry_after_from(res.headers()),
@@ -155,7 +160,7 @@ impl HttpClient {
         query: &Q,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(|| self.inner.get(self.url(path)).query(query))
+            .send_retrying(true, || self.inner.get(self.url(path)).query(query))
             .await?;
         decode_json(res).await
     }
@@ -167,7 +172,7 @@ impl HttpClient {
         body: &B,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(|| self.inner.post(self.url(path)).json(body))
+            .send_retrying(false, || self.inner.post(self.url(path)).json(body))
             .await?;
         decode_json(res).await
     }
@@ -179,21 +184,21 @@ impl HttpClient {
         body: &B,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(|| self.inner.patch(self.url(path)).json(body))
+            .send_retrying(false, || self.inner.patch(self.url(path)).json(body))
             .await?;
         decode_json(res).await
     }
 
     /// POST with no body, no response body.
     pub async fn post_empty(&self, path: &str) -> ApiResult<()> {
-        self.send_retrying(|| self.inner.post(self.url(path)))
+        self.send_retrying(false, || self.inner.post(self.url(path)))
             .await?;
         Ok(())
     }
 
     /// DELETE, no response body.
     pub async fn delete_empty(&self, path: &str) -> ApiResult<()> {
-        self.send_retrying(|| self.inner.delete(self.url(path)))
+        self.send_retrying(false, || self.inner.delete(self.url(path)))
             .await?;
         Ok(())
     }
@@ -220,7 +225,7 @@ impl HttpClient {
     /// GET binary content into memory.
     pub async fn get_bytes(&self, path: &str) -> ApiResult<Bytes> {
         let res = self
-            .send_retrying(|| self.inner.get(self.url(path)))
+            .send_retrying(true, || self.inner.get(self.url(path)))
             .await?;
         Ok(res.bytes().await?)
     }
@@ -262,23 +267,17 @@ impl HttpClient {
     }
 }
 
-/// Parse a `Retry-After` header as a delay. Only the delta-seconds form is
-/// honoured (what the DP emits); an HTTP-date value is ignored.
-fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .filter(|secs| secs.is_finite() && *secs >= 0.0)
-        .map(Duration::from_secs_f64)
-}
-
-/// `Retry-After` as the floor of a capped-exponential step (`base * 2^attempt`).
-fn retry_delay(attempt: u32, base: Duration, retry_after: Option<Duration>) -> Duration {
-    let factor = 1u64.checked_shl(attempt.min(20)).unwrap_or(u64::MAX);
-    let exp = Duration::from_millis((base.as_millis() as u64).saturating_mul(factor))
-        .min(RETRY_MAX_BACKOFF);
-    retry_after.map(|ra| ra.max(exp)).unwrap_or(exp)
+/// Whether a non-2xx status should be retried. `429` is always retryable (the
+/// request was rejected, not processed); transient gateway/upstream errors
+/// (`502`/`503`/`504`) are retryable only for `idempotent` (GET) calls.
+fn is_retryable_status(status: StatusCode, idempotent: bool) -> bool {
+    match status {
+        StatusCode::TOO_MANY_REQUESTS => true,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT => {
+            idempotent
+        }
+        _ => false,
+    }
 }
 
 async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {
@@ -352,4 +351,37 @@ fn extract_message(value: &serde_json::Value) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_policy_429_any_method_5xx_get_only() {
+        // 429: retryable regardless of idempotency (rejected, not processed).
+        assert!(is_retryable_status(StatusCode::TOO_MANY_REQUESTS, false));
+        assert!(is_retryable_status(StatusCode::TOO_MANY_REQUESTS, true));
+
+        // 502/503/504: retryable only for idempotent (GET) calls.
+        for status in [
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GATEWAY_TIMEOUT,
+        ] {
+            assert!(is_retryable_status(status, true), "{status} GET");
+            assert!(!is_retryable_status(status, false), "{status} write");
+        }
+
+        // Everything else is never retried.
+        for status in [
+            StatusCode::OK,
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(!is_retryable_status(status, true));
+            assert!(!is_retryable_status(status, false));
+        }
+    }
 }

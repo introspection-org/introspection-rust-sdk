@@ -46,6 +46,52 @@ pub struct Usage {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
+    /// Reasoning tokens reported under
+    /// `usage.completion_tokens_details.reasoning_tokens`.
+    pub reasoning_tokens: Option<i64>,
+    /// Provider-reported total cost in USD (e.g. OpenRouter `usage.cost`).
+    pub cost_usd: Option<f64>,
+    /// Provider-reported upstream inference cost in USD
+    /// (e.g. OpenRouter `usage.cost_details.upstream_inference_cost`).
+    pub upstream_cost_usd: Option<f64>,
+}
+
+impl Usage {
+    /// Merge provider-reported usage extensions from a raw `usage` JSON block
+    /// into this [`Usage`], filling only fields that are not already set.
+    ///
+    /// Recognised fields (OpenRouter-style extensions to the OpenAI schema):
+    ///
+    /// * `usage.cost` → [`Usage::cost_usd`]
+    /// * `usage.cost_details.upstream_inference_cost` → [`Usage::upstream_cost_usd`]
+    /// * `usage.completion_tokens_details.reasoning_tokens` → [`Usage::reasoning_tokens`]
+    ///
+    /// Absent or malformed (non-numeric, non-finite, negative-count) fields
+    /// are skipped silently — nothing is recorded for them.
+    pub fn apply_provider_usage_json(&mut self, usage_json: &serde_json::Value) {
+        if self.cost_usd.is_none() {
+            self.cost_usd = usage_json.get("cost").and_then(json_finite_f64);
+        }
+        if self.upstream_cost_usd.is_none() {
+            self.upstream_cost_usd = usage_json
+                .get("cost_details")
+                .and_then(|d| d.get("upstream_inference_cost"))
+                .and_then(json_finite_f64);
+        }
+        if self.reasoning_tokens.is_none() {
+            self.reasoning_tokens = usage_json
+                .get("completion_tokens_details")
+                .and_then(|d| d.get("reasoning_tokens"))
+                .and_then(serde_json::Value::as_i64)
+                .filter(|tokens| *tokens >= 0);
+        }
+    }
+}
+
+/// Extract a finite `f64` from a JSON value, returning `None` for anything
+/// that is not a plain finite number (strings, objects, NaN/infinity).
+fn json_finite_f64(value: &serde_json::Value) -> Option<f64> {
+    value.as_f64().filter(|f| f.is_finite())
 }
 
 /// Response-side update payload for a generation observation.
@@ -88,12 +134,27 @@ impl GenerationUpdate {
             input_tokens: Some(input_tokens),
             output_tokens: Some(output_tokens),
             total_tokens: Some(input_tokens + output_tokens),
+            ..Usage::default()
         });
         self
     }
 
     /// Set full usage information.
     pub fn with_full_usage(mut self, usage: Usage) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// Merge provider-reported usage extensions (cost, reasoning tokens) from
+    /// a raw `usage` JSON block into this update's usage.
+    ///
+    /// Use this when you have the provider's raw response JSON (e.g. an
+    /// OpenRouter response whose `usage` block carries `cost` /
+    /// `cost_details.upstream_inference_cost`). Absent or malformed fields
+    /// are skipped — see [`Usage::apply_provider_usage_json`].
+    pub fn with_provider_usage_json(mut self, usage_json: &serde_json::Value) -> Self {
+        let mut usage = self.usage.take().unwrap_or_default();
+        usage.apply_provider_usage_json(usage_json);
         self.usage = Some(usage);
         self
     }
@@ -280,6 +341,22 @@ impl<S: Span> Observation<S> {
                 self.span
                     .set_attribute(KeyValue::new(attr::GEN_AI_USAGE_TOTAL_TOKENS, total_tokens));
             }
+            if let Some(reasoning_tokens) = usage.reasoning_tokens {
+                self.span.set_attribute(KeyValue::new(
+                    attr::GEN_AI_USAGE_REASONING_TOKENS,
+                    reasoning_tokens,
+                ));
+            }
+            if let Some(cost_usd) = usage.cost_usd {
+                self.span
+                    .set_attribute(KeyValue::new(attr::INTROSPECTION_LLM_COST_USD, cost_usd));
+            }
+            if let Some(upstream_cost_usd) = usage.upstream_cost_usd {
+                self.span.set_attribute(KeyValue::new(
+                    attr::INTROSPECTION_LLM_UPSTREAM_COST_USD,
+                    upstream_cost_usd,
+                ));
+            }
         }
         if let Some(status) = update.status {
             self.span.set_status(status);
@@ -411,6 +488,205 @@ mod tests {
         assert_eq!(config.observation_type, ObservationType::Span);
         assert_eq!(config.model, None);
         assert_eq!(config.system, None);
+    }
+
+    #[test]
+    fn test_provider_usage_json_present_fields_are_captured() {
+        let usage_json = serde_json::json!({
+            "prompt_tokens": 12,
+            "completion_tokens": 8,
+            "total_tokens": 20,
+            "cost": 0.95,
+            "cost_details": {"upstream_inference_cost": 0.85},
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        });
+
+        let mut usage = Usage::default();
+        usage.apply_provider_usage_json(&usage_json);
+
+        assert_eq!(usage.cost_usd, Some(0.95));
+        assert_eq!(usage.upstream_cost_usd, Some(0.85));
+        assert_eq!(usage.reasoning_tokens, Some(5));
+    }
+
+    #[test]
+    fn test_provider_usage_json_absent_fields_stay_unset() {
+        let usage_json = serde_json::json!({
+            "prompt_tokens": 12,
+            "completion_tokens": 8,
+            "total_tokens": 20,
+        });
+
+        let mut usage = Usage::default();
+        usage.apply_provider_usage_json(&usage_json);
+
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.upstream_cost_usd, None);
+        assert_eq!(usage.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn test_provider_usage_json_malformed_fields_are_skipped() {
+        // cost is a string, cost_details is a number (not an object),
+        // reasoning_tokens is a float and thus not a valid token count.
+        let usage_json = serde_json::json!({
+            "cost": "0.95",
+            "cost_details": 0.85,
+            "completion_tokens_details": {"reasoning_tokens": 5.5},
+        });
+
+        let mut usage = Usage::default();
+        usage.apply_provider_usage_json(&usage_json);
+
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.upstream_cost_usd, None);
+        assert_eq!(usage.reasoning_tokens, None);
+
+        // Nested malformed variants: string upstream cost, negative and
+        // string reasoning token counts.
+        let usage_json = serde_json::json!({
+            "cost_details": {"upstream_inference_cost": "0.85"},
+            "completion_tokens_details": {"reasoning_tokens": -3},
+        });
+        let mut usage = Usage::default();
+        usage.apply_provider_usage_json(&usage_json);
+        assert_eq!(usage.upstream_cost_usd, None);
+        assert_eq!(usage.reasoning_tokens, None);
+
+        let usage_json = serde_json::json!({
+            "completion_tokens_details": {"reasoning_tokens": "5"},
+        });
+        let mut usage = Usage::default();
+        usage.apply_provider_usage_json(&usage_json);
+        assert_eq!(usage.reasoning_tokens, None);
+
+        // Non-object usage blocks are ignored entirely.
+        let mut usage = Usage::default();
+        usage.apply_provider_usage_json(&serde_json::json!(null));
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.upstream_cost_usd, None);
+        assert_eq!(usage.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn test_provider_usage_json_does_not_overwrite_existing_fields() {
+        let usage_json = serde_json::json!({
+            "cost": 0.95,
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        });
+
+        let mut usage = Usage {
+            reasoning_tokens: Some(7),
+            cost_usd: Some(1.25),
+            ..Usage::default()
+        };
+        usage.apply_provider_usage_json(&usage_json);
+
+        assert_eq!(usage.reasoning_tokens, Some(7), "typed value must win");
+        assert_eq!(usage.cost_usd, Some(1.25), "typed value must win");
+    }
+
+    #[test]
+    fn test_generation_update_with_provider_usage_json() {
+        let usage_json = serde_json::json!({
+            "cost": 0.95,
+            "cost_details": {"upstream_inference_cost": 0.85},
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        });
+
+        let update = GenerationUpdate::new()
+            .with_usage(12, 8)
+            .with_provider_usage_json(&usage_json);
+
+        let usage = update.usage.unwrap();
+        assert_eq!(usage.input_tokens, Some(12));
+        assert_eq!(usage.output_tokens, Some(8));
+        assert_eq!(usage.cost_usd, Some(0.95));
+        assert_eq!(usage.upstream_cost_usd, Some(0.85));
+        assert_eq!(usage.reasoning_tokens, Some(5));
+    }
+
+    #[test]
+    fn test_update_generation_emits_provider_cost_attributes() {
+        use crate::otel::testing::setup_test_provider;
+        use opentelemetry::trace::TracerProvider;
+        use opentelemetry::Value;
+
+        let (provider, exporter) = setup_test_provider();
+        let tracer = provider.tracer("test");
+
+        {
+            let mut obs = Observation::start(
+                &tracer,
+                ObservationConfig::generation("chat", "gpt-4o-mini"),
+            );
+            obs.update_generation(GenerationUpdate::new().with_full_usage(Usage {
+                input_tokens: Some(12),
+                output_tokens: Some(8),
+                total_tokens: Some(20),
+                reasoning_tokens: Some(5),
+                cost_usd: Some(0.95),
+                upstream_cost_usd: Some(0.85),
+            }));
+        }
+
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        let attr_value = |key: &str| {
+            span.attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == key)
+                .map(|kv| kv.value.clone())
+        };
+
+        assert_eq!(
+            attr_value(attr::GEN_AI_USAGE_REASONING_TOKENS),
+            Some(Value::I64(5)),
+        );
+        assert_eq!(
+            attr_value(attr::INTROSPECTION_LLM_COST_USD),
+            Some(Value::F64(0.95)),
+        );
+        assert_eq!(
+            attr_value(attr::INTROSPECTION_LLM_UPSTREAM_COST_USD),
+            Some(Value::F64(0.85)),
+        );
+
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_update_generation_omits_cost_attributes_when_unset() {
+        use crate::otel::testing::setup_test_provider;
+        use opentelemetry::trace::TracerProvider;
+
+        let (provider, exporter) = setup_test_provider();
+        let tracer = provider.tracer("test");
+
+        {
+            let mut obs = Observation::start(
+                &tracer,
+                ObservationConfig::generation("chat", "gpt-4o-mini"),
+            );
+            obs.update_generation(GenerationUpdate::new().with_usage(12, 8));
+        }
+
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        for key in [
+            attr::GEN_AI_USAGE_REASONING_TOKENS,
+            attr::INTROSPECTION_LLM_COST_USD,
+            attr::INTROSPECTION_LLM_UPSTREAM_COST_USD,
+        ] {
+            assert!(
+                !span.attributes.iter().any(|kv| kv.key.as_str() == key),
+                "attribute {key} must not be emitted when usage lacks it",
+            );
+        }
+
+        provider.shutdown().unwrap();
     }
 
     #[test]

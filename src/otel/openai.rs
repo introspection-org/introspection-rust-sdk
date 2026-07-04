@@ -51,7 +51,9 @@ use async_openai::types::chat::{
     CompletionUsage, CreateChatCompletionRequest, CreateChatCompletionResponse,
     CreateChatCompletionStreamResponse,
 };
-use async_openai::types::responses::{CreateResponse, OutputItem, Response as ResponsesResponse};
+use async_openai::types::responses::{
+    CreateResponse, OutputItem, Response as ResponsesResponse, ResponseUsage,
+};
 use async_openai::Client;
 use futures::Stream;
 use opentelemetry::trace::{Span, Tracer};
@@ -61,7 +63,7 @@ use crate::otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
-use crate::otel::observation::{GenerationUpdate, Observation, ObservationConfig};
+use crate::otel::observation::{GenerationUpdate, Observation, ObservationConfig, Usage};
 
 /// Convert a slice of OpenAI request messages to typed [`InputMessage`] structs.
 pub fn convert_request_messages(messages: &[ChatCompletionRequestMessage]) -> Vec<InputMessage> {
@@ -192,6 +194,52 @@ pub fn convert_response_choices(
         .collect()
 }
 
+/// Build a [`Usage`] from a Chat Completions usage block.
+///
+/// Captures token counts plus provider-reported extensions:
+/// `completion_tokens_details.reasoning_tokens`, and — when the raw usage
+/// block carries them (OpenRouter-style `cost` /
+/// `cost_details.upstream_inference_cost`) — provider-reported cost.
+/// Absent or malformed extension fields are skipped.
+pub fn usage_from_completion_usage(usage: &CompletionUsage) -> Usage {
+    let mut result = Usage {
+        input_tokens: Some(i64::from(usage.prompt_tokens)),
+        output_tokens: Some(i64::from(usage.completion_tokens)),
+        total_tokens: Some(i64::from(usage.total_tokens)),
+        reasoning_tokens: usage
+            .completion_tokens_details
+            .as_ref()
+            .and_then(|details| details.reasoning_tokens)
+            .map(i64::from),
+        ..Usage::default()
+    };
+    if let Ok(usage_json) = serde_json::to_value(usage) {
+        result.apply_provider_usage_json(&usage_json);
+    }
+    result
+}
+
+/// Build a [`Usage`] from a Responses API usage block.
+///
+/// Captures token counts plus `output_tokens_details.reasoning_tokens`
+/// (emitted only when non-zero — the Responses schema always includes the
+/// field, so zero means "no reasoning") and any provider-reported cost
+/// extensions present in the raw usage block.
+pub fn usage_from_response_usage(usage: &ResponseUsage) -> Usage {
+    let reasoning_tokens = usage.output_tokens_details.reasoning_tokens;
+    let mut result = Usage {
+        input_tokens: Some(i64::from(usage.input_tokens)),
+        output_tokens: Some(i64::from(usage.output_tokens)),
+        total_tokens: Some(i64::from(usage.total_tokens)),
+        reasoning_tokens: (reasoning_tokens > 0).then(|| i64::from(reasoning_tokens)),
+        ..Usage::default()
+    };
+    if let Ok(usage_json) = serde_json::to_value(usage) {
+        result.apply_provider_usage_json(&usage_json);
+    }
+    result
+}
+
 /// Wraps an OpenAI chat completion call with `tracing` spans carrying
 /// gen_ai semantic convention attributes.
 ///
@@ -212,6 +260,9 @@ pub async fn tracing_traced_chat_completion(
         "gen_ai.response.id" = tracing::field::Empty,
         "gen_ai.usage.input_tokens" = tracing::field::Empty,
         "gen_ai.usage.output_tokens" = tracing::field::Empty,
+        "gen_ai.usage.reasoning_tokens" = tracing::field::Empty,
+        "introspection.llm.cost_usd" = tracing::field::Empty,
+        "introspection.llm.upstream_cost_usd" = tracing::field::Empty,
     );
     let _guard = span.enter();
 
@@ -228,6 +279,18 @@ pub async fn tracing_traced_chat_completion(
                     "gen_ai.usage.output_tokens",
                     i64::from(usage.completion_tokens),
                 );
+                let full_usage = usage_from_completion_usage(usage);
+                if let Some(reasoning_tokens) = full_usage.reasoning_tokens {
+                    tracing::Span::current()
+                        .record("gen_ai.usage.reasoning_tokens", reasoning_tokens);
+                }
+                if let Some(cost_usd) = full_usage.cost_usd {
+                    tracing::Span::current().record("introspection.llm.cost_usd", cost_usd);
+                }
+                if let Some(upstream_cost_usd) = full_usage.upstream_cost_usd {
+                    tracing::Span::current()
+                        .record("introspection.llm.upstream_cost_usd", upstream_cost_usd);
+                }
             }
         }
         Err(e) => {
@@ -314,19 +377,16 @@ pub async fn traced_chat_completion<S: Span, T: Tracer<Span = S>>(
         Ok(response) => {
             let output_messages = convert_response_choices(&response.choices);
 
-            let (input_tokens, output_tokens) = response
-                .usage
-                .as_ref()
-                .map(|u| (i64::from(u.prompt_tokens), i64::from(u.completion_tokens)))
-                .unwrap_or((0, 0));
+            let update = GenerationUpdate::new()
+                .with_response_model(&response.model)
+                .with_response_id(&response.id)
+                .with_output(output_messages);
+            let update = match response.usage.as_ref() {
+                Some(usage) => update.with_full_usage(usage_from_completion_usage(usage)),
+                None => update.with_usage(0, 0),
+            };
 
-            obs.update_generation(
-                GenerationUpdate::new()
-                    .with_response_model(&response.model)
-                    .with_response_id(&response.id)
-                    .with_output(output_messages)
-                    .with_usage(input_tokens, output_tokens),
-            );
+            obs.update_generation(update);
             obs.set_ok();
         }
         Err(e) => {
@@ -379,10 +439,7 @@ impl<S: Span> TracedStream<S> {
                 update = update.with_response_model(model);
             }
             if let Some(ref usage) = self.final_usage {
-                update = update.with_usage(
-                    i64::from(usage.prompt_tokens),
-                    i64::from(usage.completion_tokens),
-                );
+                update = update.with_full_usage(usage_from_completion_usage(usage));
             }
 
             obs.update_generation(update);
@@ -624,19 +681,17 @@ pub async fn traced_responses_create<S: Span, T: Tracer<Span = S>>(
     match &result {
         Ok(response) => {
             let output_messages = convert_responses_output(&response.output);
-            let (input_tokens, output_tokens) = response
-                .usage
-                .as_ref()
-                .map(|u| (i64::from(u.input_tokens), i64::from(u.output_tokens)))
-                .unwrap_or((0, 0));
 
-            obs.update_generation(
-                GenerationUpdate::new()
-                    .with_response_model(&response.model)
-                    .with_response_id(&response.id)
-                    .with_output(output_messages)
-                    .with_usage(input_tokens, output_tokens),
-            );
+            let update = GenerationUpdate::new()
+                .with_response_model(&response.model)
+                .with_response_id(&response.id)
+                .with_output(output_messages);
+            let update = match response.usage.as_ref() {
+                Some(usage) => update.with_full_usage(usage_from_response_usage(usage)),
+                None => update.with_usage(0, 0),
+            };
+
+            obs.update_generation(update);
             obs.set_ok();
         }
         Err(e) => {
@@ -927,6 +982,112 @@ mod tests {
         let termination = attr_value(span, attr::INTROSPECTION_TERMINATION_REASON)
             .expect("termination_reason attribute present");
         assert_eq!(*termination, Value::String(StringValue::from("cancelled")));
+
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn usage_from_completion_usage_captures_reasoning_tokens() {
+        let usage: CompletionUsage = serde_json::from_str(
+            r#"{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20,"completion_tokens_details":{"reasoning_tokens":5}}"#,
+        )
+        .unwrap();
+
+        let converted = usage_from_completion_usage(&usage);
+        assert_eq!(converted.input_tokens, Some(12));
+        assert_eq!(converted.output_tokens, Some(8));
+        assert_eq!(converted.total_tokens, Some(20));
+        assert_eq!(converted.reasoning_tokens, Some(5));
+        // async-openai's typed CompletionUsage does not carry OpenRouter's
+        // cost extensions, so they must stay unset here.
+        assert_eq!(converted.cost_usd, None);
+        assert_eq!(converted.upstream_cost_usd, None);
+    }
+
+    #[test]
+    fn usage_from_completion_usage_without_details_leaves_extensions_unset() {
+        let usage: CompletionUsage =
+            serde_json::from_str(r#"{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}"#)
+                .unwrap();
+
+        let converted = usage_from_completion_usage(&usage);
+        assert_eq!(converted.reasoning_tokens, None);
+        assert_eq!(converted.cost_usd, None);
+        assert_eq!(converted.upstream_cost_usd, None);
+    }
+
+    #[test]
+    fn usage_from_response_usage_captures_reasoning_tokens() {
+        let usage: ResponseUsage = serde_json::from_str(
+            r#"{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":8,"output_tokens_details":{"reasoning_tokens":5},"total_tokens":20}"#,
+        )
+        .unwrap();
+
+        let converted = usage_from_response_usage(&usage);
+        assert_eq!(converted.input_tokens, Some(12));
+        assert_eq!(converted.output_tokens, Some(8));
+        assert_eq!(converted.total_tokens, Some(20));
+        assert_eq!(converted.reasoning_tokens, Some(5));
+        assert_eq!(converted.cost_usd, None);
+        assert_eq!(converted.upstream_cost_usd, None);
+    }
+
+    #[test]
+    fn usage_from_response_usage_zero_reasoning_is_not_reported() {
+        let usage: ResponseUsage = serde_json::from_str(
+            r#"{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":8,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":20}"#,
+        )
+        .unwrap();
+
+        let converted = usage_from_response_usage(&usage);
+        assert_eq!(converted.reasoning_tokens, None);
+    }
+
+    // A drained stream whose final usage chunk carries
+    // completion_tokens_details.reasoning_tokens emits the reasoning-token
+    // attribute; the cost attributes stay absent because the typed usage
+    // block carries no provider cost.
+    #[tokio::test]
+    async fn stream_final_usage_emits_reasoning_tokens() {
+        let (provider, exporter) = setup_test_provider();
+        let tracer = provider.tracer("test");
+
+        {
+            let obs = Observation::start(
+                &tracer,
+                ObservationConfig::generation("chat", "gpt-4o-mini"),
+            );
+            let mut stream = traced_stream_over(
+                obs,
+                vec![
+                    chunk(
+                        r#"{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}],"usage":null}"#,
+                    ),
+                    chunk(
+                        r#"{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o-mini","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20,"completion_tokens_details":{"reasoning_tokens":5}}}"#,
+                    ),
+                ],
+            );
+
+            while stream.next().await.is_some() {}
+        }
+
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+
+        assert_eq!(
+            attr_value(span, attr::GEN_AI_USAGE_REASONING_TOKENS),
+            Some(&Value::I64(5)),
+        );
+        assert!(
+            attr_value(span, attr::INTROSPECTION_LLM_COST_USD).is_none(),
+            "cost must not be emitted when the provider did not report it",
+        );
+        assert!(
+            attr_value(span, attr::INTROSPECTION_LLM_UPSTREAM_COST_USD).is_none(),
+            "upstream cost must not be emitted when the provider did not report it",
+        );
 
         provider.shutdown().unwrap();
     }
