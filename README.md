@@ -8,7 +8,7 @@
   </a>
 </div>
 
-<h4 align="center">Build frontier AI systems that self-improve.</h4>
+<h4 align="center">Deploy vertical agents that improve in production.</h4>
 
 <div align="center">
   <a href="https://introspection.dev"><img src="https://img.shields.io/badge/website-introspection.dev-blue" alt="Website"></a>
@@ -19,7 +19,17 @@
 
 <br>
 
-[Introspection](https://introspection.dev) continuously improves your AI systems with production feedback and frontier practices. This is the Rust SDK.
+[Introspection](https://introspection.dev) is the managed cloud for vertical
+agents, powered by Pi. Define an agent as a recipe, deploy it to a
+commit-pinned runtime, and improve it in production with conversations,
+patterns, judges, and experiments.
+
+This is the native Rust client for driving Introspection runtimes and tasks,
+alongside optional analytics and OpenTelemetry surfaces. Use
+`IntrospectionClient` to open a runner against a deployed runtime, start a task,
+and stream its output. See the [platform SDK overview](https://docs.introspection.dev/sdk)
+for the wider product workflow and the JavaScript, Python, browser, and CLI
+clients.
 
 The SDK exposes **three independent surfaces** — wire up only what you need:
 
@@ -47,7 +57,7 @@ With logs/traces export:
 introspection-sdk = { version = "0.1", features = ["otel"] }
 ```
 
-With the `async-openai` adapter for instrumented LLM calls:
+The `async-openai` adapter is experimental:
 
 ```toml
 [dependencies]
@@ -59,7 +69,7 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 | Feature   | Description                                                        |
 | --------- | ------------------------------------------------------------------ |
 | `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
-| `openai`  | `async-openai` integration — `traced_chat_completion` and friends (implies `otel`) |
+| `openai`  | Experimental `async-openai` support (implies `otel`)            |
 | `testing` | In-memory span exporter and test helpers (implies `otel`)          |
 
 ## Three surfaces
@@ -267,8 +277,10 @@ Observations nest automatically via OpenTelemetry context propagation.
 
 ### `async-openai` integration
 
-Requires the `openai` feature. Wraps `async-openai` chat and responses
-calls with automatic span instrumentation.
+> **Experimental integration.**
+
+Requires the `openai` feature. Wraps `async-openai` calls with span
+instrumentation.
 
 ```rust
 use async_openai::Client;
