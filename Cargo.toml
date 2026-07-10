@@ -28,6 +28,8 @@ otel = [
     "dep:opentelemetry-otlp",
 ]
 testing = ["otel", "opentelemetry_sdk/testing"]
+# Experimental legacy framework adapter. Unsupported and excluded from the
+# current product surface.
 openai = ["otel", "dep:async-openai"]
 
 [dependencies]

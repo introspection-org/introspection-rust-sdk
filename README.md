@@ -47,7 +47,7 @@ With logs/traces export:
 introspection-sdk = { version = "0.1", features = ["otel"] }
 ```
 
-With the `async-openai` adapter for instrumented LLM calls:
+The legacy `async-openai` adapter is experimental and unsupported:
 
 ```toml
 [dependencies]
@@ -59,7 +59,7 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 | Feature   | Description                                                        |
 | --------- | ------------------------------------------------------------------ |
 | `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
-| `openai`  | `async-openai` integration — `traced_chat_completion` and friends (implies `otel`) |
+| `openai`  | Experimental legacy `async-openai` integration (implies `otel`) |
 | `testing` | In-memory span exporter and test helpers (implies `otel`)          |
 
 ## Three surfaces
@@ -267,8 +267,11 @@ Observations nest automatically via OpenTelemetry context propagation.
 
 ### `async-openai` integration
 
-Requires the `openai` feature. Wraps `async-openai` chat and responses
-calls with automatic span instrumentation.
+> **Experimental legacy integration.** This feature is unsupported and may
+> change or be removed in a minor release. Do not use it for new integrations.
+
+Requires the `openai` feature. Wraps `async-openai` calls with span
+instrumentation.
 
 ```rust
 use async_openai::Client;
