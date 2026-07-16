@@ -99,16 +99,21 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    Arm, Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus, ExperimentUpdate,
+    Arm, Conversation, ConversationListParams, Conversations, Dimension, Event, EventListParams,
+    Events, Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus, ExperimentUpdate,
     File, FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
-    IntrospectionAPIError, Paginated, PaginationParams, Paginator, Project, ProjectListParams,
-    Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository, RepositoryListParams,
-    RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
-    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
-    RuntimeUpdate, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
-    TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks, UploadSource,
+    HavingTerm, IntrospectionAPIError, MetricFilter, MetricSpec, Metrics, MetricsConfig,
+    MetricsQuery, MetricsResponse, OrderTerm, Paginated, PaginationParams, Paginator, Project,
+    ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
+    RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest,
+    RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate,
+    RuntimeListParams, RuntimeUpdate, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
+    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
+    TaskRun, TaskRunCreate, TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TimeDimension, UploadSource,
 };
+#[cfg(feature = "arrow")]
+pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // AG-UI protocol event surface yielded by the task-run stream. The full
 // taxonomy lives in `crate::agui`; these aliases give the common types a
 // discoverable name at the crate root (`Event` alone would be ambiguous).
