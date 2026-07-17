@@ -1295,25 +1295,22 @@ impl ConversationListParams {
 /// rows are normalized to these canonical names server-side; anything outside
 /// the set (`gen_ai.*`, customer / `track()` events) is not returned and
 /// remains aggregable via `POST /v1/metrics`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntrospectionEventName {
-    #[serde(rename = "introspection.feedback")]
     Feedback,
-    #[serde(rename = "introspection.observation")]
     Observation,
-    #[serde(rename = "introspection.observation_clustering.run")]
     ObservationClusteringRun,
-    #[serde(rename = "introspection.judgement")]
     Judgement,
-    #[serde(rename = "introspection.pattern")]
     Pattern,
-    #[serde(rename = "introspection.pattern.assignment")]
     PatternAssignment,
+    /// A family added after this SDK was released. Keeping the wire value
+    /// makes the [`Event::Unknown`] response fallback reachable in practice.
+    Unknown(String),
 }
 
 impl IntrospectionEventName {
     /// On-the-wire dotted family name.
-    pub const fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Feedback => "introspection.feedback",
             Self::Observation => "introspection.observation",
@@ -1321,7 +1318,29 @@ impl IntrospectionEventName {
             Self::Judgement => "introspection.judgement",
             Self::Pattern => "introspection.pattern",
             Self::PatternAssignment => "introspection.pattern.assignment",
+            Self::Unknown(value) => value,
         }
+    }
+}
+
+impl Serialize for IntrospectionEventName {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for IntrospectionEventName {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "introspection.feedback" => Self::Feedback,
+            "introspection.observation" => Self::Observation,
+            "introspection.observation_clustering.run" => Self::ObservationClusteringRun,
+            "introspection.judgement" => Self::Judgement,
+            "introspection.pattern" => Self::Pattern,
+            "introspection.pattern.assignment" => Self::PatternAssignment,
+            _ => Self::Unknown(value),
+        })
     }
 }
 
@@ -1649,6 +1668,15 @@ impl EventListParams {
             include_total: self.include_total,
         }
         .apply(&mut obj)?;
+        if self
+            .filters
+            .as_ref()
+            .is_some_and(|filters| filters.contains_key("event_name"))
+        {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "event_name is reserved; select the family with EventListParams::new".to_string(),
+            ));
+        }
         merge_filters(&mut obj, self.filters.as_ref());
         Ok(serde_json::Value::Object(obj))
     }
@@ -2055,6 +2083,21 @@ mod tests {
     }
 
     #[test]
+    fn event_params_reject_event_name_filter_override() {
+        let params = EventListParams {
+            filters: Some(HashMap::from([(
+                "event_name".to_string(),
+                json!("introspection.pattern"),
+            )])),
+            ..EventListParams::new(IntrospectionEventName::Feedback)
+        };
+
+        let err = params.to_wire().unwrap_err().to_string();
+        assert!(err.contains("event_name"), "{err}");
+        assert!(err.contains("EventListParams::new"), "{err}");
+    }
+
+    #[test]
     fn introspection_event_name_serde_uses_dotted_names() {
         for (variant, wire) in [
             (IntrospectionEventName::Feedback, "introspection.feedback"),
@@ -2074,10 +2117,23 @@ mod tests {
             ),
         ] {
             assert_eq!(variant.as_str(), wire);
-            assert_eq!(serde_json::to_value(variant).unwrap(), json!(wire));
+            assert_eq!(serde_json::to_value(&variant).unwrap(), json!(wire));
             let back: IntrospectionEventName = serde_json::from_value(json!(wire)).unwrap();
             assert_eq!(back, variant);
         }
+
+        let future: IntrospectionEventName =
+            serde_json::from_value(json!("introspection.future.family")).unwrap();
+        assert_eq!(
+            future,
+            IntrospectionEventName::Unknown("introspection.future.family".to_string())
+        );
+        assert_eq!(
+            serde_json::to_value(&future).unwrap(),
+            json!("introspection.future.family")
+        );
+        let wire = EventListParams::new(future).to_wire().unwrap();
+        assert_eq!(wire["event_name"], "introspection.future.family");
     }
 
     #[test]
