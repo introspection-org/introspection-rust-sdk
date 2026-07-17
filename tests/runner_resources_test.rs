@@ -11,10 +11,11 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    ConversationListParams, Conversations, EventListParams, Events, FileCreateText, FileListParams,
-    FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError,
-    MetricSpec, Metrics, MetricsQuery, PaginationParams, SortDirection, TaskCreate, TaskListParams,
-    TaskMode, TaskRunCreate, TaskRuns, TaskUpdate, Tasks,
+    ConversationListParams, Conversations, Event, EventListParams, Events, FileCreateText,
+    FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
+    IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
+    PaginationParams, SortDirection, TaskCreate, TaskListParams, TaskMode, TaskRunCreate, TaskRuns,
+    TaskUpdate, Tasks,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -496,16 +497,31 @@ async fn conversations_list_rejects_lookback_with_start_before_send() {
 }
 
 #[tokio::test]
-async fn events_list_sends_grain_and_pattern_id() {
+async fn events_list_sends_required_event_name_and_family_filters() {
     let server = MockServer::start().await;
     let events = Events::new(build_http(&server));
 
+    // `event_name` is required (compile-enforced — `EventListParams` has no
+    // `Default`; the family must be named to construct the params) and lands
+    // on the wire alongside the verbatim family-scoped filters.
     Mock::given(method("GET"))
         .and(path("/v1/events"))
-        .and(query_param("grain", "introspection.observation"))
+        .and(query_param("event_name", "introspection.observation"))
         .and(query_param("pattern_id", "pat_1"))
+        .and(query_param_is_missing("grain"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "records": [{"event_id": "e1", "name": "obs"}],
+            "records": [{
+                "id": "e1",
+                "timestamp": "2026-07-01T00:00:00Z",
+                "event_name": "introspection.observation",
+                "conversation_id": "conv_1",
+                "payload": {
+                    "observation_id": "00000000-0000-0000-0000-000000000042",
+                    "lens": "user_frustration",
+                    "pattern_id": "pat_1",
+                    "assignment_score": 0.9,
+                },
+            }],
             "count": 1,
             "next": null,
         })))
@@ -514,14 +530,69 @@ async fn events_list_sends_grain_and_pattern_id() {
 
     let mut paginator = events
         .list(&EventListParams {
-            grain: Some("introspection.observation".into()),
-            pattern_id: Some("pat_1".into()),
-            ..Default::default()
+            filters: Some(HashMap::from([("pattern_id".to_string(), json!("pat_1"))])),
+            ..EventListParams::new(IntrospectionEventName::Observation)
         })
         .expect("params validate");
     let page = paginator.next_page().await.unwrap().unwrap();
     assert_eq!(page.records.len(), 1);
-    assert_eq!(page.records[0].event_id.as_deref(), Some("e1"));
+    let Event::Observation(obs) = &page.records[0] else {
+        panic!("expected Observation, got {:?}", page.records[0]);
+    };
+    assert_eq!(obs.id, "e1");
+    assert_eq!(
+        obs.payload.observation_id.to_string(),
+        "00000000-0000-0000-0000-000000000042"
+    );
+    assert_eq!(obs.payload.pattern_id.as_deref(), Some("pat_1"));
+    assert_eq!(obs.payload.assignment_score, Some(0.9));
+}
+
+#[tokio::test]
+async fn events_list_tolerates_unknown_family_rows() {
+    let server = MockServer::start().await;
+    let events = Events::new(build_http(&server));
+
+    // A row with an unrecognised `event_name` (a family added server-side
+    // after this SDK build) must not fail the whole page.
+    Mock::given(method("GET"))
+        .and(path("/v1/events"))
+        .and(query_param("event_name", "introspection.feedback"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [
+                {
+                    "id": "e1",
+                    "timestamp": "2026-07-01T00:00:00Z",
+                    "event_name": "introspection.feedback",
+                    "payload": {"name": "thumbs_up", "sentiment": "positive"},
+                },
+                {
+                    "id": "e2",
+                    "timestamp": "2026-07-01T00:00:00Z",
+                    "event_name": "introspection.brand_new.family",
+                    "payload": {"anything": 1},
+                },
+            ],
+            "count": 2,
+            "next": null,
+        })))
+        .mount(&server)
+        .await;
+
+    let mut paginator = events
+        .list(&EventListParams::new(IntrospectionEventName::Feedback))
+        .expect("params validate");
+    let page = paginator.next_page().await.unwrap().unwrap();
+    assert_eq!(page.records.len(), 2);
+    let Event::Feedback(fb) = &page.records[0] else {
+        panic!("expected Feedback, got {:?}", page.records[0]);
+    };
+    assert_eq!(fb.payload.name, "thumbs_up");
+    assert_eq!(fb.payload.sentiment.as_deref(), Some("positive"));
+    let Event::Unknown(raw) = &page.records[1] else {
+        panic!("expected Unknown, got {:?}", page.records[1]);
+    };
+    assert_eq!(raw["event_name"], "introspection.brand_new.family");
 }
 
 #[tokio::test]
@@ -614,6 +685,120 @@ async fn conversations_list_arrow_decodes_stream_and_headers() {
     assert_eq!(page.next.as_deref(), Some("cursor_9"));
     assert_eq!(page.count, Some(2));
     assert!(page.truncated);
+}
+
+#[cfg(feature = "arrow")]
+#[tokio::test]
+async fn events_list_arrow_round_trips_struct_payload_column() {
+    use arrow::array::{Array, Float64Array, StringArray, StructArray};
+    use arrow::datatypes::{DataType, Field, Fields, Schema};
+    use arrow::ipc::writer::StreamWriter;
+    use arrow::record_batch::RecordBatch;
+    use std::sync::Arc as StdArc;
+
+    let server = MockServer::start().await;
+    let events = Events::new(build_http(&server));
+
+    // Single-family response (feedback): constant envelope columns + one
+    // typed Arrow `struct` payload column — no JSON-blob fallback.
+    let payload_fields = Fields::from(vec![
+        Field::new("name", DataType::Utf8, false),
+        Field::new("value", DataType::Float64, true),
+        Field::new("sentiment", DataType::Utf8, true),
+    ]);
+    let schema = StdArc::new(Schema::new(vec![
+        Field::new("id", DataType::Utf8, false),
+        Field::new("timestamp", DataType::Utf8, false),
+        Field::new("event_name", DataType::Utf8, false),
+        Field::new("conversation_id", DataType::Utf8, true),
+        Field::new("payload", DataType::Struct(payload_fields.clone()), false),
+    ]));
+    let payload = StructArray::new(
+        payload_fields,
+        vec![
+            StdArc::new(StringArray::from(vec!["thumbs_up", "thumbs_down"])) as _,
+            StdArc::new(Float64Array::from(vec![Some(1.0), Some(-1.0)])) as _,
+            StdArc::new(StringArray::from(vec![Some("positive"), Some("negative")])) as _,
+        ],
+        None,
+    );
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            StdArc::new(StringArray::from(vec!["e1", "e2"])),
+            StdArc::new(StringArray::from(vec![
+                "2026-07-01T00:00:00Z",
+                "2026-07-01T00:00:01Z",
+            ])),
+            StdArc::new(StringArray::from(vec![
+                "introspection.feedback",
+                "introspection.feedback",
+            ])),
+            StdArc::new(StringArray::from(vec![Some("conv_1"), None])),
+            StdArc::new(payload),
+        ],
+    )
+    .unwrap();
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut writer = StreamWriter::try_new(&mut buf, &schema).unwrap();
+        writer.write(&batch).unwrap();
+        writer.finish().unwrap();
+    }
+
+    Mock::given(method("GET"))
+        .and(path("/v1/events"))
+        .and(query_param("event_name", "introspection.feedback"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/vnd.apache.arrow.stream")
+                .insert_header("x-result-count", "2")
+                .set_body_bytes(buf),
+        )
+        .mount(&server)
+        .await;
+
+    let page = events
+        .list_arrow(&EventListParams::new(IntrospectionEventName::Feedback))
+        .await
+        .unwrap();
+    assert_eq!(page.num_rows(), 2);
+    assert_eq!(page.count, Some(2));
+
+    // The payload arrives as a typed struct column inside the batches.
+    let decoded = &page.batches[0];
+    let payload_col = decoded
+        .column_by_name("payload")
+        .expect("payload column present");
+    assert!(matches!(payload_col.data_type(), DataType::Struct(_)));
+    let payload = payload_col
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .expect("payload is a StructArray");
+    let names = payload
+        .column_by_name("name")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(names.value(0), "thumbs_up");
+    assert_eq!(names.value(1), "thumbs_down");
+    let values = payload
+        .column_by_name("value")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .unwrap();
+    assert_eq!(values.value(0), 1.0);
+    assert_eq!(values.value(1), -1.0);
+    // Envelope columns are constant across families and ride alongside.
+    let event_names = decoded
+        .column_by_name("event_name")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(event_names.value(0), "introspection.feedback");
 }
 
 fn file_response(name: &str) -> serde_json::Value {

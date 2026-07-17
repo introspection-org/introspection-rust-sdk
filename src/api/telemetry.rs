@@ -91,16 +91,28 @@ impl Events {
         Self { http }
     }
 
-    /// `GET /v1/events` — cursor paginator (JSON). Supports the omitted/`raw`,
-    /// `introspection.observation`, and `introspection.pattern` grains via
-    /// [`EventListParams::grain`] / [`EventListParams::pattern_id`].
+    /// `GET /v1/events` — cursor paginator (JSON).
+    ///
+    /// [`EventListParams::event_name`] is **required** (compile-enforced) —
+    /// exactly one of the six canonical families per request, so every page
+    /// is homogeneous and each record deserializes into the matching typed
+    /// [`Event`] variant (envelope + nested typed payload). Rows whose
+    /// `event_name` this SDK build doesn't recognise surface as
+    /// [`Event::Unknown`] rather than failing the page. Per-family filters
+    /// (e.g. observation `pattern_id` / `lens` / `include_superseded`,
+    /// pattern `lens` / `status`) pass through
+    /// [`EventListParams::filters`] verbatim.
+    ///
+    /// [`Event::Unknown`]: crate::api::schemas::Event::Unknown
     pub fn list(&self, params: &EventListParams) -> ApiResult<Paginator<Event>> {
         let wire = params.to_wire()?;
         Paginator::new(self.http.clone(), "/v1/events", &wire)
     }
 
-    /// `GET /v1/events` as an Arrow stream — one Arrow page. Requires the
-    /// `arrow` feature.
+    /// `GET /v1/events` as an Arrow stream — one Arrow page. Because the
+    /// response is always single-family, the envelope arrives as constant
+    /// typed columns and the family payload as one typed Arrow `struct`
+    /// column (no JSON-blob fallback). Requires the `arrow` feature.
     #[cfg(feature = "arrow")]
     pub async fn list_arrow(&self, params: &EventListParams) -> ApiResult<ArrowPage> {
         let wire = params.to_wire()?;

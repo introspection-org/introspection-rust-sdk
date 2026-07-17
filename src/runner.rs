@@ -145,8 +145,8 @@ impl Runner {
     }
 
     /// `runner.events.*` — Data-Plane telemetry reads over `GET /v1/events`
-    /// (append-only `otel_logs`; observation / pattern grains). Runner-scoped
-    /// (DP bearer + `events:read`). Cheap clone.
+    /// (append-only `otel_logs`; typed six-family read, `event_name`
+    /// required). Runner-scoped (DP bearer + `events:read`). Cheap clone.
     pub fn events(&self) -> Events {
         let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
         Events::new(http)

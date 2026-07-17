@@ -99,18 +99,21 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    Arm, Conversation, ConversationListParams, Conversations, Dimension, Event, EventListParams,
-    Events, Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus, ExperimentUpdate,
-    File, FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
-    HavingTerm, IntrospectionAPIError, MetricFilter, MetricSpec, Metrics, MetricsConfig,
-    MetricsQuery, MetricsResponse, OrderTerm, Paginated, PaginationParams, Paginator, Project,
+    Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
+    Conversations, Dimension, Event, EventListParams, Events, Experiment, ExperimentCreate,
+    ExperimentListParams, ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File,
+    FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
+    HavingTerm, IntrospectionAPIError, IntrospectionEventName, JudgementEvent, JudgementPayload,
+    MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery, MetricsResponse,
+    ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams, Paginator,
+    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest,
     RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate,
     RuntimeListParams, RuntimeUpdate, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
     TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
     TaskRun, TaskRunCreate, TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TimeDimension, UploadSource,
+    TimeDimension, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
