@@ -1284,29 +1284,310 @@ impl ConversationListParams {
     }
 }
 
-/// One event record from `GET /v1/events` (append-only `otel_logs`). Supports
-/// the omitted/`raw`, `introspection.observation`, and `introspection.pattern`
-/// grains. Open attributes ride along in [`Self::extra`].
+// ----- events: typed six-family read (`GET /v1/events`) ----------------------
+
+/// The six canonical platform event families served by `GET /v1/events`.
+///
+/// The events read is a **closed, typed set**: `event_name` is required on
+/// every list read — exactly one family per request — so a response page is
+/// always homogeneous and fully typeable (JSON discriminated member; Arrow
+/// typed payload struct column). Legacy verb-suffixed names on historical
+/// rows are normalized to these canonical names server-side; anything outside
+/// the set (`gen_ai.*`, customer / `track()` events) is not returned and
+/// remains aggregable via `POST /v1/metrics`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum IntrospectionEventName {
+    #[serde(rename = "introspection.feedback")]
+    Feedback,
+    #[serde(rename = "introspection.observation")]
+    Observation,
+    #[serde(rename = "introspection.observation_clustering.run")]
+    ObservationClusteringRun,
+    #[serde(rename = "introspection.judgement")]
+    Judgement,
+    #[serde(rename = "introspection.pattern")]
+    Pattern,
+    #[serde(rename = "introspection.pattern.assignment")]
+    PatternAssignment,
+}
+
+impl IntrospectionEventName {
+    /// On-the-wire dotted family name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Feedback => "introspection.feedback",
+            Self::Observation => "introspection.observation",
+            Self::ObservationClusteringRun => "introspection.observation_clustering.run",
+            Self::Judgement => "introspection.judgement",
+            Self::Pattern => "introspection.pattern",
+            Self::PatternAssignment => "introspection.pattern.assignment",
+        }
+    }
+}
+
+impl fmt::Display for IntrospectionEventName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Common envelope shared by every typed event family — the queryable
+/// surface. `org`/`project` never appear on the wire (tenant scope is implied
+/// by auth). The `event_name` discriminator lives on the [`Event`] enum tag,
+/// not duplicated here.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Event {
+pub struct TypedEvent<P> {
+    pub id: String,
+    /// Per-family semantics: observation → `observed_at`, pattern →
+    /// `updated_at` (catalog cursor), stream families → emit/observed time.
+    pub timestamp: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event_id: Option<String>,
+    pub trace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub service_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<String>,
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_git_commit_sha: Option<String>,
+    /// Family detail — one of the six `*Payload` types, fixed by the
+    /// [`Event`] variant.
+    pub payload: P,
 }
 
-/// Ergonomic params for `GET /v1/events`. Adds the documented `grain` /
-/// `pattern_id` filters ("a pattern's observations" is client-composed:
-/// `grain=introspection.pattern` for catalog rows,
-/// `grain=introspection.observation&pattern_id=X` for resolved observations).
-#[derive(Debug, Clone, Default)]
+/// `introspection.observation` payload — one **resolved** observation (the
+/// server-side fold: supersession applied, current pattern assignment
+/// joined). All fields optional except the `observation_id` identity.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ObservationPayload {
+    pub observation_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentiment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_refs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces_observation_id: Option<Uuid>,
+    /// CURRENT pattern assignment (fold), not the assignment history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignment_score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignment_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// `introspection.pattern` payload — one **folded** catalog row (current
+/// state: latest lifecycle action, status, fold timestamps).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PatternPayload {
+    pub pattern_id: String,
+    /// Latest lifecycle action (`created` / `updated` / `retired`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens: Option<String>,
+    /// `active` | `retired` (fold).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retired_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_detected_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_pattern_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_from_pattern_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+}
+
+/// `introspection.pattern.assignment` payload — one observation→pattern
+/// assignment event (stream family).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PatternAssignmentPayload {
+    pub observation_id: Uuid,
+    pub pattern_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+}
+
+/// `introspection.observation_clustering.run` payload — one clustering run
+/// (stream family).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClusteringRunPayload {
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `introspection.feedback` payload — mirrors what the SDK `feedback()`
+/// surfaces actually emit (`properties.*` / `identity.*` attributes).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FeedbackPayload {
+    /// The feedback label (`"thumbs_up"`, …) — `properties.name`.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<String>,
+    /// Numeric axis, when present — `properties.value`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anonymous_id: Option<String>,
+    /// Optional **emitted** field (positive/negative/neutral) — never derived
+    /// server-side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentiment: Option<String>,
+    /// Remaining `properties.*` extras.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub properties: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// `introspection.judgement` payload — mirrors the runtime-agent judges
+/// emitter (`introspection.judgement.*` / `introspection.judge.*` attributes).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JudgementPayload {
+    pub judgement_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_arm_id: Option<Uuid>,
+}
+
+/// Whole-event envelope + typed payload per family.
+pub type ObservationEvent = TypedEvent<ObservationPayload>;
+pub type PatternEvent = TypedEvent<PatternPayload>;
+pub type PatternAssignmentEvent = TypedEvent<PatternAssignmentPayload>;
+pub type ClusteringRunEvent = TypedEvent<ClusteringRunPayload>;
+pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
+pub type JudgementEvent = TypedEvent<JudgementPayload>;
+
+/// One event from `GET /v1/events` — a discriminated union of the six
+/// canonical platform families, tagged by the top-level `event_name`.
+///
+/// Because `event_name` is required on the list read, a page is always
+/// homogeneous — every record matches the requested family. The hidden
+/// [`Event::Unknown`] fallback tolerates a family this SDK build doesn't know
+/// yet (a seventh family added server-side must not fail the whole page);
+/// match on it to skip or hand-parse such rows.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "event_name")]
+pub enum Event {
+    #[serde(rename = "introspection.feedback")]
+    Feedback(FeedbackEvent),
+    #[serde(rename = "introspection.observation")]
+    Observation(ObservationEvent),
+    #[serde(rename = "introspection.observation_clustering.run")]
+    ObservationClusteringRun(ClusteringRunEvent),
+    #[serde(rename = "introspection.judgement")]
+    Judgement(JudgementEvent),
+    #[serde(rename = "introspection.pattern")]
+    Pattern(PatternEvent),
+    #[serde(rename = "introspection.pattern.assignment")]
+    PatternAssignment(PatternAssignmentEvent),
+    /// Forward-compatible escape hatch: a row whose `event_name` this SDK
+    /// build doesn't recognise. Carries the raw record verbatim.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+impl Event {
+    /// The canonical family, or `None` for [`Event::Unknown`] rows.
+    pub fn event_name(&self) -> Option<IntrospectionEventName> {
+        match self {
+            Self::Feedback(_) => Some(IntrospectionEventName::Feedback),
+            Self::Observation(_) => Some(IntrospectionEventName::Observation),
+            Self::ObservationClusteringRun(_) => {
+                Some(IntrospectionEventName::ObservationClusteringRun)
+            }
+            Self::Judgement(_) => Some(IntrospectionEventName::Judgement),
+            Self::Pattern(_) => Some(IntrospectionEventName::Pattern),
+            Self::PatternAssignment(_) => Some(IntrospectionEventName::PatternAssignment),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
+/// Ergonomic params for `GET /v1/events`. [`Self::event_name`] is
+/// **required** (compile-enforced) — exactly one family per request, so the
+/// response is always homogeneous. Per-family filters (§4.3 of the telemetry
+/// read design — e.g. observation `pattern_id` / `lens` /
+/// `include_superseded`, pattern `lens` / `status`) pass through
+/// [`Self::filters`] verbatim.
+#[derive(Debug, Clone)]
 pub struct EventListParams {
+    /// The one family to list — required; there is no unfiltered read.
+    pub event_name: IntrospectionEventName,
     pub limit: Option<u32>,
     pub next: Option<String>,
     pub sort: Option<String>,
@@ -1315,21 +1596,35 @@ pub struct EventListParams {
     pub end: Option<String>,
     pub lookback: Option<String>,
     pub include_total: Option<bool>,
-    /// Event grain — omitted/`raw`, `introspection.observation`, or
-    /// `introspection.pattern`.
-    pub grain: Option<String>,
-    /// Resolve a specific pattern's observations
-    /// (with `grain=introspection.observation`).
-    pub pattern_id: Option<String>,
-    /// Arbitrary additional resource filters merged verbatim.
+    /// Envelope + family-scoped filters merged verbatim onto the query
+    /// string. A filter outside the requested family's allow-map is a 422.
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl EventListParams {
+    /// Params for one family with every optional field unset. Combine with
+    /// struct-update syntax:
+    /// `EventListParams { limit: Some(10), ..EventListParams::new(family) }`.
+    pub fn new(event_name: IntrospectionEventName) -> Self {
+        Self {
+            event_name,
+            limit: None,
+            next: None,
+            sort: None,
+            order: None,
+            start: None,
+            end: None,
+            lookback: None,
+            include_total: None,
+            filters: None,
+        }
+    }
+
     /// Validate and lower to the wire query object (see
     /// [`ConversationListParams::to_wire`]).
     pub fn to_wire(&self) -> ApiResult<serde_json::Value> {
         let mut obj = serde_json::Map::new();
+        obj.insert("event_name".to_string(), self.event_name.as_str().into());
         Window {
             limit: self.limit,
             next: self.next.as_deref(),
@@ -1341,12 +1636,6 @@ impl EventListParams {
             include_total: self.include_total,
         }
         .apply(&mut obj)?;
-        if let Some(grain) = &self.grain {
-            obj.insert("grain".to_string(), grain.clone().into());
-        }
-        if let Some(pattern_id) = &self.pattern_id {
-            obj.insert("pattern_id".to_string(), pattern_id.clone().into());
-        }
         merge_filters(&mut obj, self.filters.as_ref());
         Ok(serde_json::Value::Object(obj))
     }
@@ -1527,6 +1816,7 @@ pub struct MetricsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn task_mode_round_trips_known_variants() {
@@ -1681,7 +1971,7 @@ mod tests {
     fn lookback_computes_start_date_and_omits_end() {
         let wire = EventListParams {
             lookback: Some("24h".into()),
-            ..Default::default()
+            ..EventListParams::new(IntrospectionEventName::Feedback)
         }
         .to_wire()
         .unwrap();
@@ -1727,16 +2017,211 @@ mod tests {
     }
 
     #[test]
-    fn event_params_include_grain_and_pattern_id() {
+    fn event_params_require_event_name_and_pass_family_filters() {
+        // `event_name` is a required (compile-enforced) field: there is no
+        // `Default` impl and no way to build the params without a family.
         let wire = EventListParams {
-            grain: Some("introspection.observation".into()),
-            pattern_id: Some("pat_1".into()),
-            ..Default::default()
+            filters: Some(HashMap::from([
+                ("pattern_id".to_string(), json!("pat_1")),
+                ("include_superseded".to_string(), json!(true)),
+            ])),
+            ..EventListParams::new(IntrospectionEventName::Observation)
         }
         .to_wire()
         .unwrap();
-        assert_eq!(wire["grain"], "introspection.observation");
+        assert_eq!(wire["event_name"], "introspection.observation");
+        // Family-scoped filters pass through verbatim.
         assert_eq!(wire["pattern_id"], "pat_1");
+        assert_eq!(wire["include_superseded"], true);
+        // The retired grain-era params never reach the wire.
+        assert!(wire.get("grain").is_none());
+        assert!(wire.get("include").is_none());
+        assert!(wire.get("event_name_prefix").is_none());
+        assert!(wire.get("q").is_none());
+        assert!(wire.get("q_regex").is_none());
+    }
+
+    #[test]
+    fn introspection_event_name_serde_uses_dotted_names() {
+        for (variant, wire) in [
+            (IntrospectionEventName::Feedback, "introspection.feedback"),
+            (
+                IntrospectionEventName::Observation,
+                "introspection.observation",
+            ),
+            (
+                IntrospectionEventName::ObservationClusteringRun,
+                "introspection.observation_clustering.run",
+            ),
+            (IntrospectionEventName::Judgement, "introspection.judgement"),
+            (IntrospectionEventName::Pattern, "introspection.pattern"),
+            (
+                IntrospectionEventName::PatternAssignment,
+                "introspection.pattern.assignment",
+            ),
+        ] {
+            assert_eq!(variant.as_str(), wire);
+            assert_eq!(serde_json::to_value(variant).unwrap(), json!(wire));
+            let back: IntrospectionEventName = serde_json::from_value(json!(wire)).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+
+    #[test]
+    fn observation_event_round_trips_typed_payload() {
+        let raw = json!({
+            "id": "evt_1",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.observation",
+            "conversation_id": "conv_1",
+            "runtime_group_id": "00000000-0000-0000-0000-00000000cccc",
+            "payload": {
+                "observation_id": "00000000-0000-0000-0000-000000000042",
+                "lens": "user_frustration",
+                "summary": "User repeated the question",
+                "severity": "high",
+                "confidence": 0.92,
+                "pattern_id": "pat_7",
+                "assignment_score": 0.81,
+            },
+        });
+        let event: Event = serde_json::from_value(raw.clone()).unwrap();
+        let Event::Observation(obs) = &event else {
+            panic!("expected Observation, got {event:?}");
+        };
+        assert_eq!(obs.id, "evt_1");
+        assert_eq!(obs.conversation_id.as_deref(), Some("conv_1"));
+        assert_eq!(
+            obs.payload.observation_id.to_string(),
+            "00000000-0000-0000-0000-000000000042"
+        );
+        assert_eq!(obs.payload.lens.as_deref(), Some("user_frustration"));
+        assert_eq!(obs.payload.confidence, Some(0.92));
+        // The current-assignment fold fields ride on the payload.
+        assert_eq!(obs.payload.pattern_id.as_deref(), Some("pat_7"));
+        assert_eq!(
+            event.event_name(),
+            Some(IntrospectionEventName::Observation)
+        );
+        // Serialize → the top-level discriminator is re-emitted.
+        let back = serde_json::to_value(&event).unwrap();
+        assert_eq!(back["event_name"], "introspection.observation");
+        assert_eq!(back["payload"]["pattern_id"], "pat_7");
+    }
+
+    #[test]
+    fn pattern_event_round_trips_fold_fields() {
+        let raw = json!({
+            "id": "evt_2",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.pattern",
+            "payload": {
+                "pattern_id": "pat_7",
+                "action": "created",
+                "name": "Repeated question",
+                "status": "active",
+                "created_at": "2026-06-01T00:00:00Z",
+                "last_detected_at": "2026-07-01T00:00:00Z",
+            },
+        });
+        let event: Event = serde_json::from_value(raw).unwrap();
+        let Event::Pattern(pat) = &event else {
+            panic!("expected Pattern, got {event:?}");
+        };
+        assert_eq!(pat.payload.pattern_id, "pat_7");
+        // Legacy `introspection.pattern.created` rows normalize server-side
+        // to the canonical family with `payload.action = "created"`.
+        assert_eq!(pat.payload.action.as_deref(), Some("created"));
+        assert_eq!(pat.payload.status.as_deref(), Some("active"));
+        assert_eq!(event.event_name(), Some(IntrospectionEventName::Pattern));
+    }
+
+    #[test]
+    fn feedback_event_round_trips_typed_payload() {
+        let raw = json!({
+            "id": "evt_3",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.feedback",
+            "payload": {
+                "name": "thumbs_up",
+                "comments": "great answer",
+                "value": 1.0,
+                "user_id": "user_9",
+                "sentiment": "positive",
+                "properties": {"surface": "chat"},
+            },
+        });
+        let event: Event = serde_json::from_value(raw).unwrap();
+        let Event::Feedback(fb) = &event else {
+            panic!("expected Feedback, got {event:?}");
+        };
+        assert_eq!(fb.payload.name, "thumbs_up");
+        assert_eq!(fb.payload.value, Some(1.0));
+        assert_eq!(fb.payload.sentiment.as_deref(), Some("positive"));
+        assert_eq!(
+            fb.payload.properties.as_ref().unwrap()["surface"],
+            json!("chat")
+        );
+    }
+
+    #[test]
+    fn judgement_event_round_trips_typed_payload() {
+        let raw = json!({
+            "id": "evt_4",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.judgement",
+            "payload": {
+                "judgement_id": "jm_1",
+                "judge_id": "judge_1",
+                "result": "pass",
+                "definition_hash": "abc123",
+                "contract_version": "1",
+                "sequence_hash": "def456",
+                "experiment_arm_id": "00000000-0000-0000-0000-00000000eeee",
+            },
+        });
+        let event: Event = serde_json::from_value(raw).unwrap();
+        let Event::Judgement(j) = &event else {
+            panic!("expected Judgement, got {event:?}");
+        };
+        assert_eq!(j.payload.judgement_id, "jm_1");
+        assert_eq!(j.payload.result.as_deref(), Some("pass"));
+        assert_eq!(
+            j.payload.experiment_arm_id.unwrap().to_string(),
+            "00000000-0000-0000-0000-00000000eeee"
+        );
+    }
+
+    #[test]
+    fn unknown_event_family_does_not_fail_the_page() {
+        // A seventh family added server-side after this SDK build must not
+        // fail the whole page — it falls into `Event::Unknown` verbatim.
+        let payload = json!({
+            "records": [
+                {
+                    "id": "evt_5",
+                    "timestamp": "2026-07-01T00:00:00Z",
+                    "event_name": "introspection.brand_new.family",
+                    "payload": {"anything": true},
+                },
+                {
+                    "id": "evt_6",
+                    "timestamp": "2026-07-01T00:00:00Z",
+                    "event_name": "introspection.feedback",
+                    "payload": {"name": "thumbs_down"},
+                },
+            ],
+            "count": 2,
+            "next": null,
+        });
+        let page: Paginated<Event> = serde_json::from_value(payload).unwrap();
+        assert_eq!(page.records.len(), 2);
+        let Event::Unknown(raw) = &page.records[0] else {
+            panic!("expected Unknown, got {:?}", page.records[0]);
+        };
+        assert_eq!(raw["event_name"], "introspection.brand_new.family");
+        assert!(page.records[0].event_name().is_none());
+        assert!(matches!(page.records[1], Event::Feedback(_)));
     }
 
     #[test]
