@@ -1443,11 +1443,14 @@ pub struct PatternPayload {
 }
 
 /// `introspection.pattern.assignment` payload — one observation→pattern
-/// assignment event (stream family).
+/// assignment event (stream family). `observation_id` is the sole identity
+/// field; `pattern_id: None` means the observation was explicitly unassigned.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PatternAssignmentPayload {
     pub observation_id: Uuid,
-    pub pattern_id: String,
+    /// Target pattern; `None` = explicitly unassigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1500,6 +1503,16 @@ pub struct FeedbackPayload {
     /// server-side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sentiment: Option<String>,
+    /// Response the feedback anchors to —
+    /// `gen_ai.request.previous_response_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_response_id: Option<String>,
+    /// `gen_ai.agent.name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    /// `gen_ai.agent.id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     /// Remaining `properties.*` extras.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub properties: Option<HashMap<String, serde_json::Value>>,
@@ -2148,6 +2161,9 @@ mod tests {
                 "value": 1.0,
                 "user_id": "user_9",
                 "sentiment": "positive",
+                "previous_response_id": "resp_42",
+                "agent_name": "support-agent",
+                "agent_id": "agent_7",
                 "properties": {"surface": "chat"},
             },
         });
@@ -2158,10 +2174,62 @@ mod tests {
         assert_eq!(fb.payload.name, "thumbs_up");
         assert_eq!(fb.payload.value, Some(1.0));
         assert_eq!(fb.payload.sentiment.as_deref(), Some("positive"));
+        // gen_ai anchoring fields (cloud phase-1 final models).
+        assert_eq!(fb.payload.previous_response_id.as_deref(), Some("resp_42"));
+        assert_eq!(fb.payload.agent_name.as_deref(), Some("support-agent"));
+        assert_eq!(fb.payload.agent_id.as_deref(), Some("agent_7"));
         assert_eq!(
             fb.payload.properties.as_ref().unwrap()["surface"],
             json!("chat")
         );
+        let back = serde_json::to_value(&event).unwrap();
+        assert_eq!(back["payload"]["previous_response_id"], "resp_42");
+        assert_eq!(back["payload"]["agent_name"], "support-agent");
+        assert_eq!(back["payload"]["agent_id"], "agent_7");
+    }
+
+    #[test]
+    fn pattern_assignment_event_tolerates_explicit_unassignment() {
+        // `pattern_id: null` = explicitly unassigned — still the typed
+        // variant (observation_id alone is identity), never Unknown.
+        let raw = json!({
+            "id": "evt_7",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.pattern.assignment",
+            "payload": {
+                "observation_id": "00000000-0000-0000-0000-000000000042",
+                "pattern_id": null,
+                "method": "manual",
+            },
+        });
+        let event: Event = serde_json::from_value(raw).unwrap();
+        let Event::PatternAssignment(pa) = &event else {
+            panic!("expected PatternAssignment, got {event:?}");
+        };
+        assert_eq!(
+            pa.payload.observation_id.to_string(),
+            "00000000-0000-0000-0000-000000000042"
+        );
+        assert!(pa.payload.pattern_id.is_none());
+        assert_eq!(pa.payload.method.as_deref(), Some("manual"));
+
+        // Assigned rows still carry the pattern.
+        let assigned = json!({
+            "id": "evt_8",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.pattern.assignment",
+            "payload": {
+                "observation_id": "00000000-0000-0000-0000-000000000042",
+                "pattern_id": "pat_7",
+                "score": 0.8,
+            },
+        });
+        let event: Event = serde_json::from_value(assigned).unwrap();
+        let Event::PatternAssignment(pa) = &event else {
+            panic!("expected PatternAssignment, got {event:?}");
+        };
+        assert_eq!(pa.payload.pattern_id.as_deref(), Some("pat_7"));
+        assert_eq!(pa.payload.score, Some(0.8));
     }
 
     #[test]
