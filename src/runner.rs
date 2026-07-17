@@ -23,6 +23,7 @@ use crate::api::files::Files;
 use crate::api::http::{HttpClient, HttpConfig};
 use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpec, StringOrUuid};
 use crate::api::tasks::Tasks;
+use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::types::defaults;
 
 /// How a [`Runner`] was opened. Captured so [`Runner::refresh`] can
@@ -133,6 +134,29 @@ impl Runner {
     pub fn files(&self) -> Files {
         let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
         Files::new(http)
+    }
+
+    /// `runner.conversations.*` — Data-Plane telemetry reads over
+    /// `GET /v1/conversations` (append-only `otel_traces`). Runner-scoped (DP
+    /// bearer + `events:read`). Cheap clone.
+    pub fn conversations(&self) -> Conversations {
+        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
+        Conversations::new(http)
+    }
+
+    /// `runner.events.*` — Data-Plane telemetry reads over `GET /v1/events`
+    /// (append-only `otel_logs`; observation / pattern grains). Runner-scoped
+    /// (DP bearer + `events:read`). Cheap clone.
+    pub fn events(&self) -> Events {
+        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
+        Events::new(http)
+    }
+
+    /// `runner.metrics.*` — the bounded `POST /v1/metrics` analytics surface.
+    /// Runner-scoped (DP bearer + `events:read`). Cheap clone.
+    pub fn metrics(&self) -> Metrics {
+        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
+        Metrics::new(http)
     }
 
     /// Resolved runtime context (runtime / arm / recipe pin / identity

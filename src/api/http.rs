@@ -222,6 +222,30 @@ impl HttpClient {
         decode_json(expect_ok(res).await?).await
     }
 
+    /// GET returning the raw (2xx) [`Response`] with a query string and an
+    /// optional `Accept` header, applying the same retry policy as
+    /// [`get_json`](Self::get_json). The caller reads the body and response
+    /// headers itself — used by the telemetry Arrow reads, where pagination
+    /// metadata (`X-Next-Cursor`, `X-Result-Count`, …) moves to headers. A
+    /// non-2xx (e.g. `406` when Arrow is unsupported) is mapped to a typed
+    /// [`IntrospectionAPIError`] like any other call.
+    pub async fn get_raw<Q: Serialize>(
+        &self,
+        path: &str,
+        query: &Q,
+        accept: Option<&str>,
+    ) -> ApiResult<Response> {
+        let accept = accept.map(str::to_string);
+        self.send_retrying(true, || {
+            let mut req = self.inner.get(self.url(path)).query(query);
+            if let Some(a) = &accept {
+                req = req.header(reqwest::header::ACCEPT, a.clone());
+            }
+            req
+        })
+        .await
+    }
+
     /// GET binary content into memory.
     pub async fn get_bytes(&self, path: &str) -> ApiResult<Bytes> {
         let res = self

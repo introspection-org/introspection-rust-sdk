@@ -150,6 +150,8 @@
 //!
 //! [`RunHandle::text`]: tasks::RunHandle::text
 
+#[cfg(feature = "arrow")]
+pub mod arrow;
 pub mod backoff;
 pub mod error;
 pub mod files;
@@ -159,21 +161,27 @@ pub mod resumable;
 pub mod schemas;
 pub mod sse;
 pub mod tasks;
+pub mod telemetry;
 
+#[cfg(feature = "arrow")]
+pub use arrow::{ArrowPage, ARROW_STREAM_ACCEPT};
 pub use error::{ApiResult, IntrospectionAPIError};
 pub use files::{FileUpload, FileVersions, Files, UploadSource};
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, Arm, Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus,
-    ExperimentUpdate, File, FileCreateText, FileListParams, FileType, FileUpdate, Paginated,
-    PaginationParams, Project, ProjectListParams, Recipe, RecipeCreate, RecipeListParams,
-    RecipeUpdate, Repository, RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage,
-    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeCreate, RuntimeListParams, RuntimeUpdate, SseEvent, StringOrUuid, Task,
-    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
-    TaskRun, TaskRunCreate, TaskRunResponse, TaskStatus, TaskUpdate,
+    AgentInfo, Arm, Conversation, ConversationListParams, Dimension, Event, EventListParams,
+    Experiment, ExperimentCreate, ExperimentListParams, ExperimentStatus, ExperimentUpdate, File,
+    FileCreateText, FileListParams, FileType, FileUpdate, HavingTerm, MetricFilter, MetricSpec,
+    MetricsConfig, MetricsQuery, MetricsResponse, OrderTerm, Paginated, PaginationParams, Project,
+    ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
+    RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext,
+    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
+    RuntimeUpdate, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
+    TaskRunResponse, TaskStatus, TaskUpdate, TimeDimension,
 };
 pub use sse::{parse_agui_response, parse_sse_response};
 pub use tasks::{RunHandle, TaskRuns, Tasks};
+pub use telemetry::{Conversations, Events, Metrics};

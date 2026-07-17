@@ -11,13 +11,14 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient,
-    HttpConfig, IntrospectionAPIError, PaginationParams, TaskCreate, TaskListParams, TaskMode,
-    TaskRunCreate, TaskRuns, TaskUpdate, Tasks,
+    ConversationListParams, Conversations, EventListParams, Events, FileCreateText, FileListParams,
+    FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError,
+    MetricSpec, Metrics, MetricsQuery, PaginationParams, SortDirection, TaskCreate, TaskListParams,
+    TaskMode, TaskRunCreate, TaskRuns, TaskUpdate, Tasks,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
-use wiremock::matchers::{body_json, method, path, query_param};
+use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn build_http(server: &MockServer) -> Arc<HttpClient> {
@@ -423,6 +424,196 @@ async fn validation_error_is_translated() {
         IntrospectionAPIError::Http { status: 422, .. }
     ));
     assert!(err.to_string().contains("field required"));
+}
+
+#[tokio::test]
+async fn conversations_list_maps_window_params_and_paginates() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    // First page: the ergonomic `order`/`start`/`end` land on the wire as
+    // `direction`/`start_date`/`end_date`; a `next` cursor drives page 2.
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations"))
+        .and(query_param("direction", "asc"))
+        .and(query_param("start_date", "2026-01-01T00:00:00Z"))
+        .and(query_param("end_date", "2026-02-01T00:00:00Z"))
+        .and(query_param("limit", "10"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{"conversation_id": "c1", "trace_id": "t1", "custom_attr": 7}],
+            "count": 1,
+            "next": "cursor_2",
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations"))
+        .and(query_param("next", "cursor_2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{"conversation_id": "c2"}],
+            "count": 1,
+            "next": null,
+        })))
+        .mount(&server)
+        .await;
+
+    let mut paginator = conversations
+        .list(&ConversationListParams {
+            limit: Some(10),
+            order: Some(SortDirection::Asc),
+            start: Some("2026-01-01T00:00:00Z".into()),
+            end: Some("2026-02-01T00:00:00Z".into()),
+            ..Default::default()
+        })
+        .expect("params validate");
+
+    // Page to exhaustion via `next`, bounded.
+    let all = paginator.collect_all(10).await.unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].conversation_id.as_deref(), Some("c1"));
+    // Unknown telemetry attributes ride along in `extra`.
+    assert_eq!(all[0].extra.get("custom_attr"), Some(&json!(7)));
+    assert_eq!(all[1].conversation_id.as_deref(), Some("c2"));
+}
+
+#[tokio::test]
+async fn conversations_list_rejects_lookback_with_start_before_send() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    let result = conversations.list(&ConversationListParams {
+        lookback: Some("24h".into()),
+        start: Some("2026-01-01T00:00:00Z".into()),
+        ..Default::default()
+    });
+    assert!(matches!(
+        result.err(),
+        Some(IntrospectionAPIError::InvalidConfig(_))
+    ));
+    // No request was ever sent — validation is client-side.
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn events_list_sends_grain_and_pattern_id() {
+    let server = MockServer::start().await;
+    let events = Events::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/events"))
+        .and(query_param("grain", "introspection.observation"))
+        .and(query_param("pattern_id", "pat_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{"event_id": "e1", "name": "obs"}],
+            "count": 1,
+            "next": null,
+        })))
+        .mount(&server)
+        .await;
+
+    let mut paginator = events
+        .list(&EventListParams {
+            grain: Some("introspection.observation".into()),
+            pattern_id: Some("pat_1".into()),
+            ..Default::default()
+        })
+        .expect("params validate");
+    let page = paginator.next_page().await.unwrap().unwrap();
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.records[0].event_id.as_deref(), Some("e1"));
+}
+
+#[tokio::test]
+async fn metrics_query_posts_bounded_body() {
+    let server = MockServer::start().await;
+    let metrics = Metrics::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/metrics"))
+        .and(body_json(json!({
+            "view": "spans",
+            "metrics": [{"measure": "duration_ns", "aggregation": "p95"}],
+            "from_timestamp": "2026-06-01T00:00:00Z",
+            "to_timestamp": "2026-07-01T00:00:00Z",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{"p95": 1234}],
+            "meta": {"approximate": true},
+        })))
+        .mount(&server)
+        .await;
+
+    let res = metrics
+        .query(&MetricsQuery {
+            view: "spans".into(),
+            metrics: vec![MetricSpec {
+                measure: "duration_ns".into(),
+                aggregation: "p95".into(),
+            }],
+            start: Some("2026-06-01T00:00:00Z".into()),
+            end: Some("2026-07-01T00:00:00Z".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(res.data.len(), 1);
+    assert_eq!(res.data[0]["p95"], 1234);
+}
+
+#[cfg(feature = "arrow")]
+#[tokio::test]
+async fn conversations_list_arrow_decodes_stream_and_headers() {
+    use arrow::array::{Int64Array, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::ipc::writer::StreamWriter;
+    use arrow::record_batch::RecordBatch;
+    use std::sync::Arc as StdArc;
+
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    // Build a small Arrow IPC stream server-side to hand back.
+    let schema = StdArc::new(Schema::new(vec![
+        Field::new("conversation_id", DataType::Utf8, false),
+        Field::new("span_count", DataType::Int64, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            StdArc::new(StringArray::from(vec!["c1", "c2"])),
+            StdArc::new(Int64Array::from(vec![3, 5])),
+        ],
+    )
+    .unwrap();
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut writer = StreamWriter::try_new(&mut buf, &schema).unwrap();
+        writer.write(&batch).unwrap();
+        writer.finish().unwrap();
+    }
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/vnd.apache.arrow.stream")
+                .insert_header("x-next-cursor", "cursor_9")
+                .insert_header("x-result-count", "2")
+                .insert_header("x-truncated", "true")
+                .set_body_bytes(buf),
+        )
+        .mount(&server)
+        .await;
+
+    let page = conversations
+        .list_arrow(&ConversationListParams::default())
+        .await
+        .unwrap();
+    assert_eq!(page.num_rows(), 2);
+    assert_eq!(page.next.as_deref(), Some("cursor_9"));
+    assert_eq!(page.count, Some(2));
+    assert!(page.truncated);
 }
 
 fn file_response(name: &str) -> serde_json::Value {

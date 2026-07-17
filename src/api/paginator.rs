@@ -122,6 +122,24 @@ where
         Ok(Some(page))
     }
 
+    /// Page to exhaustion via the `next` cursor, collecting every record into
+    /// one `Vec`, bounded by `max_pages` (pass `0` for unbounded). The bound
+    /// caps the number of HTTP round-trips so a huge or mis-cursored result
+    /// set can't loop unbounded. Continues from wherever the paginator
+    /// currently is.
+    pub async fn collect_all(&mut self, max_pages: usize) -> ApiResult<Vec<T>> {
+        let mut out = Vec::new();
+        let mut pages = 0usize;
+        while let Some(page) = self.next_page().await? {
+            out.extend(page.records);
+            pages += 1;
+            if max_pages != 0 && pages >= max_pages {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     fn params_for_current_cursor(&self) -> serde_json::Value {
         let mut params = self.base_params.clone();
         if let Some(ref c) = self.next_cursor {

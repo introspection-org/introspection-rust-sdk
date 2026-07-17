@@ -27,6 +27,12 @@ otel = [
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
 ]
+# Optional Apache Arrow IPC decode for the runner-scoped Data-Plane telemetry
+# reads (`conversations` / `events`). Off by default so REST-only installs
+# don't pull the (heavy) Arrow dependency tree; enable to use the
+# `list_arrow` variants that request the `application/vnd.apache.arrow.stream`
+# response and decode it into `RecordBatch`es.
+arrow = ["dep:arrow"]
 testing = ["otel", "opentelemetry_sdk/testing"]
 openai = ["otel", "dep:async-openai"]
 
@@ -65,6 +71,11 @@ derive_builder = "0.20"
 
 # Optional: async-openai integration (requires `otel`)
 async-openai = { version = "0.41", features = ["chat-completion", "responses"], optional = true }
+
+# Optional: Apache Arrow IPC-stream decode for the telemetry reads (gated by
+# the `arrow` feature). `ipc` alone keeps the dependency tree lean — no
+# csv/json/prettyprint/pyarrow.
+arrow = { version = "59", default-features = false, features = ["ipc"], optional = true }
 
 # Streaming support (StreamExt for async-openai streams)
 futures = "0.3"

@@ -1015,6 +1015,515 @@ pub struct RunnerSpec {
     pub runtime_context: RunnerContext,
 }
 
+// ----- telemetry: conversations / events / metrics (DP, runner-scoped) -------
+//
+// These are Data-Plane telemetry reads — they hang off the [`crate::Runner`]
+// (DP bearer + `events:read`), never the CP-scoped top-level client. The
+// stores are append-only (`otel_traces` → `/v1/conversations`, `otel_logs` →
+// `/v1/events`); all aggregation goes through the bounded `POST /v1/metrics`
+// contract. Records carry open telemetry attributes, so the typed structs keep
+// a `#[serde(flatten)] extra` bag — unknown fields ride along verbatim rather
+// than being dropped.
+
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::api::error::{ApiResult, IntrospectionAPIError};
+
+/// Sort direction for the telemetry list reads. Maps to the wire `direction`
+/// query param; defaults to descending (newest-first) like the DP.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    /// The DP default — newest-first.
+    #[default]
+    Desc,
+}
+
+impl SortDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+
+impl From<&str> for SortDirection {
+    fn from(s: &str) -> Self {
+        match s {
+            "asc" => Self::Asc,
+            _ => Self::Desc,
+        }
+    }
+}
+
+impl Serialize for SortDirection {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SortDirection {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Shared window / ordering / pagination inputs for the telemetry list reads.
+///
+/// Borrowed view over the ergonomic client params — applied onto the wire
+/// query object by [`Window::apply`], which performs the client-side
+/// validation (limit range, `lookback` vs `start`/`end` mutual exclusion) and
+/// the ergonomic → wire mapping (`order`→`direction`, `start`→`start_date`,
+/// `end`→`end_date`, `lookback`→computed `start_date`).
+struct Window<'a> {
+    limit: Option<u32>,
+    next: Option<&'a str>,
+    sort: Option<&'a str>,
+    order: Option<SortDirection>,
+    start: Option<&'a str>,
+    end: Option<&'a str>,
+    lookback: Option<&'a str>,
+    include_total: Option<bool>,
+}
+
+impl Window<'_> {
+    fn apply(&self, obj: &mut serde_json::Map<String, serde_json::Value>) -> ApiResult<()> {
+        if let Some(limit) = self.limit {
+            if !(1..=1000).contains(&limit) {
+                return Err(IntrospectionAPIError::InvalidConfig(format!(
+                    "limit must be between 1 and 1000 (got {limit})"
+                )));
+            }
+            obj.insert("limit".to_string(), limit.into());
+        }
+        if let Some(next) = self.next {
+            obj.insert("next".to_string(), next.into());
+        }
+        if let Some(sort) = self.sort {
+            obj.insert("sort".to_string(), sort.into());
+        }
+        if let Some(order) = self.order {
+            obj.insert("direction".to_string(), order.as_str().into());
+        }
+        apply_time_window(
+            obj,
+            self.start,
+            self.end,
+            self.lookback,
+            "start_date",
+            "end_date",
+        )?;
+        if let Some(include_total) = self.include_total {
+            obj.insert("include_total".to_string(), include_total.into());
+        }
+        Ok(())
+    }
+}
+
+/// Resolve the ergonomic `start` / `end` / `lookback` triple into the wire
+/// window keys. `lookback` (relative, e.g. `"24h"`) is **mutually exclusive**
+/// with `start`/`end` — the mismatch is rejected client-side *before* any
+/// request is sent. When `lookback` is set the start key is computed as
+/// `now - lookback`.
+fn apply_time_window(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    start: Option<&str>,
+    end: Option<&str>,
+    lookback: Option<&str>,
+    start_key: &str,
+    end_key: &str,
+) -> ApiResult<()> {
+    if lookback.is_some() && (start.is_some() || end.is_some()) {
+        return Err(IntrospectionAPIError::InvalidConfig(
+            "`lookback` is mutually exclusive with `start`/`end`".to_string(),
+        ));
+    }
+    if let Some(lookback) = lookback {
+        let dur = parse_lookback(lookback)?;
+        let start_at = SystemTime::now().checked_sub(dur).unwrap_or(UNIX_EPOCH);
+        obj.insert(start_key.to_string(), rfc3339_utc(start_at).into());
+    } else {
+        if let Some(start) = start {
+            obj.insert(start_key.to_string(), start.into());
+        }
+        if let Some(end) = end {
+            obj.insert(end_key.to_string(), end.into());
+        }
+    }
+    Ok(())
+}
+
+/// Parse a relative lookback like `"24h"`, `"30m"`, `"7d"`, or a compound
+/// `"1h30m"` into a [`Duration`]. Units: `s`, `m`, `h`, `d`, `w`.
+fn parse_lookback(s: &str) -> ApiResult<Duration> {
+    let trimmed = s.trim();
+    let invalid = || {
+        IntrospectionAPIError::InvalidConfig(format!(
+            "invalid lookback `{s}` (expected e.g. `24h`, `30m`, `7d`, `1h30m`)"
+        ))
+    };
+    if trimmed.is_empty() {
+        return Err(invalid());
+    }
+    let mut total: u64 = 0;
+    let mut digits = String::new();
+    let mut saw_unit = false;
+    for c in trimmed.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        if digits.is_empty() {
+            return Err(invalid());
+        }
+        let value: u64 = digits.parse().map_err(|_| invalid())?;
+        let unit_secs = match c.to_ascii_lowercase() {
+            's' => 1,
+            'm' => 60,
+            'h' => 3600,
+            'd' => 86_400,
+            'w' => 604_800,
+            _ => return Err(invalid()),
+        };
+        total = total
+            .checked_add(value.checked_mul(unit_secs).ok_or_else(invalid)?)
+            .ok_or_else(invalid)?;
+        digits.clear();
+        saw_unit = true;
+    }
+    // A trailing number with no unit (`"24"`) or no units at all is invalid.
+    if !digits.is_empty() || !saw_unit {
+        return Err(invalid());
+    }
+    Ok(Duration::from_secs(total))
+}
+
+/// Format a [`SystemTime`] as an RFC 3339 / ISO-8601 UTC instant
+/// (`YYYY-MM-DDThh:mm:ssZ`) with second precision. Dependency-free (the crate
+/// does not pull `chrono`) via Howard Hinnant's civil-from-days algorithm.
+fn rfc3339_utc(t: SystemTime) -> String {
+    let secs = t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hour, minute, second) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    let (year, month, day) = civil_from_days(days);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+/// Convert a count of days since the Unix epoch to a `(year, month, day)`
+/// civil date. Howard Hinnant's public-domain algorithm.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let year = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
+/// One conversation record from `GET /v1/conversations` (append-only
+/// `otel_traces`). Telemetry attributes are open, so only a few stable
+/// identifiers are named; everything else rides along in [`Self::extra`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Conversation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// Ergonomic params for `GET /v1/conversations`. `order`/`start`/`end`/
+/// `lookback` map to the wire `direction`/`start_date`/`end_date` window (see
+/// [`Window`]); `filters` is a passthrough for resource filters that avoids
+/// baking the open attribute vocabulary into the SDK.
+#[derive(Debug, Clone, Default)]
+pub struct ConversationListParams {
+    pub limit: Option<u32>,
+    pub next: Option<String>,
+    pub sort: Option<String>,
+    pub order: Option<SortDirection>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub lookback: Option<String>,
+    pub include_total: Option<bool>,
+    /// Arbitrary resource filters merged verbatim onto the query string.
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl ConversationListParams {
+    /// Validate and lower to the wire query object. Returns
+    /// [`IntrospectionAPIError::InvalidConfig`] for an out-of-range `limit` or
+    /// a `lookback`/`start`/`end` conflict — *before* any request is issued.
+    pub fn to_wire(&self) -> ApiResult<serde_json::Value> {
+        let mut obj = serde_json::Map::new();
+        Window {
+            limit: self.limit,
+            next: self.next.as_deref(),
+            sort: self.sort.as_deref(),
+            order: self.order,
+            start: self.start.as_deref(),
+            end: self.end.as_deref(),
+            lookback: self.lookback.as_deref(),
+            include_total: self.include_total,
+        }
+        .apply(&mut obj)?;
+        merge_filters(&mut obj, self.filters.as_ref());
+        Ok(serde_json::Value::Object(obj))
+    }
+}
+
+/// One event record from `GET /v1/events` (append-only `otel_logs`). Supports
+/// the omitted/`raw`, `introspection.observation`, and `introspection.pattern`
+/// grains. Open attributes ride along in [`Self::extra`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Event {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// Ergonomic params for `GET /v1/events`. Adds the documented `grain` /
+/// `pattern_id` filters ("a pattern's observations" is client-composed:
+/// `grain=introspection.pattern` for catalog rows,
+/// `grain=introspection.observation&pattern_id=X` for resolved observations).
+#[derive(Debug, Clone, Default)]
+pub struct EventListParams {
+    pub limit: Option<u32>,
+    pub next: Option<String>,
+    pub sort: Option<String>,
+    pub order: Option<SortDirection>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub lookback: Option<String>,
+    pub include_total: Option<bool>,
+    /// Event grain — omitted/`raw`, `introspection.observation`, or
+    /// `introspection.pattern`.
+    pub grain: Option<String>,
+    /// Resolve a specific pattern's observations
+    /// (with `grain=introspection.observation`).
+    pub pattern_id: Option<String>,
+    /// Arbitrary additional resource filters merged verbatim.
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl EventListParams {
+    /// Validate and lower to the wire query object (see
+    /// [`ConversationListParams::to_wire`]).
+    pub fn to_wire(&self) -> ApiResult<serde_json::Value> {
+        let mut obj = serde_json::Map::new();
+        Window {
+            limit: self.limit,
+            next: self.next.as_deref(),
+            sort: self.sort.as_deref(),
+            order: self.order,
+            start: self.start.as_deref(),
+            end: self.end.as_deref(),
+            lookback: self.lookback.as_deref(),
+            include_total: self.include_total,
+        }
+        .apply(&mut obj)?;
+        if let Some(grain) = &self.grain {
+            obj.insert("grain".to_string(), grain.clone().into());
+        }
+        if let Some(pattern_id) = &self.pattern_id {
+            obj.insert("pattern_id".to_string(), pattern_id.clone().into());
+        }
+        merge_filters(&mut obj, self.filters.as_ref());
+        Ok(serde_json::Value::Object(obj))
+    }
+}
+
+fn merge_filters(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    filters: Option<&HashMap<String, serde_json::Value>>,
+) {
+    if let Some(filters) = filters {
+        for (k, v) in filters {
+            obj.insert(k.clone(), v.clone());
+        }
+    }
+}
+
+// ----- metrics (POST /v1/metrics) --------------------------------------------
+
+/// One `{measure, aggregation}` metric term in a [`MetricsQuery`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricSpec {
+    pub measure: String,
+    pub aggregation: String,
+}
+
+/// One grouping dimension `{field}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dimension {
+    pub field: String,
+}
+
+/// One `{field, operator, value}` filter term.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricFilter {
+    pub field: String,
+    pub operator: String,
+    pub value: serde_json::Value,
+}
+
+/// Time-bucketing dimension — `bins` (count) or `granularity`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TimeDimension {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bins: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granularity: Option<String>,
+}
+
+/// One typed ordering term: metric-index, dimension-field, or time bucket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderTerm {
+    #[serde(rename = "type")]
+    pub term_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    pub direction: SortDirection,
+}
+
+/// One post-grouping `having` term over an aggregated metric.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HavingTerm {
+    pub metric_index: u32,
+    pub operator: String,
+    pub value: serde_json::Value,
+}
+
+/// Bounded execution config — `row_limit` (default 100, max 10 000) and the
+/// grouped-time-series `series_limit`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_limit: Option<u32>,
+}
+
+/// Request body for the bounded `POST /v1/metrics` analytics endpoint.
+///
+/// Ergonomic `start` / `end` / `lookback` map to the wire
+/// `from_timestamp` / `to_timestamp` window (same mutual-exclusion validation
+/// as the list reads). This is not a general query endpoint — the DP enforces
+/// the allow-listed views / measures / dimensions and hard limits.
+#[derive(Debug, Clone, Default)]
+pub struct MetricsQuery {
+    pub view: String,
+    pub metrics: Vec<MetricSpec>,
+    pub dimensions: Option<Vec<Dimension>>,
+    pub filters: Option<Vec<MetricFilter>>,
+    pub time_dimension: Option<TimeDimension>,
+    pub order_by: Option<Vec<OrderTerm>>,
+    pub having: Option<Vec<HavingTerm>>,
+    pub config: Option<MetricsConfig>,
+    /// Window start (→ `from_timestamp`). Mutually exclusive with `lookback`.
+    pub start: Option<String>,
+    /// Window end (→ `to_timestamp`). Mutually exclusive with `lookback`.
+    pub end: Option<String>,
+    /// Relative window (e.g. `"24h"`) → computed `from_timestamp`.
+    pub lookback: Option<String>,
+}
+
+impl MetricsQuery {
+    /// Validate and lower to the wire request body. Rejects a
+    /// `lookback`/`start`/`end` conflict client-side before sending.
+    pub fn to_wire(&self) -> ApiResult<serde_json::Value> {
+        let mut obj = serde_json::Map::new();
+        obj.insert("view".to_string(), self.view.clone().into());
+        obj.insert(
+            "metrics".to_string(),
+            serde_json::to_value(&self.metrics).map_err(encode_err)?,
+        );
+        if let Some(dimensions) = &self.dimensions {
+            obj.insert(
+                "dimensions".to_string(),
+                serde_json::to_value(dimensions).map_err(encode_err)?,
+            );
+        }
+        if let Some(filters) = &self.filters {
+            obj.insert(
+                "filters".to_string(),
+                serde_json::to_value(filters).map_err(encode_err)?,
+            );
+        }
+        if let Some(time_dimension) = &self.time_dimension {
+            obj.insert(
+                "time_dimension".to_string(),
+                serde_json::to_value(time_dimension).map_err(encode_err)?,
+            );
+        }
+        if let Some(order_by) = &self.order_by {
+            obj.insert(
+                "order_by".to_string(),
+                serde_json::to_value(order_by).map_err(encode_err)?,
+            );
+        }
+        if let Some(having) = &self.having {
+            obj.insert(
+                "having".to_string(),
+                serde_json::to_value(having).map_err(encode_err)?,
+            );
+        }
+        if let Some(config) = &self.config {
+            obj.insert(
+                "config".to_string(),
+                serde_json::to_value(config).map_err(encode_err)?,
+            );
+        }
+        apply_time_window(
+            &mut obj,
+            self.start.as_deref(),
+            self.end.as_deref(),
+            self.lookback.as_deref(),
+            "from_timestamp",
+            "to_timestamp",
+        )?;
+        Ok(serde_json::Value::Object(obj))
+    }
+}
+
+fn encode_err(e: serde_json::Error) -> IntrospectionAPIError {
+    IntrospectionAPIError::Decode(format!("failed to encode metrics query: {e}"))
+}
+
+/// Response from `POST /v1/metrics`. The row shape depends on the requested
+/// view / metrics / dimensions, so rows stay as `serde_json::Value` and any
+/// envelope fields other than `data`/`meta` ride along in [`Self::extra`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MetricsResponse {
+    #[serde(default)]
+    pub data: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1120,5 +1629,147 @@ mod tests {
 
         assert_eq!(by_slug["project"], "main");
         assert_eq!(by_uuid["project"], uuid.to_string());
+    }
+
+    #[test]
+    fn sort_direction_defaults_desc_and_round_trips() {
+        assert_eq!(SortDirection::default(), SortDirection::Desc);
+        assert_eq!(SortDirection::Asc.as_str(), "asc");
+        let d: SortDirection = serde_json::from_str("\"asc\"").unwrap();
+        assert_eq!(d, SortDirection::Asc);
+        assert_eq!(
+            serde_json::to_string(&SortDirection::Desc).unwrap(),
+            "\"desc\""
+        );
+    }
+
+    #[test]
+    fn conversation_params_map_ergonomic_names_to_wire() {
+        let wire = ConversationListParams {
+            limit: Some(50),
+            order: Some(SortDirection::Asc),
+            start: Some("2026-01-01T00:00:00Z".into()),
+            end: Some("2026-02-01T00:00:00Z".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["limit"], 50);
+        assert_eq!(wire["direction"], "asc");
+        assert_eq!(wire["start_date"], "2026-01-01T00:00:00Z");
+        assert_eq!(wire["end_date"], "2026-02-01T00:00:00Z");
+        // Ergonomic aliases never leak onto the wire.
+        assert!(wire.get("order").is_none());
+        assert!(wire.get("start").is_none());
+        assert!(wire.get("end").is_none());
+    }
+
+    #[test]
+    fn lookback_is_mutually_exclusive_with_start_end() {
+        let err = ConversationListParams {
+            lookback: Some("24h".into()),
+            start: Some("2026-01-01T00:00:00Z".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap_err();
+        assert!(matches!(err, IntrospectionAPIError::InvalidConfig(_)));
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn lookback_computes_start_date_and_omits_end() {
+        let wire = EventListParams {
+            lookback: Some("24h".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+        let start = wire["start_date"].as_str().unwrap();
+        // RFC3339 UTC, second precision.
+        assert!(start.ends_with('Z'));
+        assert_eq!(start.len(), 20);
+        assert!(wire.get("end_date").is_none());
+    }
+
+    #[test]
+    fn parse_lookback_supports_compound_units() {
+        assert_eq!(parse_lookback("24h").unwrap(), Duration::from_secs(86_400));
+        assert_eq!(parse_lookback("30m").unwrap(), Duration::from_secs(1_800));
+        assert_eq!(parse_lookback("7d").unwrap(), Duration::from_secs(604_800));
+        assert_eq!(parse_lookback("1h30m").unwrap(), Duration::from_secs(5_400));
+        assert!(parse_lookback("24").is_err());
+        assert!(parse_lookback("").is_err());
+        assert!(parse_lookback("10y").is_err());
+    }
+
+    #[test]
+    fn rfc3339_utc_formats_known_epoch() {
+        // 1_700_000_000 == 2023-11-14T22:13:20Z
+        let t = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert_eq!(rfc3339_utc(t), "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn limit_out_of_range_is_rejected() {
+        assert!(ConversationListParams {
+            limit: Some(0),
+            ..Default::default()
+        }
+        .to_wire()
+        .is_err());
+        assert!(ConversationListParams {
+            limit: Some(1001),
+            ..Default::default()
+        }
+        .to_wire()
+        .is_err());
+    }
+
+    #[test]
+    fn event_params_include_grain_and_pattern_id() {
+        let wire = EventListParams {
+            grain: Some("introspection.observation".into()),
+            pattern_id: Some("pat_1".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["grain"], "introspection.observation");
+        assert_eq!(wire["pattern_id"], "pat_1");
+    }
+
+    #[test]
+    fn metrics_query_maps_window_to_from_to_timestamp() {
+        let wire = MetricsQuery {
+            view: "spans".into(),
+            metrics: vec![MetricSpec {
+                measure: "duration_ns".into(),
+                aggregation: "p95".into(),
+            }],
+            start: Some("2026-06-01T00:00:00Z".into()),
+            end: Some("2026-07-01T00:00:00Z".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["view"], "spans");
+        assert_eq!(wire["metrics"][0]["aggregation"], "p95");
+        assert_eq!(wire["from_timestamp"], "2026-06-01T00:00:00Z");
+        assert_eq!(wire["to_timestamp"], "2026-07-01T00:00:00Z");
+    }
+
+    #[test]
+    fn metrics_query_rejects_lookback_with_start() {
+        let err = MetricsQuery {
+            view: "spans".into(),
+            metrics: vec![],
+            lookback: Some("7d".into()),
+            start: Some("2026-06-01T00:00:00Z".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap_err();
+        assert!(matches!(err, IntrospectionAPIError::InvalidConfig(_)));
     }
 }
