@@ -1,14 +1,16 @@
-//! REST API surface for the Introspection Data Plane (`/v1/tasks`,
-//! `/v1/files`).
+//! Runner-bound REST API surface for the Introspection Data Plane.
 //!
-//! Two parallel namespaces are wired onto [`crate::IntrospectionClient`],
-//! both mirroring the corresponding JS / Python SDKs:
+//! Resource namespaces are opened from a [`crate::Runner`] and mirror the
+//! corresponding JS / Python SDKs:
 //!
 //! - [`Tasks`] — task lifecycle (list / create / update / archive / delete)
 //!   with nested [`TaskRuns`] and a cursor-style [`Tasks::start_prompt`]
 //!   sugar that returns a [`RunHandle`].
 //! - [`Files`] — OpenAI-style upload / download / list, plus a nested
 //!   [`FileVersions`] namespace.
+//! - [`Shares`] — read-sharing grants for files and conversations.
+//! - [`Conversations`], [`Events`], and [`Metrics`] — runner-scoped telemetry
+//!   reads.
 //!
 //! Everything maps 1:1 to existing DP routes; no new HTTP surface area.
 //! Auth reuses the same `INTROSPECTION_TOKEN` bearer used by the OTLP
@@ -37,7 +39,7 @@
 //! let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 //!
 //! // Open a runner against the runtime; spawn a task and stream its run.
-//! let runner = client.runtime(&runtime).await?.run(RunRequest::default()).await?;
+//! let runner = client.runtime(&runtime).run(RunRequest::default()).await?;
 //! let run = runner.tasks().start_prompt("Summarize this repo").await?;
 //! let stream = run.stream().await?;
 //! tokio::pin!(stream);
@@ -65,7 +67,7 @@
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::default())?;
 //! let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
-//! let runner = client.runtime(&runtime).await?.run(RunRequest::default()).await?;
+//! let runner = client.runtime(&runtime).run(RunRequest::default()).await?;
 //!
 //! // Multipart upload from a local path.
 //! let file = runner.files().upload(
@@ -97,7 +99,7 @@
 //! | `POST   /v1/tasks/{id}/unarchive` | [`Tasks::unarchive`] |
 //! | `POST   /v1/tasks/{id}/runs` | [`TaskRuns::create`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}` | [`TaskRuns::get`] |
-//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] |
+//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::abort`] / [`TaskRuns::drain`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}/stream` | [`TaskRuns::stream`] |
 //! | `GET    /v1/files` | [`Files::list`] *(paginator: stream or `next_page`)* |
 //! | `POST   /v1/files` (multipart) | [`Files::upload`] |
@@ -159,6 +161,7 @@ pub mod http;
 pub mod paginator;
 pub mod resumable;
 pub mod schemas;
+pub mod shares;
 pub mod sse;
 pub mod tasks;
 pub mod telemetry;
@@ -171,20 +174,19 @@ pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
-    Dimension, Event, EventListParams, Experiment, ExperimentCreate, ExperimentListParams,
-    ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText,
+    AgentInfo, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
+    Dimension, Event, EventListParams, FeedbackEvent, FeedbackPayload, File, FileCreateText,
     FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgementEvent,
     JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, MetricsResponse,
     ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
-    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
-    ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
-    RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext,
-    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
-    RuntimeUpdate, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
-    TaskRunResponse, TaskStatus, TaskUpdate, TimeDimension, TypedEvent,
+    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, ResourceShare,
+    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext,
+    RunnerDeployment, RunnerIdentity, RunnerSpec, ShareCreate, ShareListParams, ShareResourceType,
+    SortDirection, SseEvent, Task, TaskCancelResponse, TaskCreate, TaskCreateResponse,
+    TaskListParams, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
+    TaskRunResume, TaskStatus, TaskUpdate, TimeDimension, TypedEvent,
 };
+pub use shares::Shares;
 pub use sse::{parse_agui_response, parse_sse_response};
 pub use tasks::{RunHandle, TaskRuns, Tasks};
 pub use telemetry::{Conversations, Events, Metrics};

@@ -166,7 +166,7 @@ impl Files {
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = IntrospectionClient::new(ClientConfig::default())?;
     /// let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
-    /// let runner = client.runtime(&runtime).await?.run(RunRequest::default()).await?;
+    /// let runner = client.runtime(&runtime).run(RunRequest::default()).await?;
     /// let file = runner.files().upload(
     ///     FileUpload::from_path("input.jsonl").with_file_type(FileType::Upload),
     /// ).await?;

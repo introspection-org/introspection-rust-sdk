@@ -3,8 +3,8 @@
 //! Rust client for [Introspection](https://introspection.dev). Three
 //! independent surfaces, mix-and-match as needed:
 //!
-//! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
-//!    `Runner`, `tasks`, `files`). Always available, no OpenTelemetry
+//! 1. [`IntrospectionClient`] — runner creation plus runner-bound resources
+//!    (`Runner`, tasks, files, shares, and telemetry reads). Always available, no OpenTelemetry
 //!    dependency. No feature flag required.
 //! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
 //!    `track` / `feedback` / `identify` analytics events. Owns its own
@@ -22,8 +22,7 @@
 //!
 //! # async fn main_() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::with_token("your-token"))?;
-//! let runtimes = client.runtimes();
-//! // runtimes.create(...).await?;
+//! let runner = client.runtime("customer-agent").run(Default::default()).await?;
 //! # Ok(()) }
 //! ```
 //!
@@ -98,34 +97,29 @@ pub mod runner;
 pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
+#[cfg(feature = "arrow")]
+pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 pub use api::{
-    Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
-    Conversations, Dimension, Event, EventListParams, Events, Experiment, ExperimentCreate,
-    ExperimentListParams, ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File,
+    ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams, Conversations,
+    Dimension, Event, EventListParams, Events, FeedbackEvent, FeedbackPayload, File,
     FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
     HavingTerm, IntrospectionAPIError, IntrospectionEventName, JudgementEvent, JudgementPayload,
     MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery, MetricsResponse,
     ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams, Paginator,
-    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
-    ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
-    RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest,
-    RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate,
-    RuntimeListParams, RuntimeUpdate, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
-    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
-    TaskRun, TaskRunCreate, TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TimeDimension, TypedEvent, UploadSource,
+    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, ResourceShare,
+    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
+    RunnerDeployment, RunnerIdentity, RunnerSpec, ShareCreate, ShareListParams, ShareResourceType,
+    Shares, SortDirection, SseEvent, StreamOptions, Task, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind,
+    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TimeDimension,
+    TypedEvent, UploadSource,
 };
-#[cfg(feature = "arrow")]
-pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // AG-UI protocol event surface yielded by the task-run stream. The full
 // taxonomy lives in `crate::agui`; these aliases give the common types a
 // discoverable name at the crate root (`Event` alone would be ambiguous).
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
-pub use resources::{
-    ExperimentHandle, Experiments, Projects, RecipePin, Recipes, Repositories, RuntimeHandle,
-    Runtimes,
-};
+pub use resources::{ExperimentHandle, RuntimeHandle};
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
 

@@ -21,7 +21,8 @@ use uuid::Uuid;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::files::Files;
 use crate::api::http::{HttpClient, HttpConfig};
-use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpec, StringOrUuid};
+use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpec};
+use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::types::defaults;
@@ -38,7 +39,6 @@ pub enum RunnerSource {
     Experiment {
         cp_http: Arc<HttpClient>,
         experiment_id: Uuid,
-        project: StringOrUuid,
         ctx: RunRequest,
     },
 }
@@ -57,10 +57,9 @@ impl RunnerSource {
             Self::Experiment {
                 cp_http,
                 experiment_id,
-                project,
                 ctx,
             } => {
-                let path = format!("/v1/experiments/{}/run?project={}", experiment_id, project);
+                let path = format!("/v1/experiments/{}/run", experiment_id);
                 cp_http.post_json(&path, ctx).await
             }
         }
@@ -136,6 +135,12 @@ impl Runner {
         Files::new(http)
     }
 
+    /// `runner.shares.*` — read-sharing grants for files and conversations.
+    pub fn shares(&self) -> Shares {
+        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
+        Shares::new(http)
+    }
+
     /// `runner.conversations.*` — Data-Plane telemetry reads over
     /// `GET /v1/conversations` (append-only `otel_traces`). Runner-scoped (DP
     /// bearer + `events:read`). Cheap clone.
@@ -159,7 +164,7 @@ impl Runner {
         Metrics::new(http)
     }
 
-    /// Resolved runtime context (runtime / arm / recipe pin / identity
+    /// Resolved runtime context (runtime / arm / recipe / identity
     /// / caller).
     pub fn context(&self) -> RunnerContext {
         self.state.read().expect("runner lock").context.clone()

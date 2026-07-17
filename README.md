@@ -24,7 +24,7 @@ agents, powered by Pi. Define an agent as a recipe, deploy it to a
 commit-pinned runtime, and improve it in production with conversations,
 patterns, judges, and experiments.
 
-This is the native Rust client for driving Introspection runtimes and tasks,
+This is the native Rust client for running deployed Introspection agents,
 alongside optional analytics and OpenTelemetry surfaces. Use
 `IntrospectionClient` to open a runner against a deployed runtime, start a task,
 and stream its output. See the [platform SDK overview](https://docs.introspection.dev/sdk)
@@ -35,7 +35,7 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 
 | Surface | What it does | Cargo feature |
 | --- | --- | --- |
-| [`IntrospectionClient`](#1-introspectionclient--introspection-api-runtimes-tasks-files) | Introspection API: runtimes, experiments, runner, tasks, files | _none_ (default) |
+| [`IntrospectionClient`](#1-introspectionclient--runner-api) | Runner API: runtime/experiment execution, tasks, files, shares, conversations, events, metrics | _none_ (default) |
 | [`IntrospectionLogs`](#2-introspectionlogs--analytics-events-track-feedback-identify) | Analytics events: `track` / `feedback` / `identify` (OTLP logs) | `otel` |
 | [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces-span-processors--instrumentors) | Traces: span processors + LLM SDK instrumentors (OTLP traces) | `otel` |
 
@@ -74,11 +74,12 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 
 ## Three surfaces
 
-### 1. `IntrospectionClient` — Introspection API (runtimes, tasks, files)
+### 1. `IntrospectionClient` — Runner API
 
 The main Introspection API surface. No OpenTelemetry dependency; just
-HTTPS calls to manage runtimes, experiments, tasks, and files, and to
-drive the `Runner` SSE stream.
+HTTPS calls to open a deployed runtime or experiment runner and use its
+runner-bound resources. Runtime, recipe, experiment, project, and repository
+management stays in the CLI and frontend.
 
 ```rust
 // cargo add introspection-sdk
@@ -86,8 +87,12 @@ use introspection_sdk::{AgUiEvent, ClientConfig, IntrospectionClient, RunRequest
 use futures::StreamExt;
 
 let client = IntrospectionClient::new(ClientConfig::default())?;
-let runner = client.runtime("customer-agent").await?
-    .run(RunRequest::default()).await?;
+let runner = client.runtime("customer-agent")
+    .run(RunRequest {
+        agent_name: Some("customer-agent".into()),
+        scope: Some("support".into()),
+        ..Default::default()
+    }).await?;
 
 let mut events = runner.tasks()
     .start_prompt("Say hello in one sentence.").await?
@@ -106,6 +111,11 @@ while let Some(event) = events.next().await {
 
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
+
+Task runs can be prompted or resumed after an AG-UI interrupt, streamed with
+automatic reconnect, inspected, and stopped explicitly with `run.abort()`.
+`run.drain(Some(60))` is available for graceful teardown. `runner.shares()`
+creates and reads file or conversation grants; tasks are not shareable.
 
 #### Resilient streaming
 

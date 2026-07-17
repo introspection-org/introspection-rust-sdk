@@ -26,9 +26,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 1) Look up the runtime by runtime group slug or ID and open a Runner.
     let runner = client
         .runtime(&runtime)
-        .await?
         .run(RunRequest {
+            agent_name: Some("customer-agent".into()),
             ttl_seconds: Some(3600),
+            scope: Some("support".into()),
             ..Default::default()
         })
         .await?;

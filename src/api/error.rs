@@ -2,9 +2,8 @@
 //!
 //! Raised by every method on [`crate::Runner::tasks`] and
 //! [`crate::Runner::files`] (via the runner-bound `tasks` / `files`
-//! namespaces), as well as the CP-side [`crate::Runtimes`] /
-//! [`crate::Experiments`] / [`crate::Recipes`] / [`crate::Projects`]
-//! resources. The OTLP paths (`track` / `feedback` / `identify` on
+//! namespaces), as well as runtime and experiment runner creation. The OTLP
+//! paths (`track` / `feedback` / `identify` on
 //! `crate::otel::IntrospectionLogs`) keep returning
 //! [`crate::IntrospectionError`].
 

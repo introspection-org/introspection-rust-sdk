@@ -12,15 +12,15 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::resumable::{stream_resumable, StreamOptions};
 use crate::api::schemas::{
-    Task, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskRun,
-    TaskRunCreate, TaskRunResponse, TaskUpdate,
+    Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
+    TaskRun, TaskRunCreate, TaskRunResponse, TaskRunResume, TaskUpdate,
 };
 
 /// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
 ///
 /// Mirrors the Cursor SDK shape: [`Self::stream`] iterates typed AG-UI
 /// [`Event`]s, [`Self::text`] collects the assistant's text into a string,
-/// [`Self::cancel`] cancels the run.
+/// and [`Self::abort`] stops the run immediately.
 #[derive(Clone)]
 pub struct RunHandle {
     /// The task this run belongs to. `None` when constructed from
@@ -65,10 +65,17 @@ impl RunHandle {
         Ok(Box::pin(s))
     }
 
-    /// Cancel the run.
-    pub async fn cancel(&self) -> ApiResult<TaskCancelResponse> {
+    /// Abort the run immediately.
+    pub async fn abort(&self) -> ApiResult<TaskCancelResponse> {
         self.runs
-            .cancel(&self.run.task_id.to_string(), &self.run.id)
+            .abort(&self.run.task_id.to_string(), &self.run.id)
+            .await
+    }
+
+    /// Gracefully drain the run, optionally within a bounded number of seconds.
+    pub async fn drain(&self, within_seconds: Option<u64>) -> ApiResult<TaskCancelResponse> {
+        self.runs
+            .drain(&self.run.task_id.to_string(), &self.run.id, within_seconds)
             .await
     }
 
@@ -107,6 +114,13 @@ impl TaskRuns {
         Ok(RunHandle::new(None, res.run, self.clone()))
     }
 
+    /// Resume an interrupted run by posting AG-UI resume entries.
+    pub async fn resume(&self, task_id: &str, body: &TaskRunResume) -> ApiResult<RunHandle> {
+        let path = format!("/v1/tasks/{}/runs", urlencode(task_id));
+        let res: TaskRunResponse = self.http.post_json(&path, body).await?;
+        Ok(RunHandle::new(None, res.run, self.clone()))
+    }
+
     /// `GET /v1/tasks/{id}/runs/{rid}`.
     pub async fn get(&self, task_id: &str, run_id: &str) -> ApiResult<TaskRun> {
         let path = format!(
@@ -117,16 +131,33 @@ impl TaskRuns {
         self.http.get_json(&path, &()).await
     }
 
-    /// `POST /v1/tasks/{id}/runs/{rid}/cancel`.
-    pub async fn cancel(&self, task_id: &str, run_id: &str) -> ApiResult<TaskCancelResponse> {
+    async fn cancel(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        body: &TaskCancelOptions,
+    ) -> ApiResult<TaskCancelResponse> {
         let path = format!(
             "/v1/tasks/{}/runs/{}/cancel",
             urlencode(task_id),
             urlencode(run_id)
         );
-        // POST with no body, JSON response — use the same multipart-less JSON
-        // surface by sending an empty `()` body.
-        self.http.post_json(&path, &serde_json::json!({})).await
+        self.http.post_json(&path, body).await
+    }
+
+    pub async fn abort(&self, task_id: &str, run_id: &str) -> ApiResult<TaskCancelResponse> {
+        self.cancel(task_id, run_id, &TaskCancelOptions::abort())
+            .await
+    }
+
+    pub async fn drain(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        within_seconds: Option<u64>,
+    ) -> ApiResult<TaskCancelResponse> {
+        self.cancel(task_id, run_id, &TaskCancelOptions::drain(within_seconds))
+            .await
     }
 
     /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of typed
@@ -234,7 +265,7 @@ impl Tasks {
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = IntrospectionClient::new(ClientConfig::default())?;
     /// let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
-    /// let runner = client.runtime(&runtime).await?.run(RunRequest::default()).await?;
+    /// let runner = client.runtime(&runtime).run(RunRequest::default()).await?;
     /// let run = runner.tasks().start_prompt("Summarize this repo").await?;
     /// let text = run.text().await?;
     /// println!("{text}");
@@ -243,7 +274,6 @@ impl Tasks {
     pub async fn start_prompt(&self, prompt: impl Into<String>) -> ApiResult<RunHandle> {
         self.start(&TaskCreate {
             prompt: Some(prompt.into()),
-            mode: Some(TaskMode::Agent),
             ..Default::default()
         })
         .await

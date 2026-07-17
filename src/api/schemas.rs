@@ -1,4 +1,4 @@
-//! Wire types for the DP `/v1/tasks` and `/v1/files` surface.
+//! Wire types for runner creation and runner-bound Data Plane resources.
 //!
 //! Mirrored from `apps/dataplane-api/introspection_dataplane/models/{task,file}.py`
 //! and the Pydantic/TS implementations in
@@ -18,126 +18,7 @@ use std::collections::HashMap;
 use std::fmt;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StringOrUuid {
-    String(String),
-    Uuid(Uuid),
-}
-
-impl Default for StringOrUuid {
-    fn default() -> Self {
-        Self::String(String::new())
-    }
-}
-
-impl From<String> for StringOrUuid {
-    fn from(value: String) -> Self {
-        Self::String(value)
-    }
-}
-
-impl From<&str> for StringOrUuid {
-    fn from(value: &str) -> Self {
-        Self::String(value.to_string())
-    }
-}
-
-impl From<Uuid> for StringOrUuid {
-    fn from(value: Uuid) -> Self {
-        Self::Uuid(value)
-    }
-}
-
-impl fmt::Display for StringOrUuid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::String(value) => f.write_str(value),
-            Self::Uuid(value) => write!(f, "{value}"),
-        }
-    }
-}
-
-impl Serialize for StringOrUuid {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::String(value) => serializer.serialize_str(value),
-            Self::Uuid(value) => serializer.serialize_str(&value.to_string()),
-        }
-    }
-}
-
 // ----- enums -----------------------------------------------------------------
-
-/// Mode of a task — mirrors the DP `TaskMode` enum.
-///
-/// The `Other` variant captures any new mode added by the DP that the SDK
-/// has not been recompiled against. The string is the raw on-the-wire value.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum TaskMode {
-    #[default]
-    Agent,
-    Introspect,
-    SystemReview,
-    SystemInstrumentation,
-    ObservationReview,
-    SecurityReview,
-    RepoIndex,
-    SystemDiscovery,
-    Onboarding,
-    Heartbeat,
-    /// Forward-compatible escape hatch for modes the DP adds later.
-    Other(String),
-}
-
-impl TaskMode {
-    /// On-the-wire string form.
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Agent => "agent",
-            Self::Introspect => "introspect",
-            Self::SystemReview => "system_review",
-            Self::SystemInstrumentation => "system_instrumentation",
-            Self::ObservationReview => "observation_review",
-            Self::SecurityReview => "security_review",
-            Self::RepoIndex => "repo_index",
-            Self::SystemDiscovery => "system_discovery",
-            Self::Onboarding => "onboarding",
-            Self::Heartbeat => "heartbeat",
-            Self::Other(s) => s,
-        }
-    }
-}
-
-impl From<&str> for TaskMode {
-    fn from(s: &str) -> Self {
-        match s {
-            "agent" => Self::Agent,
-            "introspect" => Self::Introspect,
-            "system_review" => Self::SystemReview,
-            "system_instrumentation" => Self::SystemInstrumentation,
-            "observation_review" => Self::ObservationReview,
-            "security_review" => Self::SecurityReview,
-            "repo_index" => Self::RepoIndex,
-            "system_discovery" => Self::SystemDiscovery,
-            "onboarding" => Self::Onboarding,
-            "heartbeat" => Self::Heartbeat,
-            other => Self::Other(other.to_string()),
-        }
-    }
-}
-
-impl Serialize for TaskMode {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for TaskMode {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self::from(s.as_str()))
-    }
-}
 
 /// Status of a task or run — mirrors the DP `TaskStatus` enum.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,8 +176,6 @@ pub struct Task {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_index: Option<i64>,
-    #[serde(default)]
-    pub mode: TaskMode,
     #[serde(default = "default_task_status")]
     pub status: TaskStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -317,6 +196,8 @@ pub struct Task {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_key: Option<String>,
 }
 
 fn default_task_status() -> TaskStatus {
@@ -331,13 +212,13 @@ pub struct TaskCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<TaskMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repository_id: Option<String>,
+    pub repository_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_share_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -362,9 +243,13 @@ pub struct TaskListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub modes: Option<Vec<TaskMode>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub require_automation_id: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_ids: Option<Vec<Uuid>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_after: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,6 +265,32 @@ pub struct TaskRunCreate {
     pub prompt: Option<TaskPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<TaskRunKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskRunKind {
+    Prompt,
+    Steer,
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeEntry {
+    pub interrupt_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskRunResume {
+    pub resume: Vec<ResumeEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -407,6 +318,78 @@ pub struct TaskRunResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskCancelResponse {
     pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub(crate) enum TaskCancelOptions {
+    Abort,
+    Drain {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drain_within_seconds: Option<u64>,
+    },
+}
+
+impl TaskCancelOptions {
+    pub(crate) fn abort() -> Self {
+        Self::Abort
+    }
+
+    pub(crate) fn drain(within_seconds: Option<u64>) -> Self {
+        Self::Drain {
+            drain_within_seconds: within_seconds,
+        }
+    }
+}
+
+// ----- resource shares ------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShareResourceType {
+    File,
+    Conversation,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResourceShare {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resource_type: ShareResourceType,
+    pub resource_id: String,
+    #[serde(default)]
+    pub granted_member_id: Option<Uuid>,
+    pub created_by_member_id: Uuid,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShareCreate {
+    pub resource_type: ShareResourceType,
+    pub resource_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_member_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ShareListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_total: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_type: Option<ShareResourceType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by_me: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_to_me: Option<bool>,
 }
 
 // ----- files -----------------------------------------------------------------
@@ -504,361 +487,6 @@ impl SseEvent {
     }
 }
 
-// ----- projects (CP) ---------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Project {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub name: String,
-    #[serde(default)]
-    pub slug: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ProjectListParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-}
-
-// ----- repositories (CP) ----------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Repository {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub project_id: Uuid,
-    pub name: String,
-    #[serde(default)]
-    pub slug: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RepositoryListParams {
-    pub project_id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-}
-
-// ----- recipes (CP) ----------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Recipe {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub project_id: Uuid,
-    pub repository_id: Uuid,
-    pub name: String,
-    pub slug: String,
-    pub git_ref: String,
-    pub git_commit_sha: String,
-    #[serde(default)]
-    pub sub_path: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    pub created_by_member_id: Uuid,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct RecipeCreate {
-    pub project: StringOrUuid,
-    pub repository_id: Uuid,
-    pub name: String,
-    pub git_ref: String,
-    pub git_commit_sha: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sub_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct RecipeUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct RecipeListParams {
-    pub project: StringOrUuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repository_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub git_ref: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub git_commit_sha: Option<String>,
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-}
-
-// ----- runtimes (CP) ---------------------------------------------------------
-
-/// How a Runtime acquires LLM provider credentials at session create —
-/// mirrors the CP `RuntimeLlmMode` enum.
-///
-/// `Managed` (the default) uses Introspection-managed keys; `Byok` uses
-/// the project's Endpoint pool. The `Other` variant captures any future
-/// mode the CP adds, so callers can still read the rest of the record.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum RuntimeLlmMode {
-    #[default]
-    Managed,
-    Byok,
-    /// Forward-compatible escape hatch.
-    Other(String),
-}
-
-impl RuntimeLlmMode {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Managed => "managed",
-            Self::Byok => "byok",
-            Self::Other(s) => s,
-        }
-    }
-}
-
-impl From<&str> for RuntimeLlmMode {
-    fn from(s: &str) -> Self {
-        match s {
-            "managed" => Self::Managed,
-            "byok" => Self::Byok,
-            other => Self::Other(other.to_string()),
-        }
-    }
-}
-
-impl Serialize for RuntimeLlmMode {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for RuntimeLlmMode {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self::from(s.as_str()))
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Runtime {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub project_id: Uuid,
-    pub recipe_id: Uuid,
-    pub created_by_member_id: Uuid,
-    pub created_at: String,
-    pub updated_at: String,
-    pub name: String,
-    pub slug: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub is_active: bool,
-    #[serde(default)]
-    pub allow_hot_swap: bool,
-    /// LLM credential source. Defaults to `Managed` when the CP omits
-    /// the field (older servers) or sends `"managed"` explicitly.
-    #[serde(default)]
-    pub llm_mode: RuntimeLlmMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RuntimeCreate {
-    pub project: StringOrUuid,
-    pub recipe_id: Uuid,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_hot_swap: Option<bool>,
-    /// LLM credential source. Defaults to `Managed`. The wire value is
-    /// always sent; the server's default (`"managed"`) matches so no
-    /// behaviour change for unset callers.
-    pub llm_mode: RuntimeLlmMode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RuntimeUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_hot_swap: Option<bool>,
-    /// PATCH semantics: `None` means "don't change". Set to switch the
-    /// runtime between managed credentials and the BYOK pool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub llm_mode: Option<RuntimeLlmMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_active: Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RuntimeListParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<StringOrUuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipe_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub only_active: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next: Option<String>,
-}
-
-// ----- experiments (CP) ------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExperimentStatus {
-    Draft,
-    Running,
-    Concluded,
-    Cancelled,
-    Other(String),
-}
-
-impl ExperimentStatus {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Draft => "draft",
-            Self::Running => "running",
-            Self::Concluded => "concluded",
-            Self::Cancelled => "cancelled",
-            Self::Other(s) => s,
-        }
-    }
-}
-
-impl From<&str> for ExperimentStatus {
-    fn from(s: &str) -> Self {
-        match s {
-            "draft" => Self::Draft,
-            "running" => Self::Running,
-            "concluded" => Self::Concluded,
-            "cancelled" => Self::Cancelled,
-            other => Self::Other(other.to_string()),
-        }
-    }
-}
-
-impl Serialize for ExperimentStatus {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for ExperimentStatus {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        Ok(Self::from(s.as_str()))
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Arm {
-    pub runtime_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arm_label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub weight: Option<f64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Experiment {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub project_id: Uuid,
-    pub created_at: String,
-    pub updated_at: String,
-    pub name: String,
-    pub runtime: String,
-    pub status: ExperimentStatus,
-    pub arms: Vec<Arm>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_json: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub routing_strategy: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hash_key_fields: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ExperimentCreate {
-    pub project: StringOrUuid,
-    pub name: String,
-    pub runtime: StringOrUuid,
-    pub arms: Vec<Arm>,
-    pub goal_json: HashMap<String, serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub routing_strategy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash_key_fields: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ExperimentUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_json: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub routing_strategy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash_key_fields: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ExperimentListParams {
-    pub project: StringOrUuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<StringOrUuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<ExperimentStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next: Option<String>,
-}
-
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
@@ -941,27 +569,26 @@ pub struct RunRequest {
     /// [`RunCaller`]. Echoed on the response's `runtime_context.caller`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<RunCaller>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
     /// Session lifetime override, max 24h. Default 1h on CP side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
-    /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
-    /// present, CP resolves the runtime row in this runtime's slug whose
-    /// `recipe_id == recipe_id` and opens the runner against that row —
-    /// the "canary a previous version" flow from the SDK design doc.
-    /// Defaults to `None`; the regular `runtime(id).run()` path leaves
-    /// it unset and CP uses the row's current `recipe_id`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipe_id: Option<Uuid>,
+    pub scope: Option<String>,
 }
 
 /// Resolved context attached to a [`RunnerSpec`] — the runtime / arm /
 /// identity CP picked. Surfaced on `runner.context()` for telemetry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RunnerContext {
-    pub runtime_id: Uuid,
+    #[serde(default)]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default)]
+    pub runtime_group_id: Option<Uuid>,
     #[serde(default)]
     pub experiment_id: Option<Uuid>,
-    pub recipe_id: Uuid,
+    pub recipe_id: Option<Uuid>,
     #[serde(default)]
     pub recipe_repository_id: Option<Uuid>,
     #[serde(default)]
@@ -970,6 +597,8 @@ pub struct RunnerContext {
     pub recipe_git_commit_sha: Option<String>,
     #[serde(default)]
     pub arm_label: Option<String>,
+    #[serde(default)]
+    pub agent_name: Option<String>,
     #[serde(default)]
     pub identity: RunnerIdentity,
     /// Echoed from the request body when supplied — see [`RunCaller`].
@@ -1860,19 +1489,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn task_mode_round_trips_known_variants() {
-        let mode: TaskMode = serde_json::from_str("\"agent\"").unwrap();
-        assert_eq!(mode, TaskMode::Agent);
-        assert_eq!(serde_json::to_string(&mode).unwrap(), "\"agent\"");
-    }
-
-    #[test]
-    fn task_mode_tolerates_unknown_values() {
-        let mode: TaskMode = serde_json::from_str("\"brand_new_mode\"").unwrap();
-        assert_eq!(mode, TaskMode::Other("brand_new_mode".to_string()));
-    }
-
-    #[test]
     fn task_status_round_trips() {
         let s: TaskStatus = serde_json::from_str("\"running\"").unwrap();
         assert_eq!(s, TaskStatus::Running);
@@ -1892,74 +1508,6 @@ mod tests {
         let page: Paginated<serde_json::Value> = serde_json::from_str(payload).unwrap();
         assert_eq!(page.count, 0);
         assert!(page.next.is_none());
-    }
-
-    #[test]
-    fn runtime_llm_mode_round_trips_known_variants() {
-        let m: RuntimeLlmMode = serde_json::from_str("\"managed\"").unwrap();
-        assert_eq!(m, RuntimeLlmMode::Managed);
-        assert_eq!(serde_json::to_string(&m).unwrap(), "\"managed\"");
-
-        let m: RuntimeLlmMode = serde_json::from_str("\"byok\"").unwrap();
-        assert_eq!(m, RuntimeLlmMode::Byok);
-        assert_eq!(serde_json::to_string(&m).unwrap(), "\"byok\"");
-    }
-
-    #[test]
-    fn runtime_llm_mode_tolerates_unknown_values() {
-        let m: RuntimeLlmMode = serde_json::from_str("\"brand_new_mode\"").unwrap();
-        assert_eq!(m, RuntimeLlmMode::Other("brand_new_mode".to_string()));
-    }
-
-    #[test]
-    fn runtime_llm_mode_default_is_managed() {
-        assert_eq!(RuntimeLlmMode::default(), RuntimeLlmMode::Managed);
-    }
-
-    #[test]
-    fn runtime_list_params_serialize_runtime_not_name_or_slug() {
-        let value = serde_json::to_value(RuntimeListParams {
-            runtime: Some("customer-agent".into()),
-            ..Default::default()
-        })
-        .expect("runtime list params serialize");
-
-        assert_eq!(value["runtime"], "customer-agent");
-        assert!(value.get("name").is_none());
-        assert!(value.get("slug").is_none());
-    }
-
-    #[test]
-    fn project_list_params_serialize_project_not_name_or_slug() {
-        let value = serde_json::to_value(ProjectListParams {
-            project: Some("main".to_string()),
-            ..Default::default()
-        })
-        .expect("project list params serialize");
-
-        assert_eq!(value["project"], "main");
-        assert!(value.get("name").is_none());
-        assert!(value.get("slug").is_none());
-    }
-
-    #[test]
-    fn runtime_create_accepts_project_string_or_uuid() {
-        let uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000123").unwrap();
-        let by_slug = serde_json::to_value(RuntimeCreate {
-            project: "main".into(),
-            name: "agent".to_string(),
-            ..Default::default()
-        })
-        .expect("runtime create serializes slug project");
-        let by_uuid = serde_json::to_value(RuntimeCreate {
-            project: uuid.into(),
-            name: "agent".to_string(),
-            ..Default::default()
-        })
-        .expect("runtime create serializes uuid project");
-
-        assert_eq!(by_slug["project"], "main");
-        assert_eq!(by_uuid["project"], uuid.to_string());
     }
 
     #[test]

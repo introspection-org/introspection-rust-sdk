@@ -14,8 +14,9 @@ use introspection_sdk::api::{
     ConversationListParams, Conversations, Event, EventListParams, Events, FileCreateText,
     FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
     IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
-    PaginationParams, SortDirection, TaskCreate, TaskListParams, TaskMode, TaskRunCreate, TaskRuns,
-    TaskUpdate, Tasks,
+    PaginationParams, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType, Shares,
+    SortDirection, TaskCreate, TaskListParams, TaskRunCreate, TaskRunResume, TaskRuns, TaskUpdate,
+    Tasks,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -68,10 +69,7 @@ async fn tasks_create_returns_task_and_run() {
 
     Mock::given(method("POST"))
         .and(path("/v1/tasks"))
-        .and(body_json(json!({
-            "prompt": "hi",
-            "mode": "agent",
-        })))
+        .and(body_json(json!({"prompt": "hi"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "task": {
                 "id": "00000000-0000-0000-0000-000000000001",
@@ -79,7 +77,6 @@ async fn tasks_create_returns_task_and_run() {
                 "project_id": "00000000-0000-0000-0000-00000000bbbb",
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
-                "mode": "agent",
                 "status": "pending",
                 "is_archived": false,
             },
@@ -95,7 +92,6 @@ async fn tasks_create_returns_task_and_run() {
     let handle = tasks
         .start(&TaskCreate {
             prompt: Some("hi".into()),
-            mode: Some(TaskMode::Agent),
             ..Default::default()
         })
         .await
@@ -119,7 +115,6 @@ async fn tasks_update_patches_title() {
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z",
             "title": "renamed",
-            "mode": "agent",
             "status": "running",
             "is_archived": false,
         })))
@@ -242,6 +237,7 @@ async fn task_runs_create_then_cancel() {
         .and(path(
             "/v1/tasks/00000000-0000-0000-0000-000000000001/runs/run_2/cancel",
         ))
+        .and(body_json(json!({"mode": "abort"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "run_2"})))
         .mount(&server)
         .await;
@@ -256,8 +252,109 @@ async fn task_runs_create_then_cancel() {
         )
         .await
         .unwrap();
-    let cancel = handle.cancel().await.unwrap();
+    let cancel = handle.abort().await.unwrap();
     assert_eq!(cancel.id, "run_2");
+}
+
+#[tokio::test]
+async fn task_runs_resume_and_drain_use_current_bodies() {
+    let server = MockServer::start().await;
+    let runs = TaskRuns::new(build_http(&server));
+    Mock::given(method("POST"))
+        .and(path("/v1/tasks/abc/runs"))
+        .and(body_json(json!({
+            "resume": [{"interruptId": "plan:tool-1", "status": "cancelled"}]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "run": {"id": "run_3", "task_id": "00000000-0000-0000-0000-000000000001", "status": "queued"}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1/tasks/00000000-0000-0000-0000-000000000001/runs/run_3/cancel",
+        ))
+        .and(body_json(
+            json!({"mode": "drain", "drain_within_seconds": 60}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "run_3"})))
+        .mount(&server)
+        .await;
+
+    let handle = runs
+        .resume(
+            "abc",
+            &TaskRunResume {
+                resume: vec![ResumeEntry {
+                    interrupt_id: "plan:tool-1".into(),
+                    status: "cancelled".into(),
+                    payload: None,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(handle.drain(Some(60)).await.unwrap().id, "run_3");
+}
+
+#[tokio::test]
+async fn shares_create_and_list_are_runner_bound_resources() {
+    let server = MockServer::start().await;
+    let shares = Shares::new(build_http(&server));
+    let share = json!({
+        "id": "00000000-0000-0000-0000-000000000010",
+        "org_id": "00000000-0000-0000-0000-00000000aaaa",
+        "project_id": "00000000-0000-0000-0000-00000000bbbb",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "resource_type": "conversation",
+        "resource_id": "conversation-1",
+        "granted_member_id": null,
+        "created_by_member_id": "00000000-0000-0000-0000-00000000cccc",
+        "url": "https://api.example/v1/conversations/conversation-1?share_id=share-1"
+    });
+    Mock::given(method("POST"))
+        .and(path("/v1/shares"))
+        .and(body_json(
+            json!({"resource_type": "conversation", "resource_id": "conversation-1"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(share.clone()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/shares"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [share.clone()], "count": 1, "next": null
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/shares/share%2F1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(share.clone()))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/v1/shares/share%2F1"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let created = shares
+        .create(&ShareCreate {
+            resource_type: ShareResourceType::Conversation,
+            resource_id: "conversation-1".into(),
+            granted_member_id: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(created.resource_id, "conversation-1");
+    let mut pages = shares.list(&ShareListParams::default());
+    assert_eq!(pages.next_page().await.unwrap().unwrap().count, 1);
+    assert_eq!(
+        shares.get("share/1").await.unwrap().resource_id,
+        "conversation-1"
+    );
+    shares.delete("share/1").await.unwrap();
 }
 
 #[tokio::test]
@@ -823,7 +920,6 @@ fn task_response(status: &str) -> serde_json::Value {
         "project_id": "00000000-0000-0000-0000-00000000bbbb",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
-        "mode": "agent",
         "status": status,
         "is_archived": false,
     })

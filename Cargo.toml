@@ -17,7 +17,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# Default: REST-only client (runtimes / experiments / Runner / tasks / files).
+# Default: REST-only runner client (tasks / files / shares / reads).
 # Add the `otel` feature for the OTLP exporter, `track` / `feedback` /
 # `identify`, the span processor, observation helpers, and the LLM SDK
 # instrumentation (which all live behind `otel`).
