@@ -1,14 +1,14 @@
 //! REST API surface for the Introspection Data Plane (`/v1/tasks`,
-//! `/v1/files`).
+//! `/v1/files`, `/v1/shares`).
 //!
-//! Two parallel namespaces are wired onto [`crate::IntrospectionClient`],
-//! both mirroring the corresponding JS / Python SDKs:
+//! Runner-bound resource namespaces mirror the corresponding JS / Python SDKs:
 //!
 //! - [`Tasks`] — task lifecycle (list / create / update / archive / delete)
 //!   with nested [`TaskRuns`] and a cursor-style [`Tasks::start_prompt`]
 //!   sugar that returns a [`RunHandle`].
 //! - [`Files`] — OpenAI-style upload / download / list, plus a nested
 //!   [`FileVersions`] namespace.
+//! - [`Shares`] — read-sharing grants for files and conversations.
 //!
 //! Everything maps 1:1 to existing DP routes; no new HTTP surface area.
 //! Auth reuses the same `INTROSPECTION_TOKEN` bearer used by the OTLP
@@ -95,9 +95,9 @@
 //! | `DELETE /v1/tasks/{id}` | [`Tasks::delete`] *(403 on dashboard keys)* |
 //! | `POST   /v1/tasks/{id}/archive` | [`Tasks::archive`] |
 //! | `POST   /v1/tasks/{id}/unarchive` | [`Tasks::unarchive`] |
-//! | `POST   /v1/tasks/{id}/runs` | [`TaskRuns::create`] |
+//! | `POST   /v1/tasks/{id}/runs` | [`TaskRuns::create`] / [`TaskRuns::resume`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}` | [`TaskRuns::get`] |
-//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] |
+//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] / [`TaskRuns::abort`] / [`TaskRuns::drain`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}/stream` | [`TaskRuns::stream`] |
 //! | `GET    /v1/files` | [`Files::list`] *(paginator: stream or `next_page`)* |
 //! | `POST   /v1/files` (multipart) | [`Files::upload`] |
@@ -109,6 +109,10 @@
 //! | `GET    /v1/files/{id}/versions` *(paginated)* | [`FileVersions::list`] |
 //! | `POST   /v1/files/{id}/versions` | [`FileVersions::create`] |
 //! | `GET    /v1/files/{id}/versions/{vid}` | [`FileVersions::get`] |
+//! | `GET    /v1/shares` | [`Shares::list`] |
+//! | `POST   /v1/shares` | [`Shares::create`] |
+//! | `GET    /v1/shares/{id}` | [`Shares::get`] |
+//! | `DELETE /v1/shares/{id}` | [`Shares::delete`] |
 //!
 //! # Streaming
 //!
@@ -141,7 +145,7 @@
 //!
 //! # Errors
 //!
-//! Every method on `tasks` / `files` returns [`ApiResult<T>`], i.e.
+//! Every method on `tasks` / `files` / `shares` returns [`ApiResult<T>`], i.e.
 //! `Result<T, `[`IntrospectionAPIError`]`>`. The error enum has variants
 //! for HTTP failures (status / code / request id / parsed body), transport
 //! failures, decode failures, invalid configuration, and local I/O during
@@ -159,6 +163,7 @@ pub mod http;
 pub mod paginator;
 pub mod resumable;
 pub mod schemas;
+pub mod shares;
 pub mod sse;
 pub mod tasks;
 pub mod telemetry;
@@ -179,12 +184,15 @@ pub use schemas::{
     ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
     PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
-    RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext,
-    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate, RuntimeListParams,
-    RuntimeUpdate, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate,
-    TaskRunResponse, TaskStatus, TaskUpdate, TimeDimension, TypedEvent,
+    RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
+    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
+    RuntimeCreate, RuntimeListParams, RuntimeUpdate, ShareCreate, ShareListParams,
+    ShareResourceType, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions,
+    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
+    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate,
+    TimeDimension, TypedEvent,
 };
+pub use shares::Shares;
 pub use sse::{parse_agui_response, parse_sse_response};
 pub use tasks::{RunHandle, TaskRuns, Tasks};
 pub use telemetry::{Conversations, Events, Metrics};
