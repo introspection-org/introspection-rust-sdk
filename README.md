@@ -8,7 +8,7 @@
   </a>
 </div>
 
-<h4 align="center">Deploy vertical agents that improve in production.</h4>
+<h4 align="center">Run vertical agents with a focused Rust SDK.</h4>
 
 <div align="center">
   <a href="https://introspection.dev"><img src="https://img.shields.io/badge/website-introspection.dev-blue" alt="Website"></a>
@@ -20,14 +20,9 @@
 <br>
 
 [Introspection](https://introspection.dev) is the managed cloud for vertical
-agents, powered by Pi. Define an agent as a recipe, deploy it to a
-commit-pinned runtime, and improve it in production with conversations,
-patterns, judges, and experiments.
-
-This is the native Rust client for running deployed Introspection agents,
-alongside optional analytics and OpenTelemetry surfaces. Use
-`IntrospectionClient` to open a runner against a deployed runtime, start a task,
-and stream its output. See the [platform SDK overview](https://docs.introspection.dev/sdk)
+agents. This is the native Rust client for opening an agent runner, starting
+tasks, and streaming their output, alongside optional OTLP logs and traces. See
+the [platform SDK overview](https://docs.introspection.dev/sdk)
 for the wider product workflow and the JavaScript, Python, browser, and CLI
 clients.
 
@@ -37,7 +32,7 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 | --- | --- | --- |
 | [`IntrospectionClient`](#1-introspectionclient--runner-api) | Runner API: runtime/experiment execution, tasks, files, shares, conversations, events, metrics | _none_ (default) |
 | [`IntrospectionLogs`](#2-introspectionlogs--analytics-events-track-feedback-identify) | Analytics events: `track` / `feedback` / `identify` (OTLP logs) | `otel` |
-| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces-span-processors--instrumentors) | Traces: span processors + LLM SDK instrumentors (OTLP traces) | `otel` |
+| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--otlp-traces) | OTLP trace export | `otel` |
 
 They share no state. Construct the ones you want, configure independently, mix and match.
 
@@ -57,29 +52,21 @@ With logs/traces export:
 introspection-sdk = { version = "0.1", features = ["otel"] }
 ```
 
-The `async-openai` adapter is experimental:
-
-```toml
-[dependencies]
-introspection-sdk = { version = "0.1", features = ["openai"] }
-```
-
 ### Feature flags
 
-| Feature   | Description                                                        |
-| --------- | ------------------------------------------------------------------ |
-| `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
-| `openai`  | Experimental `async-openai` support (implies `otel`)            |
-| `testing` | In-memory span exporter and test helpers (implies `otel`)          |
+| Feature | Description |
+| --- | --- |
+| `otel` | Enables optional OTLP logs and traces |
+| `arrow` | Enables Arrow decoding for runner-scoped telemetry reads |
 
 ## Three surfaces
 
 ### 1. `IntrospectionClient` — Runner API
 
-The main Introspection API surface. No OpenTelemetry dependency; just
-HTTPS calls to open a deployed runtime or experiment runner and use its
-runner-bound resources. Runtime, recipe, experiment, project, and repository
-management stays in the CLI and frontend.
+The main Introspection API surface. No OpenTelemetry dependency; just HTTPS
+calls to open a configured runtime or experiment runner and use its
+runner-bound resources. Control-plane configuration is intentionally outside
+this SDK.
 
 ```rust
 // cargo add introspection-sdk
@@ -225,7 +212,7 @@ Available baggage guards: `set_user_id`, `set_anonymous_id`,
 `set_baggage`. Each returns an RAII guard that clears the value when
 dropped.
 
-### 3. `IntrospectionSpanProcessor` — Traces (span processors + instrumentors)
+### 3. `IntrospectionSpanProcessor` — OTLP traces
 
 A standalone `SpanProcessor` you attach to your own
 `SdkTracerProvider`. Sends spans to the Introspection OTLP collector
@@ -252,64 +239,6 @@ let provider = SdkTracerProvider::builder()
 `SpanProcessorAdvancedOptions` lets you override the OTLP collector URL
 (`base_otel_url`), add HTTP headers, or inject a custom `SpanExporter`
 for tests.
-
-## Higher-level helpers (otel feature)
-
-### Observation API
-
-Instruments LLM calls and pipeline steps as OpenTelemetry spans with
-[gen_ai semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
-
-```rust
-use introspection_sdk::otel::{GenerationUpdate, Observation, ObservationConfig};
-use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
-
-let provider = SdkTracerProvider::builder().build();
-let tracer = provider.tracer("my-app");
-
-let mut obs = Observation::start(
-    &tracer,
-    ObservationConfig::generation("chat", "gpt-4o-mini"),
-);
-// ... make the API call ...
-obs.update_generation(
-    GenerationUpdate::new()
-        .with_response_model("gpt-4o-mini")
-        .with_response_id("chatcmpl-abc123")
-        .with_usage(12, 8),
-);
-obs.set_ok();
-// span ends when `obs` is dropped
-```
-
-Observations nest automatically via OpenTelemetry context propagation.
-
-### `async-openai` integration
-
-> **Experimental integration.**
-
-Requires the `openai` feature. Wraps `async-openai` calls with span
-instrumentation.
-
-```rust
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::*;
-use introspection_sdk::otel::openai::traced_chat_completion;
-
-let client = Client::with_config(OpenAIConfig::default());
-let request = CreateChatCompletionRequest {
-    model: "gpt-4o-mini".to_string(),
-    messages: vec![/* … */],
-    ..Default::default()
-};
-
-let response = traced_chat_completion(&tracer, &client, request).await?;
-```
-
-Streaming variant `traced_chat_completion_stream` and the
-`tracing`-based `tracing_traced_chat_completion` are also available.
 
 ## Environment variables
 

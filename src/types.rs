@@ -60,7 +60,6 @@ pub struct AdvancedOptions {
 ///
 /// let config = ClientConfig::builder()
 ///     .token("your-token")
-///     .service_name("my-service")
 ///     .build()
 ///     .unwrap();
 /// ```
@@ -70,17 +69,6 @@ pub struct ClientConfig {
     /// Authentication token (env: `INTROSPECTION_TOKEN`).
     #[builder(setter(into))]
     pub token: Option<String>,
-
-    /// Service name for telemetry (env: `INTROSPECTION_SERVICE_NAME`,
-    /// default: `"introspection-client"`).
-    #[builder(setter(into))]
-    pub service_name: Option<String>,
-
-    /// Resolved project ID for callers that need to carry an internal project
-    /// UUID. User-facing project selectors are passed as `project` on the
-    /// resource methods.
-    #[builder(setter(into, strip_option), default)]
-    pub project_id: Option<uuid::Uuid>,
 
     /// Advanced REST options.
     #[builder(setter(into, strip_option), default)]
@@ -130,13 +118,8 @@ mod tests {
 
     #[test]
     fn test_client_config_builder() {
-        let config = ClientConfig::builder()
-            .token("test-token")
-            .service_name("test-service")
-            .build()
-            .unwrap();
+        let config = ClientConfig::builder().token("test-token").build().unwrap();
 
         assert_eq!(config.token, Some("test-token".to_string()));
-        assert_eq!(config.service_name, Some("test-service".to_string()));
     }
 }

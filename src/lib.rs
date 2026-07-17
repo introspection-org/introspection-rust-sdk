@@ -139,6 +139,3 @@ pub use otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
-
-#[cfg(feature = "openai")]
-pub use otel::openai::TracedStream;

@@ -49,9 +49,6 @@ pub type Result<T> = std::result::Result<T, IntrospectionError>;
 /// OpenTelemetry-based `track` / `feedback` / `identify` flow, enable
 /// the `otel` Cargo feature.
 pub struct IntrospectionClient {
-    #[allow(dead_code)]
-    service_name: String,
-    project_id: Option<uuid::Uuid>,
     cp_http: Option<Arc<HttpClient>>,
 }
 
@@ -65,14 +62,6 @@ impl IntrospectionClient {
             .clone()
             .or_else(|| env::var("INTROSPECTION_TOKEN").ok())
             .unwrap_or_default();
-
-        let service_name = config
-            .service_name
-            .clone()
-            .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
-            .unwrap_or_else(|| types::defaults::SERVICE_NAME.to_string());
-
-        let project_id = config.project_id;
 
         let advanced = config.advanced.unwrap_or_default();
 
@@ -104,16 +93,7 @@ impl IntrospectionClient {
             Some(http_arc)
         };
 
-        Ok(Self {
-            service_name,
-            project_id,
-            cp_http,
-        })
-    }
-
-    /// The resolved project ID from [`ClientConfig::project_id`], if supplied.
-    pub fn project_id(&self) -> Option<uuid::Uuid> {
-        self.project_id
+        Ok(Self { cp_http })
     }
 
     /// Create a handle that resolves a runtime group slug or ID when `.run()` is called.

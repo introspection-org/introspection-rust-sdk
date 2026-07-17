@@ -2,7 +2,7 @@
 name = "introspection-sdk"
 version = "0.1.0"
 edition = "2021"
-description = "Rust SDK for Introspection — continuously improve your AI systems with production feedback and frontier practices"
+description = "Rust SDK for running Introspection agents with optional OTLP logs and traces"
 license = "Apache-2.0"
 repository = "https://github.com/introspection-org/introspection-rust-sdk"
 keywords = ["ai", "llm", "opentelemetry", "otlp", "introspection"]
@@ -19,8 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 # Default: REST-only runner client (tasks / files / shares / reads).
 # Add the `otel` feature for the OTLP exporter, `track` / `feedback` /
-# `identify`, the span processor, observation helpers, and the LLM SDK
-# instrumentation (which all live behind `otel`).
+# `identify` and OTLP trace export.
 default = []
 otel = [
     "dep:opentelemetry",
@@ -34,7 +33,6 @@ otel = [
 # response and decode it into `RecordBatch`es.
 arrow = ["dep:arrow"]
 testing = ["otel", "opentelemetry_sdk/testing"]
-openai = ["otel", "dep:async-openai"]
 
 [dependencies]
 # Async runtime
@@ -72,15 +70,12 @@ mime_guess = "2"
 # `IntrospectionLogs` (otel) builders alike.
 derive_builder = "0.20"
 
-# Optional: async-openai integration (requires `otel`)
-async-openai = { version = "0.41", features = ["chat-completion", "responses"], optional = true }
-
 # Optional: Apache Arrow IPC-stream decode for the telemetry reads (gated by
 # the `arrow` feature). `ipc` alone keeps the dependency tree lean — no
 # csv/json/prettyprint/pyarrow.
 arrow = { version = "59", default-features = false, features = ["ipc"], optional = true }
 
-# Streaming support (StreamExt for async-openai streams)
+# Streaming support
 futures = "0.3"
 
 # Load .env files for examples and integration tests
@@ -92,27 +87,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
 flate2 = "1"
-async-openai = { version = "0.41", features = ["chat-completion"] }
 dotenvy = "0.15"
 
 [[example]]
 name = "runtimes"
 path = "examples/api/runtimes.rs"
-
-[[example]]
-name = "openai_tool_call"
-path = "examples/otel/openai_tool_call.rs"
-required-features = ["openai"]
-
-[[example]]
-name = "openai_streaming"
-path = "examples/otel/openai_streaming.rs"
-required-features = ["openai"]
-
-[[example]]
-name = "responses_api_features"
-path = "examples/otel/responses_api_features.rs"
-required-features = ["openai"]
 
 # Linting configuration
 # Run: cargo clippy -- -W clippy::all -W clippy::pedantic
