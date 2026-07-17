@@ -51,7 +51,10 @@ opentelemetry-otlp = { version = "0.32.0", default-features = false, features = 
 # Pinned to 0.13 to match opentelemetry-otlp 0.32 (avoids a duplicate
 # reqwest in the dep graph and the resulting HttpClient trait-bound
 # mismatch).
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs"] }
+# `gzip` makes the client advertise `Accept-Encoding: gzip` and decompress
+# responses transparently — the DP gateway compresses JSON when offered
+# (Arrow stream responses are never compressed and arrive unchanged).
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs", "gzip"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -88,6 +91,7 @@ tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
+flate2 = "1"
 async-openai = { version = "0.41", features = ["chat-completion"] }
 dotenvy = "0.15"
 
