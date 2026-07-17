@@ -14,8 +14,9 @@ use introspection_sdk::api::{
     ConversationListParams, Conversations, Event, EventListParams, Events, FileCreateText,
     FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
     IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
-    PaginationParams, SortDirection, TaskCreate, TaskListParams, TaskMode, TaskRunCreate, TaskRuns,
-    TaskUpdate, Tasks,
+    PaginationParams, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType, Shares,
+    SortDirection, TaskCreate, TaskListParams, TaskMode, TaskRunCreate, TaskRunResume, TaskRuns,
+    TaskStatus, TaskUpdate, Tasks,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -80,8 +81,9 @@ async fn tasks_create_returns_task_and_run() {
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
                 "mode": "agent",
-                "status": "pending",
+                "status": "awaiting_user",
                 "is_archived": false,
+                "identity_key": "user:customer-1",
             },
             "run": {
                 "id": "run_001",
@@ -101,7 +103,10 @@ async fn tasks_create_returns_task_and_run() {
         .await
         .unwrap();
     assert_eq!(handle.run.id, "run_001");
-    assert!(handle.task.is_some());
+    let task = handle.task.unwrap();
+    assert_eq!(task.mode, TaskMode::Agent);
+    assert_eq!(task.status, TaskStatus::AwaitingUser);
+    assert_eq!(task.identity_key.as_deref(), Some("user:customer-1"));
 }
 
 #[tokio::test]
@@ -242,6 +247,7 @@ async fn task_runs_create_then_cancel() {
         .and(path(
             "/v1/tasks/00000000-0000-0000-0000-000000000001/runs/run_2/cancel",
         ))
+        .and(body_json(json!({})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "run_2"})))
         .mount(&server)
         .await;
@@ -258,6 +264,134 @@ async fn task_runs_create_then_cancel() {
         .unwrap();
     let cancel = handle.cancel().await.unwrap();
     assert_eq!(cancel.id, "run_2");
+}
+
+#[tokio::test]
+async fn task_runs_resume_and_typed_cancel_use_current_bodies() {
+    let server = MockServer::start().await;
+    let runs = TaskRuns::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/tasks/abc/runs"))
+        .and(body_json(json!({
+            "resume": [{
+                "interruptId": "plan:tool-1",
+                "status": "cancelled"
+            }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "run": {
+                "id": "run_3",
+                "task_id": "00000000-0000-0000-0000-000000000001",
+                "status": "queued"
+            }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1/tasks/00000000-0000-0000-0000-000000000001/runs/run_3/cancel",
+        ))
+        .and(body_json(json!({
+            "mode": "drain",
+            "drain_within_seconds": 60
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "run_3"})))
+        .mount(&server)
+        .await;
+
+    let handle = runs
+        .resume(
+            "abc",
+            &TaskRunResume {
+                resume: vec![ResumeEntry {
+                    interrupt_id: "plan:tool-1".into(),
+                    status: "cancelled".into(),
+                    payload: None,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let cancel = handle
+        .cancel_with(&introspection_sdk::TaskCancelOptions::Drain {
+            drain_within_seconds: Some(60),
+        })
+        .await
+        .unwrap();
+    assert_eq!(cancel.id, "run_3");
+}
+
+#[tokio::test]
+async fn shares_support_identity_grants_and_crud() {
+    let server = MockServer::start().await;
+    let shares = Shares::new(build_http(&server));
+    let share_id = "00000000-0000-0000-0000-000000000010";
+    let response = json!({
+        "id": share_id,
+        "org_id": "00000000-0000-0000-0000-00000000aaaa",
+        "project_id": "00000000-0000-0000-0000-00000000bbbb",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "resource_type": "file",
+        "resource_id": "file_1",
+        "granted_member_id": null,
+        "granted_identity_key": "user:user-1",
+        "created_by_member_id": "00000000-0000-0000-0000-000000000020",
+        "created_by_identity_key": "user:admin-1",
+        "url": "https://example.test/share"
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v1/shares"))
+        .and(body_json(json!({
+            "resource_type": "file",
+            "resource_id": "file_1",
+            "granted_identity_key": "user:user-1"
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(response.clone()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/shares"))
+        .and(query_param("resource_id", "file_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [response.clone()],
+            "count": 1,
+            "total_count": 1,
+            "next": null
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/shares/{share_id}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/v1/shares/{share_id}")))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let created = shares
+        .create(&ShareCreate {
+            resource_type: ShareResourceType::File,
+            resource_id: "file_1".into(),
+            granted_member_id: None,
+            granted_identity_key: Some("user:user-1".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(created.granted_identity_key.as_deref(), Some("user:user-1"));
+
+    let mut page = shares.list(&ShareListParams {
+        resource_id: Some("file_1".into()),
+        ..Default::default()
+    });
+    assert_eq!(page.next_page().await.unwrap().unwrap().count, 1);
+    assert_eq!(shares.get(share_id).await.unwrap().id.to_string(), share_id);
+    shares.delete(share_id).await.unwrap();
 }
 
 #[tokio::test]

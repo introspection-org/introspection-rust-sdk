@@ -4,7 +4,7 @@
 //! independent surfaces, mix-and-match as needed:
 //!
 //! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
-//!    `Runner`, `tasks`, `files`). Always available, no OpenTelemetry
+//!    `Runner`, `tasks`, `files`, `shares`, and runner telemetry reads). Always available, no OpenTelemetry
 //!    dependency. No feature flag required.
 //! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
 //!    `track` / `feedback` / `identify` analytics events. Owns its own
@@ -108,12 +108,13 @@ pub use api::{
     ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams, Paginator,
     PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
-    RepositoryListParams, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest,
-    RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeCreate,
-    RuntimeListParams, RuntimeUpdate, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
-    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
-    TaskRun, TaskRunCreate, TaskRunResponse, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TimeDimension, TypedEvent, UploadSource,
+    RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
+    RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
+    RuntimeCreate, RuntimeListParams, RuntimeUpdate, ShareCreate, ShareListParams,
+    ShareResourceType, Shares, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
+    TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
+    TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume,
+    TaskRuns, TaskStatus, TaskUpdate, Tasks, TimeDimension, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};

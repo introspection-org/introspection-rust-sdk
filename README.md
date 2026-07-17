@@ -87,7 +87,11 @@ use futures::StreamExt;
 
 let client = IntrospectionClient::new(ClientConfig::default())?;
 let runner = client.runtime("customer-agent").await?
-    .run(RunRequest::default()).await?;
+    .run(RunRequest {
+        agent_name: Some("support-agent".into()),
+        scope: Some("customer:acme".into()),
+        ..Default::default()
+    }).await?;
 
 let mut events = runner.tasks()
     .start_prompt("Say hello in one sentence.").await?
@@ -103,6 +107,18 @@ while let Some(event) = events.next().await {
     }
 }
 ```
+
+`RunRequest` also accepts `identity`, `caller`, and `ttl_seconds`. The resolved
+runner context includes the runtime or experiment selection, runtime group,
+flat recipe revision fields, agent name, identity, and caller.
+
+Existing bodyless `handle.cancel().await` remains supported and aborts
+immediately. Pass typed options with
+`handle.cancel_with(&TaskCancelOptions::Abort).await` for explicit abort or
+`handle.cancel_with(&TaskCancelOptions::Drain { ... }).await` for graceful
+teardown. `TaskCancelOptions::default()` is abort. Interrupted runs resume with
+`runner.tasks().runs.resume(...)`. Rust runners also expose `runner.shares()`
+for file and conversation sharing grants.
 
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.

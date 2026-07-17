@@ -146,6 +146,7 @@ pub enum TaskStatus {
     Queued,
     Scheduled,
     Running,
+    AwaitingUser,
     Idle,
     Completed,
     Failed,
@@ -162,6 +163,7 @@ impl TaskStatus {
             Self::Queued => "queued",
             Self::Scheduled => "scheduled",
             Self::Running => "running",
+            Self::AwaitingUser => "awaiting_user",
             Self::Idle => "idle",
             Self::Completed => "completed",
             Self::Failed => "failed",
@@ -179,6 +181,7 @@ impl From<&str> for TaskStatus {
             "queued" => Self::Queued,
             "scheduled" => Self::Scheduled,
             "running" => Self::Running,
+            "awaiting_user" => Self::AwaitingUser,
             "idle" => Self::Idle,
             "completed" => Self::Completed,
             "failed" => Self::Failed,
@@ -317,6 +320,8 @@ pub struct Task {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_key: Option<String>,
 }
 
 fn default_task_status() -> TaskStatus {
@@ -380,6 +385,32 @@ pub struct TaskRunCreate {
     pub prompt: Option<TaskPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<TaskRunKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskRunKind {
+    Prompt,
+    Steer,
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeEntry {
+    pub interrupt_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskRunResume {
+    pub resume: Vec<ResumeEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -407,6 +438,76 @@ pub struct TaskRunResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskCancelResponse {
     pub id: String,
+}
+
+/// Typed body for the run-cancel endpoint.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum TaskCancelOptions {
+    /// Interrupt the current turn immediately while keeping the sandbox warm.
+    #[default]
+    Abort,
+    /// Let the current turn settle, then tear down the sandbox.
+    Drain {
+        /// Optional upper bound before teardown is forced.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drain_within_seconds: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShareResourceType {
+    File,
+    Conversation,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResourceShare {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resource_type: ShareResourceType,
+    pub resource_id: String,
+    #[serde(default)]
+    pub granted_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub granted_identity_key: Option<String>,
+    pub created_by_member_id: Uuid,
+    #[serde(default)]
+    pub created_by_identity_key: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShareCreate {
+    pub resource_type: ShareResourceType,
+    pub resource_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_identity_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ShareListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_total: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_type: Option<ShareResourceType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by_me: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_to_me: Option<bool>,
 }
 
 // ----- files -----------------------------------------------------------------
@@ -941,9 +1042,13 @@ pub struct RunRequest {
     /// [`RunCaller`]. Echoed on the response's `runtime_context.caller`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<RunCaller>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
     /// Session lifetime override, max 24h. Default 1h on CP side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
     /// present, CP resolves the runtime row in this runtime's slug whose
     /// `recipe_id == recipe_id` and opens the runner against that row —
@@ -960,6 +1065,8 @@ pub struct RunRequest {
 pub struct RunnerContext {
     pub runtime_id: Uuid,
     #[serde(default)]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default)]
     pub experiment_id: Option<Uuid>,
     pub recipe_id: Uuid,
     #[serde(default)]
@@ -970,6 +1077,8 @@ pub struct RunnerContext {
     pub recipe_git_commit_sha: Option<String>,
     #[serde(default)]
     pub arm_label: Option<String>,
+    #[serde(default)]
+    pub agent_name: Option<String>,
     #[serde(default)]
     pub identity: RunnerIdentity,
     /// Echoed from the request body when supplied — see [`RunCaller`].
@@ -1877,6 +1986,48 @@ mod tests {
         let s: TaskStatus = serde_json::from_str("\"running\"").unwrap();
         assert_eq!(s, TaskStatus::Running);
         assert_eq!(serde_json::to_string(&s).unwrap(), "\"running\"");
+
+        let awaiting: TaskStatus = serde_json::from_str("\"awaiting_user\"").unwrap();
+        assert_eq!(awaiting, TaskStatus::AwaitingUser);
+    }
+
+    #[test]
+    fn current_runner_request_and_context_fields_use_wire_names() {
+        let request = serde_json::to_value(RunRequest {
+            agent_name: Some("support-agent".into()),
+            scope: Some("tasks:read shares:read".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(request["agent_name"], "support-agent");
+        assert_eq!(request["scope"], "tasks:read shares:read");
+
+        let context: RunnerContext = serde_json::from_value(json!({
+            "runtime_id": "00000000-0000-0000-0000-000000000041",
+            "runtime_group_id": "00000000-0000-0000-0000-000000000042",
+            "experiment_id": null,
+            "recipe_id": "00000000-0000-0000-0000-000000000043",
+            "agent_name": "support-agent",
+            "identity": {}
+        }))
+        .unwrap();
+        assert_eq!(
+            context.runtime_id.to_string(),
+            "00000000-0000-0000-0000-000000000041"
+        );
+        assert_eq!(
+            context.runtime_group_id.unwrap().to_string(),
+            "00000000-0000-0000-0000-000000000042"
+        );
+        assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn cancel_options_default_to_abort() {
+        assert_eq!(
+            serde_json::to_value(TaskCancelOptions::default()).unwrap(),
+            serde_json::json!({"mode": "abort"})
+        );
     }
 
     #[test]
