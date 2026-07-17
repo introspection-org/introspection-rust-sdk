@@ -12,8 +12,8 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::resumable::{stream_resumable, StreamOptions};
 use crate::api::schemas::{
-    Task, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskRun,
-    TaskRunCreate, TaskRunResponse, TaskUpdate,
+    Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
+    TaskMode, TaskRun, TaskRunCreate, TaskRunResponse, TaskRunResume, TaskUpdate,
 };
 
 /// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
@@ -72,6 +72,20 @@ impl RunHandle {
             .await
     }
 
+    /// Abort this run immediately while keeping its sandbox warm.
+    pub async fn abort(&self) -> ApiResult<TaskCancelResponse> {
+        self.runs
+            .abort(&self.run.task_id.to_string(), &self.run.id)
+            .await
+    }
+
+    /// Drain this run and optionally force teardown after the supplied seconds.
+    pub async fn drain(&self, within_seconds: Option<u64>) -> ApiResult<TaskCancelResponse> {
+        self.runs
+            .drain(&self.run.task_id.to_string(), &self.run.id, within_seconds)
+            .await
+    }
+
     /// Convenience: concatenate the assistant's streamed text — the `delta`
     /// of every [`Event::TextMessageContent`] — into a single string. Returns
     /// an error on the first transport / decode failure.
@@ -107,6 +121,13 @@ impl TaskRuns {
         Ok(RunHandle::new(None, res.run, self.clone()))
     }
 
+    /// Resume an AG-UI interrupt by posting its typed resume entries.
+    pub async fn resume(&self, task_id: &str, body: &TaskRunResume) -> ApiResult<RunHandle> {
+        let path = format!("/v1/tasks/{}/runs", urlencode(task_id));
+        let res: TaskRunResponse = self.http.post_json(&path, body).await?;
+        Ok(RunHandle::new(None, res.run, self.clone()))
+    }
+
     /// `GET /v1/tasks/{id}/runs/{rid}`.
     pub async fn get(&self, task_id: &str, run_id: &str) -> ApiResult<TaskRun> {
         let path = format!(
@@ -127,6 +148,44 @@ impl TaskRuns {
         // POST with no body, JSON response — use the same multipart-less JSON
         // surface by sending an empty `()` body.
         self.http.post_json(&path, &serde_json::json!({})).await
+    }
+
+    /// Cancel a run with explicit abort or drain options.
+    pub async fn cancel_with(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        options: &TaskCancelOptions,
+    ) -> ApiResult<TaskCancelResponse> {
+        let path = format!(
+            "/v1/tasks/{}/runs/{}/cancel",
+            urlencode(task_id),
+            urlencode(run_id)
+        );
+        self.http.post_json(&path, options).await
+    }
+
+    /// Abort a run immediately while keeping its sandbox warm.
+    pub async fn abort(&self, task_id: &str, run_id: &str) -> ApiResult<TaskCancelResponse> {
+        self.cancel_with(task_id, run_id, &TaskCancelOptions::Abort)
+            .await
+    }
+
+    /// Drain a run and optionally force teardown after the supplied seconds.
+    pub async fn drain(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        within_seconds: Option<u64>,
+    ) -> ApiResult<TaskCancelResponse> {
+        self.cancel_with(
+            task_id,
+            run_id,
+            &TaskCancelOptions::Drain {
+                drain_within_seconds: within_seconds,
+            },
+        )
+        .await
     }
 
     /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of typed

@@ -22,6 +22,7 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::files::Files;
 use crate::api::http::{HttpClient, HttpConfig};
 use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpec, StringOrUuid};
+use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::types::defaults;
@@ -134,6 +135,12 @@ impl Runner {
     pub fn files(&self) -> Files {
         let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
         Files::new(http)
+    }
+
+    /// Runner-bound read-sharing grants for files and conversations.
+    pub fn shares(&self) -> Shares {
+        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
+        Shares::new(http)
     }
 
     /// `runner.conversations.*` — Data-Plane telemetry reads over
