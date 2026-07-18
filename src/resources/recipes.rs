@@ -2,9 +2,7 @@
 //!
 //! Recipes are pure CRUD: no handle subtype, no `.run()` lifecycle. They
 //! describe a (repository, git_ref, git_commit_sha [, sub_path]) tuple
-//! that runtime rows pin to. To "canary a previous version", fetch a
-//! historical recipe via [`Recipes::get`] / [`Recipes::list`] and pass
-//! it to [`crate::resources::RuntimeHandle::pin`].
+//! used by platform-managed runtime versions.
 
 use std::sync::Arc;
 

@@ -77,8 +77,8 @@ introspection-sdk = { version = "0.1", features = ["openai"] }
 ### 1. `IntrospectionClient` — Introspection API (runtimes, tasks, files)
 
 The main Introspection API surface. No OpenTelemetry dependency; just
-HTTPS calls to manage runtimes, experiments, tasks, and files, and to
-drive the `Runner` SSE stream.
+HTTPS calls to read and run runtimes, manage experiments, tasks, and files,
+and drive the `Runner` SSE stream.
 
 ```rust
 // cargo add introspection-sdk

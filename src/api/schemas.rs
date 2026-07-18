@@ -786,45 +786,6 @@ pub struct Runtime {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct RuntimeCreate {
-    pub project: StringOrUuid,
-    pub recipe_id: Uuid,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_hot_swap: Option<bool>,
-    /// LLM credential source. Defaults to `Managed`. The wire value is
-    /// always sent; the server's default (`"managed"`) matches so no
-    /// behaviour change for unset callers.
-    pub llm_mode: RuntimeLlmMode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RuntimeUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_hot_swap: Option<bool>,
-    /// PATCH semantics: `None` means "don't change". Set to switch the
-    /// runtime between managed credentials and the BYOK pool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub llm_mode: Option<RuntimeLlmMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_active: Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
@@ -1049,14 +1010,6 @@ pub struct RunRequest {
     pub ttl_seconds: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
-    /// Recipe pin set by [`crate::resources::RuntimeHandle::pin`]. When
-    /// present, CP resolves the runtime row in this runtime's slug whose
-    /// `recipe_id == recipe_id` and opens the runner against that row —
-    /// the "canary a previous version" flow from the SDK design doc.
-    /// Defaults to `None`; the regular `runtime(id).run()` path leaves
-    /// it unset and CP uses the row's current `recipe_id`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipe_id: Option<Uuid>,
 }
 
 /// Resolved context attached to a [`RunnerSpec`] — the runtime / arm /
@@ -2091,26 +2044,6 @@ mod tests {
         assert_eq!(value["project"], "main");
         assert!(value.get("name").is_none());
         assert!(value.get("slug").is_none());
-    }
-
-    #[test]
-    fn runtime_create_accepts_project_string_or_uuid() {
-        let uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000123").unwrap();
-        let by_slug = serde_json::to_value(RuntimeCreate {
-            project: "main".into(),
-            name: "agent".to_string(),
-            ..Default::default()
-        })
-        .expect("runtime create serializes slug project");
-        let by_uuid = serde_json::to_value(RuntimeCreate {
-            project: uuid.into(),
-            name: "agent".to_string(),
-            ..Default::default()
-        })
-        .expect("runtime create serializes uuid project");
-
-        assert_eq!(by_slug["project"], "main");
-        assert_eq!(by_uuid["project"], uuid.to_string());
     }
 
     #[test]
