@@ -22,8 +22,8 @@
 //!
 //! # async fn main_() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::with_token("your-token"))?;
-//! let runtimes = client.runtimes();
-//! // runtimes.create(...).await?;
+//! let runtime = client.runtime("customer-agent").await?;
+//! // runtime.run(Default::default()).await?;
 //! # Ok(()) }
 //! ```
 //!
@@ -110,11 +110,11 @@ pub use api::{
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
     RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeCreate, RuntimeListParams, RuntimeUpdate, ShareCreate, ShareListParams,
-    ShareResourceType, Shares, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
-    TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
-    TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume,
-    TaskRuns, TaskStatus, TaskUpdate, Tasks, TimeDimension, TypedEvent, UploadSource,
+    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection,
+    SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind,
+    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TimeDimension,
+    TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
@@ -124,8 +124,7 @@ pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use resources::{
-    ExperimentHandle, Experiments, Projects, RecipePin, Recipes, Repositories, RuntimeHandle,
-    Runtimes,
+    ExperimentHandle, Experiments, Projects, Recipes, Repositories, RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
