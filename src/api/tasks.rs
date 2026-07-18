@@ -72,17 +72,10 @@ impl RunHandle {
             .await
     }
 
-    /// Abort this run immediately while keeping its sandbox warm.
-    pub async fn abort(&self) -> ApiResult<TaskCancelResponse> {
+    /// Cancel the run with explicit abort or drain options.
+    pub async fn cancel_with(&self, options: &TaskCancelOptions) -> ApiResult<TaskCancelResponse> {
         self.runs
-            .abort(&self.run.task_id.to_string(), &self.run.id)
-            .await
-    }
-
-    /// Drain this run and optionally force teardown after the supplied seconds.
-    pub async fn drain(&self, within_seconds: Option<u64>) -> ApiResult<TaskCancelResponse> {
-        self.runs
-            .drain(&self.run.task_id.to_string(), &self.run.id, within_seconds)
+            .cancel_with(&self.run.task_id.to_string(), &self.run.id, options)
             .await
     }
 
@@ -163,29 +156,6 @@ impl TaskRuns {
             urlencode(run_id)
         );
         self.http.post_json(&path, options).await
-    }
-
-    /// Abort a run immediately while keeping its sandbox warm.
-    pub async fn abort(&self, task_id: &str, run_id: &str) -> ApiResult<TaskCancelResponse> {
-        self.cancel_with(task_id, run_id, &TaskCancelOptions::Abort)
-            .await
-    }
-
-    /// Drain a run and optionally force teardown after the supplied seconds.
-    pub async fn drain(
-        &self,
-        task_id: &str,
-        run_id: &str,
-        within_seconds: Option<u64>,
-    ) -> ApiResult<TaskCancelResponse> {
-        self.cancel_with(
-            task_id,
-            run_id,
-            &TaskCancelOptions::Drain {
-                drain_within_seconds: within_seconds,
-            },
-        )
-        .await
     }
 
     /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of typed

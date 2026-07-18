@@ -441,10 +441,11 @@ pub struct TaskCancelResponse {
 }
 
 /// Typed body for the run-cancel endpoint.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum TaskCancelOptions {
     /// Interrupt the current turn immediately while keeping the sandbox warm.
+    #[default]
     Abort,
     /// Let the current turn settle, then tear down the sandbox.
     Drain {
@@ -2019,6 +2020,14 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn cancel_options_default_to_abort() {
+        assert_eq!(
+            serde_json::to_value(TaskCancelOptions::default()).unwrap(),
+            serde_json::json!({"mode": "abort"})
+        );
     }
 
     #[test]

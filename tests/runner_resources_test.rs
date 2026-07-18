@@ -272,13 +272,6 @@ async fn task_runs_resume_and_typed_cancel_use_current_bodies() {
     let runs = TaskRuns::new(build_http(&server));
 
     Mock::given(method("POST"))
-        .and(path("/v1/tasks/abc/runs/run_abort/cancel"))
-        .and(body_json(json!({"mode": "abort"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "run_abort"})))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("POST"))
         .and(path("/v1/tasks/abc/runs"))
         .and(body_json(json!({
             "resume": [{
@@ -320,12 +313,13 @@ async fn task_runs_resume_and_typed_cancel_use_current_bodies() {
         )
         .await
         .unwrap();
-    let cancel = handle.drain(Some(60)).await.unwrap();
+    let cancel = handle
+        .cancel_with(&introspection_sdk::TaskCancelOptions::Drain {
+            drain_within_seconds: Some(60),
+        })
+        .await
+        .unwrap();
     assert_eq!(cancel.id, "run_3");
-    assert_eq!(
-        runs.abort("abc", "run_abort").await.unwrap().id,
-        "run_abort"
-    );
 }
 
 #[tokio::test]

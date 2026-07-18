@@ -113,8 +113,10 @@ runner context includes the runtime or experiment selection, runtime group,
 flat recipe revision fields, agent name, identity, and caller.
 
 Existing bodyless `handle.cancel().await` remains supported and aborts
-immediately. New code can use `handle.abort().await`, or request graceful
-teardown with `handle.drain(Some(60)).await`. Interrupted runs resume with
+immediately. Pass typed options with
+`handle.cancel_with(&TaskCancelOptions::Abort).await` for explicit abort or
+`handle.cancel_with(&TaskCancelOptions::Drain { ... }).await` for graceful
+teardown. `TaskCancelOptions::default()` is abort. Interrupted runs resume with
 `runner.tasks().runs.resume(...)`. Rust runners also expose `runner.shares()`
 for file and conversation sharing grants.
 
