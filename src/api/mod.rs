@@ -177,11 +177,12 @@ pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
     AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
-    Dimension, Event, EventListParams, Experiment, ExperimentCreate, ExperimentListParams,
+    Dimension, Event, EventListParams, Experiment, ExperimentCreate, ExperimentGoal,
+    ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams,
     ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText,
-    FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgementEvent,
-    JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, MetricsResponse,
-    ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
+    FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgeGoalComponent,
+    JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery,
+    MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
     PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
@@ -189,7 +190,7 @@ pub use schemas::{
     RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent,
     StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
     TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskStatus, TaskUpdate, TimeDimension, TypedEvent,
+    TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::{parse_agui_response, parse_sse_response};
