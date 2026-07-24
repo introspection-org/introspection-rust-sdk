@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.8.0...v0.9.0) (2026-07-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **experiments:** ExperimentCreate requires runtime_group_id, arms of {runtime_id, arm_label}, and a typed goal_json; Arm.weight and the untyped goal_json map are removed; ExperimentStatus::Concluded is now Ended.
+
+### Features
+
+* add environment_ref to Runtime schema ([#45](https://github.com/introspection-org/introspection-rust-sdk/issues/45)) ([d7a9937](https://github.com/introspection-org/introspection-rust-sdk/commit/d7a9937ebf6d5b8fbbcc794afc8696e6f8e85519))
+
+
+### Bug Fixes
+
+* **experiments:** align the experiments contract with the CP API ([#47](https://github.com/introspection-org/introspection-rust-sdk/issues/47)) ([15c7760](https://github.com/introspection-org/introspection-rust-sdk/commit/15c7760adbd81d8ba9f94b812b4811c8d7b414d6))
+
 ## [0.8.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.7.0...v0.8.0) (2026-07-18)
 
 
