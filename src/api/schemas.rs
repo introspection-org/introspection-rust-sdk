@@ -396,7 +396,6 @@ pub struct TaskRunCreate {
 pub enum TaskRunKind {
     Prompt,
     Steer,
-    Clear,
 }
 
 #[derive(Debug, Clone, Serialize)]
