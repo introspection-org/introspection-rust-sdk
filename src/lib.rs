@@ -18,12 +18,14 @@
 //! ## REST quick start
 //!
 //! ```rust,no_run
-//! use introspection_sdk::{ClientConfig, IntrospectionClient};
+//! use introspection_sdk::{ClientConfig, IntrospectionClient, RuntimeRunSelector};
 //!
 //! # async fn main_() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::with_token("your-token"))?;
-//! let runtime = client.runtime("customer-agent").await?;
-//! // runtime.run(Default::default()).await?;
+//! let runner = client.runtimes().run(
+//!     RuntimeRunSelector::Runtime("customer-agent".into()),
+//!     Default::default(),
+//! ).await?;
 //! # Ok(()) }
 //! ```
 //!
@@ -98,36 +100,37 @@ pub mod runner;
 pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
+#[cfg(feature = "arrow")]
+pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 pub use api::{
-    Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
-    Conversations, Dimension, Event, EventListParams, Events, Experiment, ExperimentCreate,
-    ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard,
-    ExperimentListParams, ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File,
-    FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
-    HavingTerm, IntrospectionAPIError, IntrospectionEventName, JudgeGoalComponent, JudgementEvent,
+    ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams, Conversations,
+    Dimension, Event, EventListParams, Events, Experiment, ExperimentArm, ExperimentArmCreate,
+    ExperimentCreate, ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection,
+    ExperimentGoalGuard, ExperimentListParams, ExperimentRoutingStrategy, ExperimentRunRequest,
+    ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText,
+    FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files, HavingTerm,
+    IntrospectionAPIError, IntrospectionEventName, JudgeGoalComponent, JudgementEvent,
     JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
     MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
     Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload,
     Project, ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
-    RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection,
-    SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind,
-    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TelemetryGoalComponent, TimeDimension, TypedEvent, UploadSource,
+    RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec,
+    RuntimeEnvironment, RuntimeImageStatus, RuntimeKind, RuntimeLlmMode, RuntimeRecipeKind,
+    RuntimeRunSelector, RuntimeVersion, RuntimeVersionListParams, ShareCreate, ShareListParams,
+    ShareResourceType, Shares, SortDirection, SseEvent, StreamOptions, StringOrUuid, Task,
+    TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
+    TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume,
+    TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TypedEvent,
+    UploadSource,
 };
-#[cfg(feature = "arrow")]
-pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // AG-UI protocol event surface yielded by the task-run stream. The full
 // taxonomy lives in `crate::agui`; these aliases give the common types a
 // discoverable name at the crate root (`Event` alone would be ambiguous).
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
-pub use resources::{
-    ExperimentHandle, Experiments, Projects, Recipes, Repositories, RuntimeHandle, Runtimes,
-};
-pub use runner::{Runner, RunnerSource};
+pub use resources::{Experiments, Projects, Recipes, Repositories, Runtimes};
+pub use runner::Runner;
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
 
 // OTel surfaces — gated behind the `otel` feature, re-exported from

@@ -1,4 +1,4 @@
-//! End-to-end walkthrough — look up a runtime by runtime group slug, open a Runner,
+//! End-to-end walkthrough — run a stable Runtime selected by slug,
 //! spawn a task, stream its run, then upload a file.
 //!
 //! Run with:
@@ -13,6 +13,7 @@ use std::error::Error;
 use futures::StreamExt;
 use introspection_sdk::{
     AgUiEvent, ClientConfig, FileCreateText, FileUpload, IntrospectionClient, RunRequest,
+    RuntimeRunSelector,
 };
 
 #[tokio::main]
@@ -23,14 +24,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runtime =
         std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 
-    // 1) Look up the runtime by runtime group slug or ID and open a Runner.
+    // 1) Run the stable Runtime selected by slug or group ID.
     let runner = client
-        .runtime(&runtime)
-        .await?
-        .run(RunRequest {
-            ttl_seconds: Some(3600),
-            ..Default::default()
-        })
+        .runtimes()
+        .run(
+            RuntimeRunSelector::Runtime(runtime.into()),
+            RunRequest {
+                ttl_seconds: Some(3600),
+                ..Default::default()
+            },
+        )
         .await?;
     println!(
         "runner -> dp={}, session={}, expires={}",

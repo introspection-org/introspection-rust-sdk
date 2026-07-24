@@ -1,5 +1,4 @@
-//! `client.experiments` (CP) — experiment CRUD + lifecycle +
-//! `experiment(id, project).run()` to open a [`crate::Runner`].
+//! `client.experiments` (CP) — experiment CRUD, lifecycle, and execution.
 
 use std::sync::Arc;
 
@@ -10,10 +9,10 @@ use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Experiment, ExperimentCreate, ExperimentListParams, ExperimentUpdate, RunRequest, RunnerSpec,
-    StringOrUuid,
+    Experiment, ExperimentCreate, ExperimentListParams, ExperimentRunRequest, ExperimentUpdate,
+    RunnerSpec, StringOrUuid,
 };
-use crate::runner::{Runner, RunnerSource};
+use crate::runner::Runner;
 
 #[derive(Clone)]
 pub struct Experiments {
@@ -81,75 +80,56 @@ impl Experiments {
         self.http.delete_empty(&path).await
     }
 
-    pub fn handle(
+    /// Run this Experiment and return its selected [`Runner`].
+    pub async fn run(
         &self,
         experiment_id: Uuid,
         project: impl Into<StringOrUuid>,
-    ) -> ExperimentHandle {
-        ExperimentHandle {
-            http: self.http.clone(),
-            experiment_id,
-            project: project.into(),
-        }
-    }
-}
-
-/// Handle returned by `client.experiment(id, project)`. Open a
-/// [`Runner`] via [`Self::run`] or drive lifecycle via
-/// [`Self::start`] / [`Self::end`] / [`Self::cancel`].
-#[derive(Clone)]
-pub struct ExperimentHandle {
-    http: Arc<HttpClient>,
-    experiment_id: Uuid,
-    project: StringOrUuid,
-}
-
-impl ExperimentHandle {
-    pub fn id(&self) -> Uuid {
-        self.experiment_id
-    }
-
-    pub fn project(&self) -> &StringOrUuid {
-        &self.project
-    }
-
-    /// `POST /v1/experiments/{id}/run` — open a [`Runner`] with the arm
-    /// picked by CP.
-    pub async fn run(&self, ctx: RunRequest) -> ApiResult<Runner> {
+        request: ExperimentRunRequest,
+    ) -> ApiResult<Runner> {
         let path = format!(
-            "/v1/experiments/{}/run?project={}",
-            self.experiment_id, self.project
+            "/v1/experiments/{experiment_id}/run?project={}",
+            project.into()
         );
-        let spec: RunnerSpec = self.http.post_json(&path, &ctx).await?;
-        let source = RunnerSource::Experiment {
-            cp_http: self.http.clone(),
-            experiment_id: self.experiment_id,
-            project: self.project.clone(),
-            ctx,
-        };
-        Runner::from_spec(spec, source)
+        let spec: RunnerSpec = self.http.post_json(&path, &request).await?;
+        Runner::from_spec(spec)
     }
 
-    pub async fn start(&self) -> ApiResult<Experiment> {
+    pub async fn start(
+        &self,
+        experiment_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/start?project={}",
-            self.experiment_id, self.project
+            experiment_id,
+            project.into()
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
 
-    pub async fn end(&self) -> ApiResult<Experiment> {
+    pub async fn end(
+        &self,
+        experiment_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/end?project={}",
-            self.experiment_id, self.project
+            experiment_id,
+            project.into()
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
 
-    pub async fn cancel(&self) -> ApiResult<Experiment> {
+    pub async fn cancel(
+        &self,
+        experiment_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/cancel?project={}",
-            self.experiment_id, self.project
+            experiment_id,
+            project.into()
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }

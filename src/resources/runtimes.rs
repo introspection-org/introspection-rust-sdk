@@ -1,4 +1,4 @@
-//! `client.runtimes` (CP) — read, resolve, and run runtimes.
+//! `client.runtimes` (CP) — read and run runtime versions.
 
 use std::sync::Arc;
 
@@ -8,8 +8,10 @@ use uuid::Uuid;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{RunRequest, RunnerSpec, Runtime, RuntimeListParams, StringOrUuid};
-use crate::runner::{Runner, RunnerSource};
+use crate::api::schemas::{
+    RunRequest, RuntimeRunSelector, RuntimeVersion, RuntimeVersionListParams, StringOrUuid,
+};
+use crate::runner::Runner;
 
 /// `client.runtimes` namespace. Holds a CP-bound HTTP client.
 #[derive(Clone)]
@@ -23,9 +25,9 @@ impl Runtimes {
     }
 
     /// `GET /v1/runtimes` — paginated.
-    pub fn list(&self, params: &RuntimeListParams) -> Paginator<Runtime> {
+    pub fn list(&self, params: &RuntimeVersionListParams) -> Paginator<RuntimeVersion> {
         Paginator::new(self.http.clone(), "/v1/runtimes", params)
-            .expect("RuntimeListParams must serialize to a JSON object")
+            .expect("RuntimeVersionListParams must serialize to a JSON object")
     }
 
     /// `GET /v1/runtimes/{id}?project=...`.
@@ -33,7 +35,7 @@ impl Runtimes {
         &self,
         runtime_id: Uuid,
         project: impl Into<StringOrUuid>,
-    ) -> ApiResult<Runtime> {
+    ) -> ApiResult<RuntimeVersion> {
         #[derive(Serialize)]
         struct Q {
             project: StringOrUuid,
@@ -49,67 +51,57 @@ impl Runtimes {
             .await
     }
 
-    /// Look up a runtime by runtime group slug or ID and return a [`RuntimeHandle`].
-    ///
-    /// Queries `GET /v1/runtimes?runtime=…&only_active=true` and returns a
-    /// handle to the first match. The server infers the project from the
-    /// API token. Returns `IntrospectionAPIError::Http` with status 404
-    /// if no active runtime with that runtime group slug or ID exists.
-    pub async fn resolve(&self, runtime: &str) -> ApiResult<RuntimeHandle> {
-        let mut paginator = self.list(&RuntimeListParams {
-            runtime: Some(runtime.into()),
-            only_active: Some(true),
-            limit: Some(1),
-            ..Default::default()
-        });
-        let runtime = paginator
-            .next_page()
-            .await?
-            .and_then(|p| p.records.into_iter().next())
-            .ok_or_else(|| IntrospectionAPIError::Http {
-                message: format!("no active runtime '{runtime}'"),
-                status: 404,
-                code: None,
-                request_id: None,
-                body: None,
-            })?;
-        Ok(self.handle(runtime.id))
-    }
-
-    /// Build a [`RuntimeHandle`] for `runtime_id`. The handle is the
-    /// surface used to call `.run(...)`.
-    pub fn handle(&self, runtime_id: Uuid) -> RuntimeHandle {
-        RuntimeHandle::new(self.http.clone(), runtime_id)
+    /// Run either a stable Runtime or one exact immutable Runtime version.
+    pub async fn run(&self, selector: RuntimeRunSelector, ctx: RunRequest) -> ApiResult<Runner> {
+        let body = runtime_run_request_body(&selector, &ctx)?;
+        let spec = self.http.post_json("/v1/runtimes/run", &body).await?;
+        Runner::from_spec(spec)
     }
 }
 
-/// Handle returned by `client.runtimes().handle(id)`. Opens a [`Runner`] via
-/// [`Self::run`]. Runtime lifecycle and version selection are managed by the
-/// CLI and platform.
-#[derive(Clone)]
-pub struct RuntimeHandle {
-    http: Arc<HttpClient>,
-    runtime_id: Uuid,
+fn runtime_run_request_body(
+    selector: &RuntimeRunSelector,
+    ctx: &RunRequest,
+) -> ApiResult<serde_json::Value> {
+    let mut body = serde_json::to_value(ctx)
+        .map_err(|error| IntrospectionAPIError::InvalidConfig(error.to_string()))?;
+    let (field, value) = match selector {
+        RuntimeRunSelector::Runtime(runtime) => ("runtime", runtime.to_string()),
+        RuntimeRunSelector::RuntimeId(runtime_id) => ("runtime_id", runtime_id.to_string()),
+    };
+    body[field] = serde_json::Value::String(value);
+    Ok(body)
 }
 
-impl RuntimeHandle {
-    pub(crate) fn new(http: Arc<HttpClient>, runtime_id: Uuid) -> Self {
-        Self { http, runtime_id }
+#[cfg(test)]
+mod tests {
+    use super::runtime_run_request_body;
+    use crate::api::schemas::{RunRequest, RuntimeRunSelector};
+    use uuid::Uuid;
+
+    #[test]
+    fn stable_runner_request_uses_only_runtime_selector() {
+        let body = runtime_run_request_body(
+            &RuntimeRunSelector::Runtime("support-agent".into()),
+            &RunRequest::default(),
+        )
+        .expect("serialize stable runner request");
+
+        assert_eq!(body["runtime"], "support-agent");
+        assert!(body.get("runtime_id").is_none());
     }
 
-    pub fn id(&self) -> Uuid {
-        self.runtime_id
-    }
+    #[test]
+    fn exact_runner_request_uses_only_runtime_id_selector() {
+        let runtime_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111")
+            .expect("valid runtime version id");
+        let body = runtime_run_request_body(
+            &RuntimeRunSelector::RuntimeId(runtime_id),
+            &RunRequest::default(),
+        )
+        .expect("serialize exact runner request");
 
-    /// `POST /v1/runtimes/{id}/run` — open a [`Runner`] for this runtime.
-    pub async fn run(&self, ctx: RunRequest) -> ApiResult<Runner> {
-        let path = format!("/v1/runtimes/{}/run", self.runtime_id);
-        let spec: RunnerSpec = self.http.post_json(&path, &ctx).await?;
-        let source = RunnerSource::Runtime {
-            cp_http: self.http.clone(),
-            runtime_id: self.runtime_id,
-            ctx,
-        };
-        Runner::from_spec(spec, source)
+        assert_eq!(body["runtime_id"], runtime_id.to_string());
+        assert!(body.get("runtime").is_none());
     }
 }

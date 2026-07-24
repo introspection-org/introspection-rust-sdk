@@ -758,38 +758,95 @@ impl<'de> Deserialize<'de> for RuntimeLlmMode {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Runtime {
+pub struct RuntimeVersion {
     pub id: Uuid,
     pub org_id: Uuid,
-    pub project_id: Uuid,
-    pub recipe_id: Uuid,
-    pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    pub slug: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub is_active: bool,
-    #[serde(default)]
-    pub allow_hot_swap: bool,
-    /// LLM credential source. Defaults to `Managed` when the CP omits
-    /// the field (older servers) or sends `"managed"` explicitly.
+    pub kind: RuntimeKind,
     #[serde(default)]
     pub llm_mode: RuntimeLlmMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub config_json: HashMap<String, serde_json::Value>,
+    pub project_id: Uuid,
+    pub recipe_id: Uuid,
+    pub runtime_group_id: Uuid,
+    pub slug: String,
+    #[serde(default)]
+    pub recipe_kind: RuntimeRecipeKind,
+    #[serde(default = "default_runtime_recipe_ref")]
+    pub recipe_ref: String,
+    #[serde(default)]
+    pub environments: Vec<RuntimeEnvironment>,
+    #[serde(default)]
+    pub image_tag: Option<String>,
+    #[serde(default)]
+    pub image_status: RuntimeImageStatus,
+    #[serde(default)]
+    pub image_built_at: Option<String>,
+    #[serde(default)]
+    pub image_build_error: Option<String>,
+    #[serde(default)]
+    pub image_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub image_build_log_file_id: Option<Uuid>,
+    pub created_by_member_id: Uuid,
+    #[serde(default)]
+    pub yanked_at: Option<String>,
+    #[serde(default)]
+    pub yanked_reason: Option<String>,
     /// Per-environment git ref each lane tracks (`environment` -> `main` /
     /// `pr/N` / commit sha), projected from the runtime group.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_ref: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub environment_ref: Option<HashMap<RuntimeEnvironment, String>>,
+}
+
+fn default_runtime_recipe_ref() -> String {
+    "main".to_string()
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeEnvironment {
+    Development,
+    Staging,
+    #[default]
+    Production,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeKind {
+    #[default]
+    Byor,
+    Byoh,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeRecipeKind {
+    Preview,
+    #[default]
+    Production,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeImageStatus {
+    #[default]
+    Pending,
+    Queued,
+    Building,
+    Ready,
+    Failed,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct RuntimeListParams {
+pub struct RuntimeVersionListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -797,7 +854,7 @@ pub struct RuntimeListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub only_active: Option<bool>,
+    pub environment: Option<RuntimeEnvironment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -936,17 +993,30 @@ impl Default for ExperimentGoal {
     }
 }
 
-/// One arm of an experiment — a Runtime version in the experiment's group
-/// plus a display label. On create only `runtime_id`, `arm_label`, and the
-/// optional `agent_overrides` are sent; reads may carry additional
-/// server-set fields (arm id, seeded weight) which deserialize is happy to
-/// ignore.
+/// One arm accepted in an Experiment create request.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Arm {
+pub struct ExperimentArmCreate {
     pub runtime_id: Uuid,
     pub arm_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_overrides: Option<HashMap<String, String>>,
+}
+
+/// One persisted Experiment arm.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExperimentArm {
+    pub id: Uuid,
+    pub runtime_id: Uuid,
+    pub arm_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_overrides: Option<HashMap<String, String>>,
+    pub initial_weight: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentRoutingStrategy {
+    BetaSample,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -957,23 +1027,15 @@ pub struct Experiment {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_group_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
+    pub runtime_group_id: Uuid,
+    pub environment: RuntimeEnvironment,
     pub status: ExperimentStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub routing_strategy: Option<String>,
-    #[serde(default)]
-    pub arms: Vec<Arm>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_json: Option<ExperimentGoal>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hash_key_fields: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sample_rate: Option<f64>,
+    pub routing_strategy: ExperimentRoutingStrategy,
+    pub arms: Vec<ExperimentArm>,
+    pub goal_json: ExperimentGoal,
+    pub scoring_interval_seconds: u64,
+    pub hash_key_fields: Vec<String>,
+    pub sample_rate: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posterior_json: Option<HashMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -986,24 +1048,28 @@ pub struct Experiment {
     pub halted_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halted_reason: Option<String>,
+    pub created_by_member_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 /// `POST /v1/experiments` body. Creates a draft that routes nothing until
-/// `start`. `arms` takes 2-20 runtime versions sharing `runtime_group_id`,
-/// and `goal_json` must contain at least one positive-weight judge component.
+/// `start`. `runtime` is the stable Runtime slug or group ID; `arms` takes 2-20
+/// versions belonging to it, and `goal_json` must contain at least one
+/// positive-weight judge component.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExperimentCreate {
     pub project: StringOrUuid,
     pub name: String,
-    pub runtime_group_id: Uuid,
-    pub arms: Vec<Arm>,
+    pub runtime: StringOrUuid,
+    pub arms: Vec<ExperimentArmCreate>,
     pub goal_json: ExperimentGoal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
+    pub environment: Option<RuntimeEnvironment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scoring_interval_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1013,7 +1079,7 @@ pub struct ExperimentCreate {
 }
 
 /// `PATCH /v1/experiments/{id}`. Status transitions go through start / end /
-/// cancel; `runtime_group_id` and arms are immutable once running.
+/// cancel; the selected Runtime and arms are immutable once running.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1032,11 +1098,12 @@ pub struct ExperimentUpdate {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
-    pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_group_id: Option<Uuid>,
+    pub project: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
+    pub runtime: Option<StringOrUuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<RuntimeEnvironment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ExperimentStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1114,13 +1181,17 @@ pub struct RunCallerPage {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-/// `POST /v1/runtimes/{id}/run` and `/v1/experiments/{id}/run` body.
+/// Common options for Runtime and Experiment `/run` routes.
 ///
-/// User-facing request type. CP infers everything else (runtime_id /
-/// experiment_id from the URL; member_id / org_id / project_id from
-/// the bearer key).
+/// User-facing request type. Runtime methods add `runtime` or `runtime_id`;
+/// Experiment identity comes from its route. CP infers member and organization
+/// context from the bearer credential.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RunRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<RuntimeEnvironment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<RunnerIdentity>,
     /// Optional segment.io-style observability payload — see
@@ -1134,18 +1205,51 @@ pub struct RunRequest {
     pub ttl_seconds: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bindings_required: Option<bool>,
+}
+
+/// Valid body for `POST /v1/experiments/{id}/run`.
+///
+/// Project is carried by the route query and the Experiment selects its own
+/// environment, so neither can be supplied here.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ExperimentRunRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<RunnerIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller: Option<RunCaller>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bindings_required: Option<bool>,
+}
+
+/// Explicit selector for `POST /v1/runtimes/run`.
+#[derive(Debug, Clone)]
+pub enum RuntimeRunSelector {
+    /// Stable Runtime slug or group ID; follows environment and Experiment routing.
+    Runtime(StringOrUuid),
+    /// Exact immutable Runtime version ID; bypasses version routing.
+    RuntimeId(Uuid),
 }
 
 /// Resolved context attached to a [`RunnerSpec`] — the runtime / arm /
 /// identity CP picked. Surfaced on `runner.context()` for telemetry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RunnerContext {
-    pub runtime_id: Uuid,
+    #[serde(default)]
+    pub runtime_id: Option<Uuid>,
     #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     #[serde(default)]
     pub experiment_id: Option<Uuid>,
-    pub recipe_id: Uuid,
+    #[serde(default)]
+    pub recipe_id: Option<Uuid>,
     #[serde(default)]
     pub recipe_repository_id: Option<Uuid>,
     #[serde(default)]
@@ -1176,7 +1280,7 @@ pub struct RunnerDeployment {
     pub region: String,
 }
 
-/// CP `/run` response — the customer-facing shape.
+/// CP Runtime or Experiment `/run` response — the customer-facing shape.
 ///
 /// Sandbox-internal fields (`credentials` for ext_proc egress, the
 /// `bootstrap` repo manifest, DP `limits`, and the any-llm `llm_proxy`
@@ -1188,10 +1292,9 @@ pub struct RunnerSpec {
     pub session_id: String,
     /// DP deployment the runner should talk to.
     pub deployment: RunnerDeployment,
-    /// RS256 session-locator JWT — the customer's only credential.
-    /// SDK sends it as `Authorization: Bearer …`; the DP server looks
-    /// up the session by JWT claims and reads the materialized access
-    /// token from its Redis cache.
+    /// RS256 Runner capability JWT — the customer's only credential.
+    /// SDK sends it as `Authorization: Bearer …`; the target DP validates
+    /// it directly.
     pub session_token: String,
     /// Session lifetime (ISO-8601 string).
     pub expires_at: String,
@@ -2089,7 +2192,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(
-            context.runtime_id.to_string(),
+            context.runtime_id.unwrap().to_string(),
             "00000000-0000-0000-0000-000000000041"
         );
         assert_eq!(
@@ -2097,6 +2200,73 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn experiment_run_request_cannot_duplicate_route_context() {
+        let request = serde_json::to_value(ExperimentRunRequest {
+            agent_name: Some("support-agent".into()),
+            scope: Some("tasks:read".into()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(request["agent_name"], "support-agent");
+        assert_eq!(request["scope"], "tasks:read");
+        assert!(request.get("project").is_none());
+        assert!(request.get("environment").is_none());
+    }
+
+    #[test]
+    fn runtime_version_parses_public_cloud_shape() {
+        let runtime: RuntimeVersion = serde_json::from_value(json!({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "org_id": "00000000-0000-0000-0000-000000000002",
+            "created_at": "2026-07-24T00:00:00Z",
+            "updated_at": "2026-07-24T00:00:00Z",
+            "name": "Support Agent",
+            "description": null,
+            "kind": "byoh",
+            "llm_mode": "byok",
+            "config_json": {"timeout": 60},
+            "project_id": "00000000-0000-0000-0000-000000000003",
+            "recipe_id": "00000000-0000-0000-0000-000000000004",
+            "runtime_group_id": "00000000-0000-0000-0000-000000000005",
+            "slug": "support-agent",
+            "recipe_kind": "preview",
+            "recipe_ref": "pr/42",
+            "environments": ["development", "staging"],
+            "image_tag": "sha-abc123",
+            "image_status": "ready",
+            "image_built_at": null,
+            "image_build_error": null,
+            "image_size_bytes": 1234,
+            "image_build_log_file_id": null,
+            "created_by_member_id": "00000000-0000-0000-0000-000000000006",
+            "yanked_at": null,
+            "yanked_reason": null,
+            "environment_ref": {
+                "development": "main",
+                "staging": "pr/42"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(runtime.kind, RuntimeKind::Byoh);
+        assert_eq!(runtime.llm_mode, RuntimeLlmMode::Byok);
+        assert_eq!(runtime.recipe_kind, RuntimeRecipeKind::Preview);
+        assert_eq!(
+            runtime.environments,
+            vec![RuntimeEnvironment::Development, RuntimeEnvironment::Staging]
+        );
+        assert_eq!(runtime.image_status, RuntimeImageStatus::Ready);
+        assert_eq!(
+            runtime
+                .environment_ref
+                .unwrap()
+                .get(&RuntimeEnvironment::Staging),
+            Some(&"pr/42".to_string())
+        );
     }
 
     #[test]
@@ -2110,19 +2280,19 @@ mod tests {
     }
 
     #[test]
-    fn experiment_create_serializes_group_arms_and_judge_goal() {
+    fn experiment_create_serializes_runtime_arms_and_judge_goal() {
         let judge_id = "0195c0de-0000-7000-8000-00000000000d";
         let body = serde_json::to_value(ExperimentCreate {
             project: "my-project".into(),
             name: "prompt-bake-off".into(),
-            runtime_group_id: "0195c0de-0000-7000-8000-00000000000a".parse().unwrap(),
+            runtime: "support-agent".into(),
             arms: vec![
-                Arm {
+                ExperimentArmCreate {
                     runtime_id: "0195c0de-0000-7000-8000-00000000000b".parse().unwrap(),
                     arm_label: "control".into(),
                     agent_overrides: None,
                 },
-                Arm {
+                ExperimentArmCreate {
                     runtime_id: "0195c0de-0000-7000-8000-00000000000c".parse().unwrap(),
                     arm_label: "variant".into(),
                     agent_overrides: None,
@@ -2145,10 +2315,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(
-            body["runtime_group_id"],
-            "0195c0de-0000-7000-8000-00000000000a"
-        );
+        assert_eq!(body["runtime"], "support-agent");
         assert_eq!(body["arms"][0]["arm_label"], "control");
         assert!(body["arms"][0].get("weight").is_none());
         let component = &body["goal_json"]["components"][0];
@@ -2166,7 +2333,9 @@ mod tests {
             "project_id": "0195c0de-0000-7000-8000-000000000003",
             "name": "prompt-bake-off",
             "runtime_group_id": "0195c0de-0000-7000-8000-00000000000a",
+            "environment": "production",
             "status": "running",
+            "routing_strategy": "beta_sample",
             "arms": [
                 {"id": "0195c0de-0000-7000-8000-0000000000f1", "runtime_id": "0195c0de-0000-7000-8000-00000000000b", "arm_label": "control", "initial_weight": 50}
             ],
@@ -2177,6 +2346,10 @@ mod tests {
                     {"source": "judge", "judge_id": "0195c0de-0000-7000-8000-00000000000d", "weight": 1.0}
                 ]
             },
+            "scoring_interval_seconds": 300,
+            "hash_key_fields": ["user.id", "anonymous.id", "conversation.id"],
+            "sample_rate": 1.0,
+            "created_by_member_id": "0195c0de-0000-7000-8000-000000000004",
             "created_at": "2025-01-01T00:00:00Z",
             "updated_at": "2025-01-01T00:00:00Z"
         }))
@@ -2184,11 +2357,11 @@ mod tests {
 
         assert_eq!(exp.status, ExperimentStatus::Running);
         assert_eq!(
-            exp.runtime_group_id.unwrap().to_string(),
+            exp.runtime_group_id.to_string(),
             "0195c0de-0000-7000-8000-00000000000a"
         );
         assert_eq!(exp.arms[0].arm_label, "control");
-        let goal = exp.goal_json.expect("goal parsed");
+        let goal = exp.goal_json;
         match &goal.components[0] {
             ExperimentGoalComponent::Judge(j) => assert_eq!(j.weight, 1.0),
             ExperimentGoalComponent::Telemetry(_) => panic!("expected judge component"),
@@ -2242,7 +2415,7 @@ mod tests {
 
     #[test]
     fn runtime_list_params_serialize_runtime_not_name_or_slug() {
-        let value = serde_json::to_value(RuntimeListParams {
+        let value = serde_json::to_value(RuntimeVersionListParams {
             runtime: Some("customer-agent".into()),
             ..Default::default()
         })

@@ -5,7 +5,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **experiments:** ExperimentCreate requires runtime_group_id, arms of {runtime_id, arm_label}, and a typed goal_json; Arm.weight and the untyped goal_json map are removed; ExperimentStatus::Concluded is now Ended.
+* **experiments:** ExperimentCreate requires a stable runtime selector, arms of {runtime_id, arm_label}, and a typed goal_json; Arm.weight and the untyped goal_json map are removed; ExperimentStatus::Concluded is now Ended.
 
 ### Features
 

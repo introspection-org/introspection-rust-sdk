@@ -1,8 +1,7 @@
 //! Introspection Client — REST-only surface.
 //!
 //! Always available with no OpenTelemetry dependency. Exposes
-//! `client.runtimes()` / `client.experiments()` / `client.runtimes().handle(id)` /
-//! `client.experiment(id, project)` accessors over the Introspection
+//! `client.runtimes()` / `client.experiments()` accessors over the Introspection
 //! DP REST API.
 //!
 //! For analytics events (`track` / `feedback` / `identify`), construct
@@ -19,9 +18,7 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::api::http::{HttpClient, HttpConfig};
-use crate::resources::{
-    ExperimentHandle, Experiments, Projects, Recipes, Repositories, RuntimeHandle, Runtimes,
-};
+use crate::resources::{Experiments, Projects, Recipes, Repositories, Runtimes};
 use crate::types::{self, ClientConfig};
 
 /// SDK version.
@@ -167,24 +164,6 @@ impl IntrospectionClient {
         self.recipes.as_ref().expect(
             "client.recipes() requires a token; set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`",
         )
-    }
-
-    /// Look up an active runtime by runtime group slug or ID. The server infers the
-    /// project from the API token. Equivalent to
-    /// `client.runtimes().resolve(runtime)`.
-    ///
-    /// To build a handle for a concrete runtime UUID without a lookup, use
-    /// `client.runtimes().handle(runtime_id)`.
-    pub async fn runtime(&self, runtime: &str) -> crate::api::error::ApiResult<RuntimeHandle> {
-        self.runtimes().resolve(runtime).await
-    }
-
-    pub fn experiment(
-        &self,
-        experiment_id: uuid::Uuid,
-        project: impl Into<crate::api::schemas::StringOrUuid>,
-    ) -> ExperimentHandle {
-        self.experiments().handle(experiment_id, project)
     }
 
     pub fn try_projects(&self) -> Option<&Projects> {

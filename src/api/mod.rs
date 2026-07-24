@@ -36,8 +36,8 @@
 //! let client = IntrospectionClient::new(ClientConfig::default())?;
 //! let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 //!
-//! // Open a runner against the runtime; spawn a task and stream its run.
-//! let runner = client.runtime(&runtime).await?.run(RunRequest::default()).await?;
+//! // Run the Runtime; spawn a task and stream its run through the returned Runner.
+//! let runner = client.runtimes().run(introspection_sdk::RuntimeRunSelector::Runtime(runtime.into()), RunRequest::default()).await?;
 //! let run = runner.tasks().start_prompt("Summarize this repo").await?;
 //! let stream = run.stream().await?;
 //! tokio::pin!(stream);
@@ -65,7 +65,7 @@
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = IntrospectionClient::new(ClientConfig::default())?;
 //! let runtime = std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
-//! let runner = client.runtime(&runtime).await?.run(RunRequest::default()).await?;
+//! let runner = client.runtimes().run(introspection_sdk::RuntimeRunSelector::Runtime(runtime.into()), RunRequest::default()).await?;
 //!
 //! // Multipart upload from a local path.
 //! let file = runner.files().upload(
@@ -176,9 +176,10 @@ pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
-    Dimension, Event, EventListParams, Experiment, ExperimentCreate, ExperimentGoal,
-    ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams,
+    AgentInfo, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
+    Dimension, Event, EventListParams, Experiment, ExperimentArm, ExperimentArmCreate,
+    ExperimentCreate, ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection,
+    ExperimentGoalGuard, ExperimentListParams, ExperimentRoutingStrategy, ExperimentRunRequest,
     ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText,
     FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgeGoalComponent,
     JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery,
@@ -186,11 +187,13 @@ pub use schemas::{
     PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
-    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent,
-    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, TypedEvent,
+    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, RuntimeEnvironment,
+    RuntimeImageStatus, RuntimeKind, RuntimeLlmMode, RuntimeRecipeKind, RuntimeRunSelector,
+    RuntimeVersion, RuntimeVersionListParams, ShareCreate, ShareListParams, ShareResourceType,
+    SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind,
+    TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension,
+    TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::{parse_agui_response, parse_sse_response};

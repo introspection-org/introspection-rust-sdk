@@ -26,7 +26,7 @@ patterns, judges, and experiments.
 
 This is the native Rust client for driving Introspection runtimes and tasks,
 alongside optional analytics and OpenTelemetry surfaces. Use
-`IntrospectionClient` to open a runner against a deployed runtime, start a task,
+`IntrospectionClient` to run a deployed Runtime, start a task,
 and stream its output. See the [platform SDK overview](https://docs.introspection.dev/sdk)
 for the wider product workflow and the JavaScript, Python, browser, and CLI
 clients.
@@ -82,16 +82,21 @@ and drive the `Runner` SSE stream.
 
 ```rust
 // cargo add introspection-sdk
-use introspection_sdk::{AgUiEvent, ClientConfig, IntrospectionClient, RunRequest};
+use introspection_sdk::{
+    AgUiEvent, ClientConfig, IntrospectionClient, RunRequest, RuntimeRunSelector,
+};
 use futures::StreamExt;
 
 let client = IntrospectionClient::new(ClientConfig::default())?;
-let runner = client.runtime("customer-agent").await?
-    .run(RunRequest {
-        agent_name: Some("support-agent".into()),
-        scope: Some("customer:acme".into()),
-        ..Default::default()
-    }).await?;
+let runner = client.runtimes()
+    .run(
+        RuntimeRunSelector::Runtime("customer-agent".into()),
+        RunRequest {
+            agent_name: Some("support-agent".into()),
+            scope: Some("customer:acme".into()),
+            ..Default::default()
+        },
+    ).await?;
 
 let mut events = runner.tasks()
     .start_prompt("Say hello in one sentence.").await?
