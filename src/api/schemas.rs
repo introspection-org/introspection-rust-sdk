@@ -811,7 +811,7 @@ pub struct RuntimeListParams {
 pub enum ExperimentStatus {
     Draft,
     Running,
-    Concluded,
+    Ended,
     Cancelled,
     Other(String),
 }
@@ -821,7 +821,7 @@ impl ExperimentStatus {
         match self {
             Self::Draft => "draft",
             Self::Running => "running",
-            Self::Concluded => "concluded",
+            Self::Ended => "ended",
             Self::Cancelled => "cancelled",
             Self::Other(s) => s,
         }
@@ -833,7 +833,7 @@ impl From<&str> for ExperimentStatus {
         match s {
             "draft" => Self::Draft,
             "running" => Self::Running,
-            "concluded" => Self::Concluded,
+            "ended" => Self::Ended,
             "cancelled" => Self::Cancelled,
             other => Self::Other(other.to_string()),
         }
@@ -853,13 +853,101 @@ impl<'de> Deserialize<'de> for ExperimentStatus {
     }
 }
 
+/// How a composite goal's component scores combine into the optimized reward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExperimentGoalDirection {
+    #[default]
+    Maximize,
+    Minimize,
+}
+
+/// Canary bound over one goal component's rate.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ExperimentGoalGuard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+}
+
+fn default_component_weight() -> f64 {
+    1.0
+}
+
+/// Judge-backed reward component. `judge_id` comes from `GET /v1/judges` —
+/// judges cannot be created through the API; author a `judges/*.yaml` in the
+/// recipe repository and it syncs when a runtime versions that commit.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JudgeGoalComponent {
+    pub judge_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_definition_hash: Option<String>,
+    #[serde(default = "default_component_weight")]
+    pub weight: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard: Option<ExperimentGoalGuard>,
+}
+
+/// Reserved shape for future telemetry-backed reward components.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TelemetryGoalComponent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aggregation: Option<String>,
+    #[serde(default = "default_component_weight")]
+    pub weight: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard: Option<ExperimentGoalGuard>,
+}
+
+/// One reward component of a composite goal, discriminated on `source`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "source", rename_all = "lowercase")]
+pub enum ExperimentGoalComponent {
+    Judge(JudgeGoalComponent),
+    Telemetry(TelemetryGoalComponent),
+}
+
+fn default_goal_kind() -> String {
+    "composite".to_string()
+}
+
+/// Composite objective the bandit optimizes. A create goal must carry at
+/// least one `Judge` component with `weight > 0` — the v1 scorer only
+/// implements judge-backed reward.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExperimentGoal {
+    #[serde(default = "default_goal_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub direction: ExperimentGoalDirection,
+    #[serde(default)]
+    pub components: Vec<ExperimentGoalComponent>,
+}
+
+impl Default for ExperimentGoal {
+    fn default() -> Self {
+        Self {
+            kind: default_goal_kind(),
+            direction: ExperimentGoalDirection::default(),
+            components: Vec::new(),
+        }
+    }
+}
+
+/// One arm of an experiment — a Runtime version in the experiment's group
+/// plus a display label. On create only `runtime_id`, `arm_label`, and the
+/// optional `agent_overrides` are sent; reads may carry additional
+/// server-set fields (arm id, seeded weight) which deserialize is happy to
+/// ignore.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Arm {
     pub runtime_id: Uuid,
+    pub arm_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arm_label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub weight: Option<f64>,
+    pub agent_overrides: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -867,56 +955,89 @@ pub struct Experiment {
     pub id: Uuid,
     pub org_id: Uuid,
     pub project_id: Uuid,
-    pub created_at: String,
-    pub updated_at: String,
     pub name: String,
-    pub runtime: String,
-    pub status: ExperimentStatus,
-    pub arms: Vec<Arm>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_json: Option<HashMap<String, serde_json::Value>>,
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    pub status: ExperimentStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_strategy: Option<String>,
+    #[serde(default)]
+    pub arms: Vec<Arm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_json: Option<ExperimentGoal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring_interval_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash_key_fields: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
+    pub sample_rate: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posterior_json: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weights_json: Option<HashMap<String, i64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halted_reason: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
+/// `POST /v1/experiments` body. Creates a draft that routes nothing until
+/// `start`. `arms` takes 2-20 runtime versions sharing `runtime_group_id`,
+/// and `goal_json` must contain at least one positive-weight judge component.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExperimentCreate {
     pub project: StringOrUuid,
     pub name: String,
-    pub runtime: StringOrUuid,
+    pub runtime_group_id: Uuid,
     pub arms: Vec<Arm>,
-    pub goal_json: HashMap<String, serde_json::Value>,
+    pub goal_json: ExperimentGoal,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub routing_strategy: Option<String>,
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scoring_interval_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash_key_fields: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
+    pub sample_rate: Option<f64>,
 }
 
+/// `PATCH /v1/experiments/{id}`. Status transitions go through start / end /
+/// cancel; `runtime_group_id` and arms are immutable once running.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_json: Option<HashMap<String, serde_json::Value>>,
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub routing_strategy: Option<String>,
+    pub goal_json: Option<ExperimentGoal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scoring_interval_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash_key_fields: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
+    pub sample_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
     pub project: StringOrUuid,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<StringOrUuid>,
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ExperimentStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1977,6 +2098,102 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn experiment_status_round_trips_ended() {
+        let s: ExperimentStatus = serde_json::from_str("\"ended\"").unwrap();
+        assert_eq!(s, ExperimentStatus::Ended);
+        assert_eq!(serde_json::to_string(&s).unwrap(), "\"ended\"");
+
+        let unknown: ExperimentStatus = serde_json::from_str("\"paused\"").unwrap();
+        assert_eq!(unknown, ExperimentStatus::Other("paused".to_string()));
+    }
+
+    #[test]
+    fn experiment_create_serializes_group_arms_and_judge_goal() {
+        let judge_id = "0195c0de-0000-7000-8000-00000000000d";
+        let body = serde_json::to_value(ExperimentCreate {
+            project: "my-project".into(),
+            name: "prompt-bake-off".into(),
+            runtime_group_id: "0195c0de-0000-7000-8000-00000000000a".parse().unwrap(),
+            arms: vec![
+                Arm {
+                    runtime_id: "0195c0de-0000-7000-8000-00000000000b".parse().unwrap(),
+                    arm_label: "control".into(),
+                    agent_overrides: None,
+                },
+                Arm {
+                    runtime_id: "0195c0de-0000-7000-8000-00000000000c".parse().unwrap(),
+                    arm_label: "variant".into(),
+                    agent_overrides: None,
+                },
+            ],
+            goal_json: ExperimentGoal {
+                components: vec![ExperimentGoalComponent::Judge(JudgeGoalComponent {
+                    judge_id: judge_id.parse().unwrap(),
+                    judge_definition_hash: None,
+                    weight: 1.0,
+                    guard: None,
+                })],
+                ..Default::default()
+            },
+            description: None,
+            environment: None,
+            scoring_interval_seconds: None,
+            hash_key_fields: None,
+            sample_rate: None,
+        })
+        .unwrap();
+
+        assert_eq!(
+            body["runtime_group_id"],
+            "0195c0de-0000-7000-8000-00000000000a"
+        );
+        assert_eq!(body["arms"][0]["arm_label"], "control");
+        assert!(body["arms"][0].get("weight").is_none());
+        let component = &body["goal_json"]["components"][0];
+        assert_eq!(component["source"], "judge");
+        assert_eq!(component["judge_id"], judge_id);
+        assert_eq!(body["goal_json"]["kind"], "composite");
+        assert_eq!(body["goal_json"]["direction"], "maximize");
+    }
+
+    #[test]
+    fn experiment_read_parses_typed_goal_and_group() {
+        let exp: Experiment = serde_json::from_value(json!({
+            "id": "0195c0de-0000-7000-8000-000000000001",
+            "org_id": "0195c0de-0000-7000-8000-000000000002",
+            "project_id": "0195c0de-0000-7000-8000-000000000003",
+            "name": "prompt-bake-off",
+            "runtime_group_id": "0195c0de-0000-7000-8000-00000000000a",
+            "status": "running",
+            "arms": [
+                {"id": "0195c0de-0000-7000-8000-0000000000f1", "runtime_id": "0195c0de-0000-7000-8000-00000000000b", "arm_label": "control", "initial_weight": 50}
+            ],
+            "goal_json": {
+                "kind": "composite",
+                "direction": "maximize",
+                "components": [
+                    {"source": "judge", "judge_id": "0195c0de-0000-7000-8000-00000000000d", "weight": 1.0}
+                ]
+            },
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z"
+        }))
+        .unwrap();
+
+        assert_eq!(exp.status, ExperimentStatus::Running);
+        assert_eq!(
+            exp.runtime_group_id.unwrap().to_string(),
+            "0195c0de-0000-7000-8000-00000000000a"
+        );
+        assert_eq!(exp.arms[0].arm_label, "control");
+        let goal = exp.goal_json.expect("goal parsed");
+        match &goal.components[0] {
+            ExperimentGoalComponent::Judge(j) => assert_eq!(j.weight, 1.0),
+            ExperimentGoalComponent::Telemetry(_) => panic!("expected judge component"),
+        }
     }
 
     #[test]

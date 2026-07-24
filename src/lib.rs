@@ -101,20 +101,21 @@ pub mod types;
 pub use api::{
     Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
     Conversations, Dimension, Event, EventListParams, Events, Experiment, ExperimentCreate,
+    ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard,
     ExperimentListParams, ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File,
     FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files,
-    HavingTerm, IntrospectionAPIError, IntrospectionEventName, JudgementEvent, JudgementPayload,
-    MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery, MetricsResponse,
-    ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams, Paginator,
-    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
-    ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
+    HavingTerm, IntrospectionAPIError, IntrospectionEventName, JudgeGoalComponent, JudgementEvent,
+    JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
+    MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
+    Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload,
+    Project, ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
     RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
     RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection,
     SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
     TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind,
-    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TimeDimension,
-    TypedEvent, UploadSource,
+    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TelemetryGoalComponent, TimeDimension, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
