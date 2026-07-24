@@ -783,6 +783,10 @@ pub struct Runtime {
     pub llm_mode: RuntimeLlmMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_json: Option<HashMap<String, serde_json::Value>>,
+    /// Per-environment git ref each lane tracks (`environment` -> `main` /
+    /// `pr/N` / commit sha), projected from the runtime group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_ref: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
