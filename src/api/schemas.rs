@@ -1114,11 +1114,11 @@ pub struct RunCallerPage {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-/// `POST /v1/runtimes/{id}/run` and `/v1/experiments/{id}/run` body.
+/// Runtime or Experiment Runner options.
 ///
-/// User-facing request type. CP infers everything else (runtime_id /
-/// experiment_id from the URL; member_id / org_id / project_id from
-/// the bearer key).
+/// Runtime selectors are supplied by [`crate::Runtimes::run`] or
+/// [`crate::RuntimeHandle::run`]; Experiment IDs remain part of the
+/// Experiment handle.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RunRequest {
     #[serde(skip_serializing_if = "Option::is_none")]

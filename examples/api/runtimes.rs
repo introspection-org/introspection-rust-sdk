@@ -23,14 +23,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runtime =
         std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 
-    // 1) Look up the runtime by runtime group slug or ID and open a Runner.
+    // 1) Atomically select the stable Runtime and open a Runner.
     let runner = client
-        .runtime(&runtime)
-        .await?
-        .run(RunRequest {
-            ttl_seconds: Some(3600),
-            ..Default::default()
-        })
+        .runtimes()
+        .run(
+            &runtime,
+            RunRequest {
+                ttl_seconds: Some(3600),
+                ..Default::default()
+            },
+        )
         .await?;
     println!(
         "runner -> dp={}, session={}, expires={}",

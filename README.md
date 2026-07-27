@@ -86,8 +86,8 @@ use introspection_sdk::{AgUiEvent, ClientConfig, IntrospectionClient, RunRequest
 use futures::StreamExt;
 
 let client = IntrospectionClient::new(ClientConfig::default())?;
-let runner = client.runtime("customer-agent").await?
-    .run(RunRequest {
+let runner = client.runtimes()
+    .run("customer-agent", RunRequest {
         agent_name: Some("support-agent".into()),
         scope: Some("customer:acme".into()),
         ..Default::default()

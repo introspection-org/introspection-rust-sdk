@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::api::error::{ApiResult, IntrospectionAPIError};
@@ -52,8 +53,21 @@ impl RunnerSource {
                 runtime_id,
                 ctx,
             } => {
-                let path = format!("/v1/runtimes/{}/run", runtime_id);
-                cp_http.post_json(&path, ctx).await
+                #[derive(Serialize)]
+                struct ExactRuntimeRunRequest<'a> {
+                    runtime_id: Uuid,
+                    #[serde(flatten)]
+                    ctx: &'a RunRequest,
+                }
+                cp_http
+                    .post_json(
+                        "/v1/runtimes/run",
+                        &ExactRuntimeRunRequest {
+                            runtime_id: *runtime_id,
+                            ctx,
+                        },
+                    )
+                    .await
             }
             Self::Experiment {
                 cp_http,
@@ -63,6 +77,42 @@ impl RunnerSource {
             } => {
                 let path = format!("/v1/experiments/{}/run?project={}", experiment_id, project);
                 cp_http.post_json(&path, ctx).await
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum RunnerRefreshSource {
+    Existing(RunnerSource),
+    StableRuntime {
+        cp_http: Arc<HttpClient>,
+        runtime: String,
+        ctx: RunRequest,
+    },
+}
+
+impl RunnerRefreshSource {
+    async fn mint(&self) -> ApiResult<RunnerSpec> {
+        match self {
+            Self::Existing(source) => source.mint().await,
+            Self::StableRuntime {
+                cp_http,
+                runtime,
+                ctx,
+            } => {
+                #[derive(Serialize)]
+                struct StableRuntimeRunRequest<'a> {
+                    runtime: &'a str,
+                    #[serde(flatten)]
+                    ctx: &'a RunRequest,
+                }
+                cp_http
+                    .post_json(
+                        "/v1/runtimes/run",
+                        &StableRuntimeRunRequest { runtime, ctx },
+                    )
+                    .await
             }
         }
     }
@@ -100,7 +150,7 @@ impl RunnerState {
 /// identity) or (experiment-arm, identity) pair.
 pub struct Runner {
     state: Arc<RwLock<RunnerState>>,
-    source: RunnerSource,
+    source: RunnerRefreshSource,
 }
 
 impl Runner {
@@ -108,7 +158,24 @@ impl Runner {
         let state = RunnerState::from_spec(spec)?;
         Ok(Self {
             state: Arc::new(RwLock::new(state)),
-            source,
+            source: RunnerRefreshSource::Existing(source),
+        })
+    }
+
+    pub(crate) fn from_stable_runtime(
+        spec: RunnerSpec,
+        cp_http: Arc<HttpClient>,
+        runtime: String,
+        ctx: RunRequest,
+    ) -> ApiResult<Self> {
+        let state = RunnerState::from_spec(spec)?;
+        Ok(Self {
+            state: Arc::new(RwLock::new(state)),
+            source: RunnerRefreshSource::StableRuntime {
+                cp_http,
+                runtime,
+                ctx,
+            },
         })
     }
 
