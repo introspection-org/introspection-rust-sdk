@@ -19,6 +19,7 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::api::http::{HttpClient, HttpConfig};
+use crate::dev_target;
 use crate::resources::{
     ExperimentHandle, Experiments, Projects, Recipes, Repositories, RuntimeHandle, Runtimes,
 };
@@ -100,7 +101,13 @@ impl IntrospectionClient {
         {
             (None, None, None, None, None, None)
         } else {
-            let api_headers = advanced.additional_headers.clone().unwrap_or_default();
+            // INTROSPECTION_DEV_TARGET rides every request as a header so it
+            // reaches the paths a runner cannot: a bare `POST /v1/tasks` with a
+            // dev API key mints its JWT from the key row and has no per-request
+            // claim to carry a target.
+            let api_headers = dev_target::with_dev_target(
+                advanced.additional_headers.clone().unwrap_or_default(),
+            );
             let http_cfg = HttpConfig {
                 api_url: base_api_url,
                 token: token.clone(),
