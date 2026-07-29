@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.9.0...v0.10.0) (2026-07-29)
+
+
+### Features
+
+* route tasks to a named dev server via INTROSPECTION_DEV_TARGET ([#51](https://github.com/introspection-org/introspection-rust-sdk/issues/51)) ([a101611](https://github.com/introspection-org/introspection-rust-sdk/commit/a101611070bc244bed6455200fd85f0962880f08))
+
 ## [0.9.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.8.0...v0.9.0) (2026-07-24)
 
 
