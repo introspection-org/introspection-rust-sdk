@@ -324,6 +324,10 @@ Streaming variant `traced_chat_completion_stream` and the
 export INTROSPECTION_TOKEN="intro_xxx"
 export INTROSPECTION_BASE_API_URL="https://api.introspection.dev"   # optional
 
+# Development only: route this process's tasks to your own `introspection dev`
+# server when several developers share one Runtime. No default — see below.
+export INTROSPECTION_DEV_TARGET="roland"                            # optional
+
 # OTel (IntrospectionLogs + IntrospectionSpanProcessor)
 export INTROSPECTION_BASE_OTEL_URL="https://otel.introspection.dev" # optional
 export INTROSPECTION_SERVICE_NAME="my-service"                      # optional
@@ -331,6 +335,29 @@ export INTROSPECTION_SERVICE_NAME="my-service"                      # optional
 
 All env values can be overridden programmatically via the matching
 builder method or advanced-options struct.
+
+### Sharing a Runtime with another developer
+
+When two people run `introspection dev` against one Runtime, a task created by
+a shared application credential carries no developer, so the platform cannot
+tell their machines apart. Name one:
+
+```shell
+# introspection dev prints the line to copy
+export INTROSPECTION_DEV_TARGET="roland"
+```
+
+The SDK reads it and sends it as a request header on every call, so this
+process's tasks reach that dev server — prompts, working tree, and local MCP
+servers. There is no default: a target names *someone else's* machine, and
+guessing it from the local username would be right on a laptop and quietly
+wrong in a shared development deployment. Set it explicitly, or leave it unset
+and keep today's behaviour.
+
+It travels as a header, not on `caller`. `caller` stays what it is documented
+to be: descriptive metadata you attach to a session that the platform never
+acts on. Nothing changes outside the development environment, where the value
+is ignored.
 
 ## Documentation
 

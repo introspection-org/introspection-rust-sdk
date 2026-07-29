@@ -91,6 +91,7 @@
 pub mod agui;
 pub mod api;
 pub mod client;
+pub mod dev_target;
 #[cfg(feature = "otel")]
 pub mod otel;
 pub mod resources;

@@ -54,6 +54,7 @@ opentelemetry-otlp = { version = "0.32.0", default-features = false, features = 
 # `gzip` makes the client advertise `Accept-Encoding: gzip` and decompress
 # responses transparently — the DP gateway compresses JSON when offered
 # (Arrow stream responses are never compressed and arrive unchanged).
+percent-encoding = "2"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs", "gzip"] }
 
 # Serialization
