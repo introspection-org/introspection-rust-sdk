@@ -74,7 +74,7 @@ mime_guess = "2"
 derive_builder = "0.20"
 
 # Optional: async-openai integration (requires `otel`)
-async-openai = { version = "0.41", features = ["chat-completion", "responses"], optional = true }
+async-openai = { version = "0.41", features = ["chat-completion", "responses", "embedding"], optional = true }
 
 # Optional: Apache Arrow IPC-stream decode for the telemetry reads (gated by
 # the `arrow` feature). `ipc` alone keeps the dependency tree lean — no
@@ -93,7 +93,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
 flate2 = "1"
-async-openai = { version = "0.41", features = ["chat-completion"] }
+async-openai = { version = "0.41", features = ["chat-completion", "embedding"] }
 dotenvy = "0.15"
 
 [[example]]
