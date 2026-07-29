@@ -51,12 +51,15 @@ use async_openai::types::chat::{
     CompletionUsage, CreateChatCompletionRequest, CreateChatCompletionResponse,
     CreateChatCompletionStreamResponse,
 };
+use async_openai::types::embeddings::{
+    CreateEmbeddingRequest, CreateEmbeddingResponse, EncodingFormat,
+};
 use async_openai::types::responses::{
     CreateResponse, OutputItem, Response as ResponsesResponse, ResponseUsage,
 };
 use async_openai::Client;
 use futures::Stream;
-use opentelemetry::trace::{Span, Tracer};
+use opentelemetry::trace::{Span, SpanKind, Status, Tracer};
 use opentelemetry::{KeyValue, StringValue, Value};
 
 use crate::otel::messages::{
@@ -64,6 +67,75 @@ use crate::otel::messages::{
     ToolCallResponsePart,
 };
 use crate::otel::observation::{GenerationUpdate, Observation, ObservationConfig, Usage};
+
+/// Wrap an OpenAI embedding request in a metadata-only GenAI span.
+///
+/// The request input and returned vectors are never attached to the span.
+pub async fn traced_embeddings_create<S: Span, T: Tracer<Span = S>>(
+    tracer: &T,
+    client: &Client<OpenAIConfig>,
+    request: CreateEmbeddingRequest,
+) -> Result<CreateEmbeddingResponse, OpenAIError> {
+    let model = request.model.clone();
+    let requested_dimensions = request.dimensions;
+    let encoding_format = request
+        .encoding_format
+        .as_ref()
+        .map(|encoding| match encoding {
+            EncodingFormat::Float => "float",
+            EncodingFormat::Base64 => "base64",
+        });
+
+    let mut attributes = vec![
+        KeyValue::new("gen_ai.system", "openai"),
+        KeyValue::new("gen_ai.provider.name", "openai"),
+        KeyValue::new("gen_ai.operation.name", "embeddings"),
+        KeyValue::new("gen_ai.request.model", model.clone()),
+        KeyValue::new("openinference.span.kind", "EMBEDDING"),
+    ];
+    if let Some(dimensions) = requested_dimensions {
+        attributes.push(KeyValue::new(
+            "gen_ai.embeddings.dimension.count",
+            i64::from(dimensions),
+        ));
+    }
+    if let Some(encoding) = encoding_format {
+        attributes.push(KeyValue::new(
+            "gen_ai.request.encoding_formats",
+            Value::Array(vec![StringValue::from(encoding)].into()),
+        ));
+    }
+
+    let mut span = tracer
+        .span_builder(format!("embeddings {model}"))
+        .with_kind(SpanKind::Client)
+        .with_attributes(attributes)
+        .start(tracer);
+
+    let result = client.embeddings().create(request).await;
+    match &result {
+        Ok(response) => {
+            span.set_attribute(KeyValue::new(
+                "gen_ai.response.model",
+                response.model.clone(),
+            ));
+            span.set_attribute(KeyValue::new(
+                "gen_ai.usage.input_tokens",
+                i64::from(response.usage.prompt_tokens),
+            ));
+            if let Some(embedding) = response.data.first() {
+                span.set_attribute(KeyValue::new(
+                    "gen_ai.embeddings.dimension.count",
+                    i64::try_from(embedding.embedding.len()).unwrap_or(i64::MAX),
+                ));
+            }
+            span.set_status(Status::Ok);
+        }
+        Err(error) => span.set_status(Status::error(error.to_string())),
+    }
+    span.end();
+    result
+}
 
 /// Convert a slice of OpenAI request messages to typed [`InputMessage`] structs.
 pub fn convert_request_messages(messages: &[ChatCompletionRequestMessage]) -> Vec<InputMessage> {
