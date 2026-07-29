@@ -30,6 +30,7 @@
 //! Inert outside development: the Data Plane consults a target only on the
 //! development pin path, so a stray value in staging or production is ignored.
 
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use std::collections::HashMap;
 use std::env;
 
@@ -40,13 +41,22 @@ pub const DEV_TARGET_HEADER: &str = "x-introspection-dev-target";
 pub const DEV_TARGET_ENV: &str = "INTROSPECTION_DEV_TARGET";
 
 /// The development target for this process, or `None` when unset or blank.
+///
+/// Percent-encoded, because the value becomes an HTTP header and a header is
+/// bytes: `HeaderValue` rejects a non-ASCII login name like `andré` outright,
+/// so encoding is what lets one route rather than fail the request. An
+/// ordinary ASCII name encodes to itself.
+///
+/// Safe to send encoded because the Data Plane decodes before it normalizes,
+/// so `andré` and `andr%C3%A9` land on the same target as the `--as andré`
+/// the CLI advertises over protobuf, where no encoding is needed.
 pub fn resolve_dev_target() -> Option<String> {
     let raw = env::var(DEV_TARGET_ENV).ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         None
     } else {
-        Some(trimmed.to_string())
+        Some(utf8_percent_encode(trimmed, NON_ALPHANUMERIC).to_string())
     }
 }
 
@@ -101,6 +111,23 @@ mod tests {
         });
         with_env(Some("   "), || assert!(resolve_dev_target().is_none()));
         with_env(None, || assert!(resolve_dev_target().is_none()));
+    }
+
+    #[test]
+    fn non_ascii_and_spaced_targets_are_percent_encoded() {
+        // A HeaderValue cannot carry these bytes; the Data Plane decodes
+        // before it normalizes, so the encoded form matches what the CLI
+        // advertises unencoded over protobuf.
+        with_env(Some("andré"), || {
+            assert_eq!(resolve_dev_target().as_deref(), Some("andr%C3%A9"));
+        });
+        with_env(Some("roland laptop"), || {
+            assert_eq!(resolve_dev_target().as_deref(), Some("roland%20laptop"));
+        });
+        // The ordinary case is untouched.
+        with_env(Some("roland"), || {
+            assert_eq!(resolve_dev_target().as_deref(), Some("roland"));
+        });
     }
 
     #[test]
