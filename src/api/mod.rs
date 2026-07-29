@@ -9,6 +9,8 @@
 //! - [`Files`] — OpenAI-style upload / download / list, plus a nested
 //!   [`FileVersions`] namespace.
 //! - [`Shares`] — read-sharing grants for files and conversations.
+//! - [`Conversations`] — telemetry summaries with nested [`ConversationItems`]
+//!   for opaque-cursor item list/detail reads.
 //!
 //! Everything maps 1:1 to existing DP routes; no new HTTP surface area.
 //! Auth reuses the same `INTROSPECTION_TOKEN` bearer used by the OTLP
@@ -113,6 +115,8 @@
 //! | `POST   /v1/shares` | [`Shares::create`] |
 //! | `GET    /v1/shares/{id}` | [`Shares::get`] |
 //! | `DELETE /v1/shares/{id}` | [`Shares::delete`] |
+//! | `GET /v1/conversations/{id}/items` | [`ConversationItems::list`] *(stream or `next_page`)* |
+//! | `GET /v1/conversations/{id}/items/{item_id}` | [`ConversationItems::get`] |
 //!
 //! # Streaming
 //!
@@ -157,6 +161,7 @@
 #[cfg(feature = "arrow")]
 pub mod arrow;
 pub mod backoff;
+pub mod conversation_items;
 pub mod error;
 pub mod files;
 pub mod http;
@@ -170,27 +175,30 @@ pub mod telemetry;
 
 #[cfg(feature = "arrow")]
 pub use arrow::{ArrowPage, ARROW_STREAM_ACCEPT};
+pub use conversation_items::{ConversationItemPaginator, ConversationItems};
 pub use error::{ApiResult, IntrospectionAPIError};
 pub use files::{FileUpload, FileVersions, Files, UploadSource};
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationListParams,
-    Dimension, Event, EventListParams, Experiment, ExperimentCreate, ExperimentGoal,
-    ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams,
-    ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText,
-    FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgeGoalComponent,
-    JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery,
-    MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
-    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
-    ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
-    RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,
-    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent,
-    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, TypedEvent,
+    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationItem,
+    ConversationItemGetParams, ConversationItemInclude, ConversationItemList,
+    ConversationItemListParams, ConversationListParams, Dimension, Event, EventListParams,
+    Experiment, ExperimentCreate, ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection,
+    ExperimentGoalGuard, ExperimentListParams, ExperimentStatus, ExperimentUpdate, FeedbackEvent,
+    FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate, HavingTerm,
+    IntrospectionEventName, JudgeGoalComponent, JudgementEvent, JudgementPayload, MetricFilter,
+    MetricSpec, MetricsConfig, MetricsQuery, MetricsResponse, ObservationEvent, ObservationPayload,
+    OrderTerm, Paginated, PaginationParams, PatternAssignmentEvent, PatternAssignmentPayload,
+    PatternEvent, PatternPayload, Project, ProjectListParams, Recipe, RecipeCreate,
+    RecipeListParams, RecipeUpdate, Repository, RepositoryListParams, ResourceShare, ResumeEntry,
+    RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext, RunnerDeployment,
+    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, ShareCreate, ShareListParams,
+    ShareResourceType, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions,
+    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt,
+    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate,
+    TelemetryGoalComponent, TimeDimension, TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::{parse_agui_response, parse_sse_response};

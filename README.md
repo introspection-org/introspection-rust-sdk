@@ -123,6 +123,46 @@ for file and conversation sharing grants.
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
 
+#### Conversation items
+
+`runner.conversations().items.list(...)` returns a
+`ConversationItemPaginator`. Use it as an async `Stream` to iterate items
+across pages, or call `next_page()` when the OpenAI-style page metadata
+(`first_id`, `last_id`, `has_more`, and opaque `next`) is needed:
+
+```rust
+use futures::StreamExt;
+use introspection_sdk::ConversationItemListParams;
+
+let conversations = runner.conversations();
+let mut items = conversations.items.list(
+    "conversation-id",
+    &ConversationItemListParams {
+        limit: Some(100),
+        ..Default::default()
+    },
+)?;
+
+while let Some(item) = items.next().await {
+    println!("{}", item?.id);
+}
+
+// Or preserve page metadata explicitly:
+let mut pages = conversations.items.list(
+    "conversation-id",
+    &ConversationItemListParams::default(),
+)?;
+while let Some(page) = pages.next_page().await? {
+    println!("first={:?} last={:?} next={:?}",
+        page.first_id, page.last_id, page.next);
+}
+```
+
+Pass a returned `next` token into `ConversationItemListParams::next` to resume
+from a checkpoint. `first_id` and `last_id` are informational item IDs, not
+pagination inputs. `conversations.items.get(...)` fetches a single item with
+the full input history for that span.
+
 #### Resilient streaming
 
 `stream()` resumes **transparently** across a mid-turn disconnect — gateway

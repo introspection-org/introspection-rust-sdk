@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
+    ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, Conversations, Event, EventListParams, Events, FileCreateText,
     FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
     IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
@@ -33,6 +34,22 @@ fn build_http(server: &MockServer) -> Arc<HttpClient> {
         retry_base: Duration::from_millis(1),
     };
     Arc::new(HttpClient::from_parts(reqwest::Client::new(), cfg))
+}
+
+fn conversation_item(id: &str) -> serde_json::Value {
+    json!({
+        "object": "conversation.item",
+        "id": id,
+        "type": "span",
+        "trace_id": "0123456789abcdef0123456789abcdef",
+        "span_id": id,
+        "created_at": "2026-07-29T08:00:00.123456789Z",
+        "span_name": "invoke_agent",
+        "span_kind": "INTERNAL",
+        "node_type": "assistant",
+        "input_messages": [],
+        "future_server_field": "preserved"
+    })
 }
 
 #[tokio::test]
@@ -628,6 +645,160 @@ async fn conversations_list_rejects_lookback_with_start_before_send() {
     ));
     // No request was ever sent — validation is client-side.
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param("limit", "1"))
+        .and(query_param("include", "events"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": true,
+            "next": "opaque-page-2"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param("next", "opaque-page-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-2")],
+            "first_id": "span-2",
+            "last_id": "span-2",
+            "has_more": false,
+            "next": null
+        })))
+        .mount(&server)
+        .await;
+
+    let mut pages = conversations
+        .items
+        .list(
+            "conv-1",
+            &ConversationItemListParams {
+                limit: Some(1),
+                include: vec![ConversationItemInclude::Events],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let first = pages.next_page().await.unwrap().unwrap();
+    assert_eq!(first.first_id.as_deref(), Some("span-1"));
+    assert_eq!(first.last_id.as_deref(), Some("span-1"));
+    assert_eq!(first.next.as_deref(), Some("opaque-page-2"));
+    assert!(first.has_more);
+    let second = pages.next_page().await.unwrap().unwrap();
+    assert_eq!(second.data[0].id, "span-2");
+    assert!(pages.next_page().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn conversation_items_list_is_an_async_item_stream() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-stream/items"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": true,
+            "next": "opaque-next"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-stream/items"))
+        .and(query_param("next", "opaque-next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-2")],
+            "first_id": "span-2",
+            "last_id": "span-2",
+            "has_more": false,
+            "next": null
+        })))
+        .mount(&server)
+        .await;
+
+    let mut items = conversations
+        .items
+        .list("conv-stream", &ConversationItemListParams::default())
+        .unwrap();
+    let mut ids = Vec::new();
+    while let Some(item) = items.next().await {
+        ids.push(item.unwrap().id);
+    }
+    assert_eq!(ids, ["span-1", "span-2"]);
+}
+
+#[tokio::test]
+async fn conversation_items_rejects_has_more_without_next() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-bad/items"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [],
+            "first_id": null,
+            "last_id": null,
+            "has_more": true,
+            "next": null
+        })))
+        .mount(&server)
+        .await;
+
+    let mut pages = conversations
+        .items
+        .list("conv-bad", &ConversationItemListParams::default())
+        .unwrap();
+    let error = pages.next_page().await.unwrap_err();
+    assert!(matches!(error, IntrospectionAPIError::Decode(_)));
+    assert!(error.to_string().contains("has_more without next"));
+}
+
+#[tokio::test]
+async fn conversation_items_get_fetches_detail_with_includes() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items/span-1"))
+        .and(query_param("include", "gen_ai.input.messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(conversation_item("span-1")))
+        .mount(&server)
+        .await;
+
+    let item = conversations
+        .items
+        .get(
+            "conv-1",
+            "span-1",
+            &ConversationItemGetParams {
+                include: vec![ConversationItemInclude::GenAiInputMessages],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(item.id, "span-1");
+    assert_eq!(
+        item.extra.get("future_server_field"),
+        Some(&json!("preserved"))
+    );
 }
 
 #[tokio::test]
