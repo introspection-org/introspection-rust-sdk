@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.10.0...v0.11.0) (2026-07-29)
+
+
+### Features
+
+* add conversation item pagination ([#54](https://github.com/introspection-org/introspection-rust-sdk/issues/54)) ([b3ec069](https://github.com/introspection-org/introspection-rust-sdk/commit/b3ec0699826248ade5f566413c959ee58248b482))
+* **otel:** trace OpenAI embedding usage ([#53](https://github.com/introspection-org/introspection-rust-sdk/issues/53)) ([0487898](https://github.com/introspection-org/introspection-rust-sdk/commit/0487898565afd77db191d295719d4fbcc4303d59))
+
 ## [0.10.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.9.0...v0.10.0) (2026-07-29)
 
 
