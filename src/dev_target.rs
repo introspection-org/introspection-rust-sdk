@@ -30,7 +30,20 @@
 //! Inert outside development: the Data Plane consults a target only on the
 //! development pin path, so a stray value in staging or production is ignored.
 
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+
+/// Everything outside RFC 3986's *unreserved* set.
+///
+/// `NON_ALPHANUMERIC` alone would encode `-`, `.`, `_` and `~`, turning an
+/// everyday `my-laptop` into `my%2Dlaptop`. The Data Plane decodes before it
+/// normalizes, so that still routes — but it is not what the other SDKs send,
+/// not what `introspection dev` prints for you to copy, and not what anyone
+/// reading a header or a log expects to see.
+const TARGET_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
 use std::collections::HashMap;
 use std::env;
 
@@ -56,7 +69,7 @@ pub fn resolve_dev_target() -> Option<String> {
     if trimmed.is_empty() {
         None
     } else {
-        Some(utf8_percent_encode(trimmed, NON_ALPHANUMERIC).to_string())
+        Some(utf8_percent_encode(trimmed, TARGET_ENCODE_SET).to_string())
     }
 }
 
@@ -111,6 +124,19 @@ mod tests {
         });
         with_env(Some("   "), || assert!(resolve_dev_target().is_none()));
         with_env(None, || assert!(resolve_dev_target().is_none()));
+    }
+
+    #[test]
+    fn ordinary_machine_names_survive_encoding_intact() {
+        // The three SDKs must put the same bytes on the wire for the same
+        // target: a hyphenated hostname is the common case, and encoding it
+        // differently from the JS and Python clients would show up in every
+        // header and log line even though routing tolerates it.
+        for name in ["my-laptop", "roland_box", "host.local", "a~b"] {
+            with_env(Some(name), || {
+                assert_eq!(resolve_dev_target().as_deref(), Some(name));
+            });
+        }
     }
 
     #[test]
