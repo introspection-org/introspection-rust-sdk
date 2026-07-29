@@ -27,6 +27,7 @@
 
 use std::sync::Arc;
 
+use crate::api::conversation_items::ConversationItems;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
@@ -42,12 +43,17 @@ use crate::api::arrow::{decode_arrow_response, ArrowPage, ARROW_STREAM_ACCEPT};
 #[derive(Clone)]
 pub struct Conversations {
     http: Arc<HttpClient>,
+    /// Items of a conversation (`/v1/conversations/{id}/items`).
+    pub items: ConversationItems,
 }
 
 impl Conversations {
     #[doc(hidden)]
     pub fn new(http: Arc<HttpClient>) -> Self {
-        Self { http }
+        Self {
+            items: ConversationItems::new(http.clone()),
+            http,
+        }
     }
 
     /// `GET /v1/conversations` — cursor paginator (JSON).
