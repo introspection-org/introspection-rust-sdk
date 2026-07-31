@@ -12,9 +12,54 @@ updates:
     labels:
       - "dependencies"
       - "rust"
+    # `include: "scope"` appends "(deps)" itself, so the prefix must NOT
+    # contain it — `prefix: "chore(deps)"` renders `chore(deps)(deps):`, which
+    # is not a valid Conventional Commit (see the titles on #6-#10 and #19).
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
+    groups:
+      # Cargo's compatibility rule keys off the leftmost NONZERO component, but
+      # Dependabot labels by numeric position. For a pre-1.0 crate the two
+      # disagree: async-openai 0.40 -> 0.41 and reqwest 0.12 -> 0.13 both report
+      # as "minor" while Cargo treats them as breaking. This repo's own history
+      # is the proof — #6, #7, #8, #9, #10 and #19 were every one of them a
+      # breaking bump that Dependabot labelled minor.
+      #
+      # So auto-merge keys off membership of this group, never the update type.
+      # Only crates already at >=1.0 belong here, where a minor/patch bump is
+      # compatible by construction.
+      cargo-semver-compatible:
+        applies-to: version-updates
+        patterns:
+          - "arrow"
+          - "bytes"
+          - "fastrand"
+          - "flate2"
+          - "insta"
+          - "mime_guess"
+          - "percent-encoding"
+          - "serde"
+          - "serde_json"
+          - "thiserror"
+          - "tokio"
+          - "uuid"
+        update-types:
+          - "minor"
+          - "patch"
+      # The OTLP exporter pins the HTTP client: Cargo.toml holds reqwest at 0.13
+      # to match opentelemetry-otlp 0.32, to avoid "a duplicate reqwest in the
+      # dep graph and the resulting HttpClient trait-bound mismatch". Bumping
+      # either side alone breaks that pairing, so they are grouped to RESOLVE
+      # together — not because the bump is safe. All four are pre-1.0, so they
+      # are excluded from auto-merge by construction; review them as breaking.
+      otel-rust:
+        applies-to: version-updates
+        patterns:
+          - "opentelemetry"
+          - "opentelemetry-otlp"
+          - "opentelemetry_sdk"
+          - "reqwest"
 
   # ── GitHub Actions (used by ci.yml / publish.yml / release-tag.yml) ──
   - package-ecosystem: "github-actions"
