@@ -1,0 +1,53 @@
+name: Dependabot auto-merge
+
+# Dependabot cannot merge anything itself — there is no auto-merge setting in
+# dependabot.yml. This workflow asks GitHub to auto-merge the PR; GitHub then
+# waits for required checks and merges when they pass. It never bypasses CI.
+#
+# Requires "Allow auto-merge" in Settings > General > Pull Requests.
+#
+# Deliberately `pull_request`, not `pull_request_target` (which the js-sdk and
+# python-sdk copies use). Read-only is only the DEFAULT for a Dependabot-
+# triggered GITHUB_TOKEN; the `permissions:` block below elevates it, which is
+# exactly the shape GitHub documents for this job. `pull_request_target` would
+# run in base-branch context with a writable token, so adding an
+# actions/checkout step later would silently execute PR-authored code with it.
+# What genuinely cannot be elevated is SECRETS access — Dependabot runs read
+# the Dependabot secrets store, not the Actions one — and this workflow needs
+# no secrets beyond GITHUB_TOKEN.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Cargo is gated on the group, not the update type. Cargo's compatibility
+      # rule is the leftmost NONZERO component while Dependabot labels by
+      # numeric position, so a `!= semver-major` gate auto-merges breaking
+      # bumps. That is not hypothetical here: of the 12 Dependabot PRs this
+      # repo has ever seen, #6/#7/#8/#9/#10/#19 (opentelemetry 0.30->0.32,
+      # reqwest 0.12->0.13, async-openai 0.33->0.40 and 0.40->0.41) all report
+      # as "minor" and all are breaking. Membership of cargo-semver-compatible
+      # — by construction the >=1.0 minor/patch allow-list — is the safe signal.
+      #
+      # github-actions follows normal semver, so majors are the only exclusion.
+      - name: Enable auto-merge
+        if: >
+          steps.meta.outputs.dependency-group == 'cargo-semver-compatible' ||
+          (steps.meta.outputs.package-ecosystem != 'cargo' &&
+           steps.meta.outputs.update-type != 'version-update:semver-major')
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
