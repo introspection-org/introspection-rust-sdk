@@ -116,10 +116,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # release-please creates the tag *and* the release, and the tag push is
+      # what triggers this workflow — so by the time it runs the release
+      # normally already exists and `gh release create` fails the job with a
+      # 422. The step still earns its place for a manual `workflow_dispatch`
+      # publish, where nothing has created one. Same guard the JS SDK uses.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ needs.resolve-version.outputs.version }}" \
-            --title "v${{ needs.resolve-version.outputs.version }}" \
+          TAG="v${{ needs.resolve-version.outputs.version }}"
+          if gh release view "${TAG}" --json tagName >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; skipping creation."
+            exit 0
+          fi
+          gh release create "${TAG}" \
+            --title "${TAG}" \
             --generate-notes
