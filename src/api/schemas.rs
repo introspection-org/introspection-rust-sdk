@@ -1413,22 +1413,10 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
-/// One conversation record from `GET /v1/conversations` (append-only
-/// `otel_traces`). Telemetry attributes are open, so only a few stable
-/// identifiers are named; everything else rides along in [`Self::extra`].
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Conversation {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conversation_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_time: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_time: Option<String>,
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
-}
+// A conversation summary and a conversation item are the same object — the
+// GenAI span in [`crate::api::genai_span`]. A summary is a span-shaped preview
+// carrying the latest turn plus conversation rollups, so it needs no type of
+// its own.
 
 /// Ergonomic params for `GET /v1/conversations`. `order`/`start`/`end`/
 /// `lookback` map to the wire `direction`/`start_date`/`end_date` window (see
@@ -1449,43 +1437,38 @@ pub struct ConversationListParams {
 }
 
 /// Optional expansions for conversation-item list/detail reads.
+///
+/// Two values, and the ones that are gone matter more than the ones that are
+/// left. The message-family includes (`gen_ai.input.messages` and friends) are
+/// deleted: the detail read returns the full history unconditionally, so there
+/// is nothing left for them to gate. A parameter that is *always* required is
+/// not a parameter, it is a trap — forgetting it silently forked a
+/// conversation with one turn of context. `span_attributes` is gone for the
+/// related reason that the attribute tree **is** the response now, not an
+/// optional expansion of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ConversationItemInclude {
-    #[serde(rename = "gen_ai.input.messages")]
-    GenAiInputMessages,
-    #[serde(rename = "gen_ai.output.messages")]
-    GenAiOutputMessages,
-    #[serde(rename = "gen_ai.system_instructions")]
-    GenAiSystemInstructions,
-    #[serde(rename = "gen_ai.tool.definitions")]
-    GenAiToolDefinitions,
     #[serde(rename = "events")]
     Events,
     #[serde(rename = "resource_attributes")]
     ResourceAttributes,
-    #[serde(rename = "span_attributes")]
-    SpanAttributes,
 }
 
 impl ConversationItemInclude {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::GenAiInputMessages => "gen_ai.input.messages",
-            Self::GenAiOutputMessages => "gen_ai.output.messages",
-            Self::GenAiSystemInstructions => "gen_ai.system_instructions",
-            Self::GenAiToolDefinitions => "gen_ai.tool.definitions",
             Self::Events => "events",
             Self::ResourceAttributes => "resource_attributes",
-            Self::SpanAttributes => "span_attributes",
         }
     }
 }
 
 /// Parameters for `GET /v1/conversations/{conversation_id}/items`.
 ///
-/// `next` is the opaque token returned by [`ConversationItemList::next`].
-/// [`ConversationItemList::first_id`] and [`ConversationItemList::last_id`]
-/// are informational and are not valid pagination inputs.
+/// `next` is the opaque token returned by
+/// [`GenAiSpanList::next`](crate::api::genai_span::GenAiSpanList::next).
+/// `first_id` and `last_id` on that envelope are informational span IDs and
+/// are not valid pagination inputs.
 #[derive(Debug, Clone, Default)]
 pub struct ConversationItemListParams {
     pub limit: Option<u32>,
@@ -1508,104 +1491,11 @@ pub struct ConversationItemGetParams {
     pub share_id: Option<Uuid>,
 }
 
-/// Canonical conversation item — one span in a conversation.
-///
-/// Stable scalar fields are named directly. Message, tool, event, and
-/// attribute payloads remain JSON values so newly added semconv shapes stay
-/// forward-compatible without requiring an SDK release.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ConversationItem {
-    pub object: String,
-    pub id: String,
-    #[serde(rename = "type")]
-    pub item_type: String,
-    pub trace_id: String,
-    pub span_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_span_id: Option<String>,
-    pub created_at: String,
-    pub span_name: String,
-    pub span_kind: String,
-    pub node_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operation_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_code: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ns: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_read_input_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_creation_input_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost_usd: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_arguments: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_definitions: Option<Vec<serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introspection: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span_attributes: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default)]
-    pub input_messages: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_message: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub events: Option<Vec<serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource_attributes: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system_instructions: Option<Vec<serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gen_ai_input_messages: Option<Vec<serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gen_ai_output_messages: Option<Vec<serde_json::Value>>,
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
-}
-
-/// OpenAI-style conversation-item page.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ConversationItemList {
-    pub object: String,
-    #[serde(default)]
-    pub data: Vec<ConversationItem>,
-    #[serde(default)]
-    pub first_id: Option<String>,
-    #[serde(default)]
-    pub last_id: Option<String>,
-    #[serde(default)]
-    pub has_more: bool,
-    #[serde(default)]
-    pub next: Option<String>,
-}
+// The conversation item and its page envelope are the GenAI span types in
+// [`crate::api::genai_span`] — `GenAiSpan` and `GenAiSpanList`. The flat
+// ~40-column item that used to live here is gone, not deprecated: it renamed a
+// standard vocabulary, dropped every attribute nobody had added a column for,
+// and rendered the absence of a value as the presence of one.
 
 impl ConversationListParams {
     /// Validate and lower to the wire query object. Returns

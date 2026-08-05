@@ -36,18 +36,24 @@ fn build_http(server: &MockServer) -> Arc<HttpClient> {
     Arc::new(HttpClient::from_parts(reqwest::Client::new(), cfg))
 }
 
+/// One conversation item as the DP now returns it: a GenAI span, addressed by
+/// semantic-convention name, with an attribute nobody modelled riding along.
 fn conversation_item(id: &str) -> serde_json::Value {
     json!({
-        "object": "conversation.item",
-        "id": id,
-        "type": "span",
         "trace_id": "0123456789abcdef0123456789abcdef",
         "span_id": id,
-        "created_at": "2026-07-29T08:00:00.123456789Z",
-        "span_name": "invoke_agent",
-        "span_kind": "INTERNAL",
-        "node_type": "assistant",
-        "input_messages": [],
+        "name": "invoke_agent",
+        "kind": "INTERNAL",
+        "start_time": "2026-07-29T08:00:00.123456789Z",
+        "attributes": {
+            "gen_ai": {
+                "operation": {"name": "invoke_agent"},
+                "input": {"messages": [
+                    {"role": "user", "parts": [{"type": "text", "content": "hey"}]}
+                ]}
+            },
+            "acme": {"tenant": "x"}
+        },
         "future_server_field": "preserved"
     })
 }
@@ -593,7 +599,12 @@ async fn conversations_list_maps_window_params_and_paginates() {
         .and(query_param("limit", "10"))
         .and(query_param_is_missing("next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "records": [{"conversation_id": "c1", "trace_id": "t1", "custom_attr": 7}],
+            "records": [{
+                "trace_id": "t1",
+                "start_time": "2026-08-04T22:14:34.462000Z",
+                "attributes": {"gen_ai": {"conversation": {"id": "c1"}}},
+                "custom_attr": 7,
+            }],
             "count": 1,
             "next": "cursor_2",
         })))
@@ -603,7 +614,11 @@ async fn conversations_list_maps_window_params_and_paginates() {
         .and(path("/v1/conversations"))
         .and(query_param("next", "cursor_2"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "records": [{"conversation_id": "c2"}],
+            "records": [{
+                "trace_id": "t2",
+                "start_time": "2026-08-04T22:15:00Z",
+                "attributes": {"gen_ai": {"conversation": {"id": "c2"}}},
+            }],
             "count": 1,
             "next": null,
         })))
@@ -623,10 +638,12 @@ async fn conversations_list_maps_window_params_and_paginates() {
     // Page to exhaustion via `next`, bounded.
     let all = paginator.collect_all(10).await.unwrap();
     assert_eq!(all.len(), 2);
-    assert_eq!(all[0].conversation_id.as_deref(), Some("c1"));
+    // A summary is the same span envelope as an item, so it is read the same
+    // way — by semantic-convention name, not by a flat renamed column.
+    assert_eq!(all[0].conversation_id(), Some("c1"));
     // Unknown telemetry attributes ride along in `extra`.
     assert_eq!(all[0].extra.get("custom_attr"), Some(&json!(7)));
-    assert_eq!(all[1].conversation_id.as_deref(), Some("c2"));
+    assert_eq!(all[1].conversation_id(), Some("c2"));
 }
 
 #[tokio::test]
@@ -698,7 +715,7 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     assert_eq!(first.next.as_deref(), Some("opaque-page-2"));
     assert!(first.has_more);
     let second = pages.next_page().await.unwrap().unwrap();
-    assert_eq!(second.data[0].id, "span-2");
+    assert_eq!(second.data[0].span_id.as_deref(), Some("span-2"));
     assert!(pages.next_page().await.unwrap().is_none());
 }
 
@@ -740,7 +757,7 @@ async fn conversation_items_list_is_an_async_item_stream() {
         .unwrap();
     let mut ids = Vec::new();
     while let Some(item) = items.next().await {
-        ids.push(item.unwrap().id);
+        ids.push(item.unwrap().span_id.unwrap());
     }
     assert_eq!(ids, ["span-1", "span-2"]);
 }
@@ -777,7 +794,7 @@ async fn conversation_items_get_fetches_detail_with_includes() {
     let conversations = Conversations::new(build_http(&server));
     Mock::given(method("GET"))
         .and(path("/v1/conversations/conv-1/items/span-1"))
-        .and(query_param("include", "gen_ai.input.messages"))
+        .and(query_param("include", "resource_attributes"))
         .respond_with(ResponseTemplate::new(200).set_body_json(conversation_item("span-1")))
         .mount(&server)
         .await;
@@ -788,16 +805,26 @@ async fn conversation_items_get_fetches_detail_with_includes() {
             "conv-1",
             "span-1",
             &ConversationItemGetParams {
-                include: vec![ConversationItemInclude::GenAiInputMessages],
+                include: vec![ConversationItemInclude::ResourceAttributes],
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-    assert_eq!(item.id, "span-1");
+    assert_eq!(item.span_id.as_deref(), Some("span-1"));
+    // The detail read carries the full history unconditionally — there is no
+    // message-family `include` left to forget.
+    assert_eq!(item.input_messages().len(), 1);
+    assert_eq!(item.operation_name(), Some("invoke_agent"));
+    // Both open seams survive: an unmodelled top-level field and an entire
+    // unmodelled attribute family.
     assert_eq!(
         item.extra.get("future_server_field"),
         Some(&json!("preserved"))
+    );
+    assert_eq!(
+        item.attributes.extra.get("acme"),
+        Some(&json!({"tenant": "x"}))
     );
 }
 

@@ -9,12 +9,11 @@ use std::task::{Context, Poll};
 use futures::Stream;
 
 use crate::api::error::{ApiResult, IntrospectionAPIError};
+use crate::api::genai_span::{GenAiSpan, GenAiSpanList};
 use crate::api::http::HttpClient;
-use crate::api::schemas::{
-    ConversationItem, ConversationItemGetParams, ConversationItemList, ConversationItemListParams,
-};
+use crate::api::schemas::{ConversationItemGetParams, ConversationItemListParams};
 
-type PageFuture = Pin<Box<dyn Future<Output = ApiResult<ConversationItemList>> + Send>>;
+type PageFuture = Pin<Box<dyn Future<Output = ApiResult<GenAiSpanList>> + Send>>;
 
 /// `runner.conversations().items` read-only namespace.
 #[derive(Clone)]
@@ -31,7 +30,7 @@ impl ConversationItems {
     /// `GET /v1/conversations/{conversation_id}/items`.
     ///
     /// The returned paginator can be used as a [`Stream`] of
-    /// [`ConversationItem`]s or page-by-page with
+    /// [`GenAiSpan`]s or page-by-page with
     /// [`ConversationItemPaginator::next_page`]. Pagination passes each
     /// response's opaque `next` token back unchanged.
     pub fn list(
@@ -64,14 +63,16 @@ impl ConversationItems {
 
     /// `GET /v1/conversations/{conversation_id}/items/{item_id}`.
     ///
-    /// The detail response contains the full input history for the span; list
-    /// responses contain only the turn-local input delta.
+    /// The detail response carries the **full input history** for that span —
+    /// unconditionally, with no `include` to remember — while list responses
+    /// carry only the turn-local input delta. This is the read to fork or
+    /// resume a conversation from.
     pub async fn get(
         &self,
         conversation_id: &str,
         item_id: &str,
         params: &ConversationItemGetParams,
-    ) -> ApiResult<ConversationItem> {
+    ) -> ApiResult<GenAiSpan> {
         let path = format!(
             "/v1/conversations/{}/items/{}",
             urlencode(conversation_id),
@@ -81,7 +82,7 @@ impl ConversationItems {
     }
 }
 
-/// Async paginator for the OpenAI-style [`ConversationItemList`] envelope.
+/// Async paginator for the OpenAI-style [`GenAiSpanList`] envelope.
 ///
 /// `first_id` and `last_id` remain available through [`Self::next_page`] but
 /// are not used for pagination.
@@ -92,7 +93,7 @@ pub struct ConversationItemPaginator {
     next_cursor: Option<String>,
     started: bool,
     exhausted: bool,
-    buffer: VecDeque<ConversationItem>,
+    buffer: VecDeque<GenAiSpan>,
     pending: Option<PageFuture>,
 }
 
@@ -116,12 +117,12 @@ impl ConversationItemPaginator {
     }
 
     /// Fetch one page, returning `None` after the page with `has_more=false`.
-    pub async fn next_page(&mut self) -> ApiResult<Option<ConversationItemList>> {
+    pub async fn next_page(&mut self) -> ApiResult<Option<GenAiSpanList>> {
         if self.exhausted && self.started {
             return Ok(None);
         }
         self.started = true;
-        let page: ConversationItemList = self
+        let page: GenAiSpanList = self
             .http
             .get_json(&self.path, &self.query_for_current_cursor())
             .await?;
@@ -133,7 +134,7 @@ impl ConversationItemPaginator {
     }
 
     /// Collect items to exhaustion, bounded by `max_pages` (`0` is unbounded).
-    pub async fn collect_all(&mut self, max_pages: usize) -> ApiResult<Vec<ConversationItem>> {
+    pub async fn collect_all(&mut self, max_pages: usize) -> ApiResult<Vec<GenAiSpan>> {
         let mut out = Vec::new();
         let mut pages = 0usize;
         while let Some(page) = self.next_page().await? {
@@ -146,7 +147,7 @@ impl ConversationItemPaginator {
         Ok(out)
     }
 
-    fn advance(&mut self, page: &ConversationItemList) -> ApiResult<()> {
+    fn advance(&mut self, page: &GenAiSpanList) -> ApiResult<()> {
         if !page.has_more {
             self.next_cursor = None;
             self.exhausted = true;
@@ -177,7 +178,7 @@ impl ConversationItemPaginator {
 }
 
 impl Stream for ConversationItemPaginator {
-    type Item = ApiResult<ConversationItem>;
+    type Item = ApiResult<GenAiSpan>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();

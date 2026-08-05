@@ -123,10 +123,44 @@ for file and conversation sharing grants.
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
 
+#### Conversations are GenAI spans
+
+Every conversation read — the summary list and the item list/detail — returns
+the same object: `GenAiSpan`, an OpenTelemetry span with identity and timing at
+the top level and everything else under `attributes`, keyed by its
+[GenAI semantic-convention][semconv] name. `gen_ai.request.model` is reached as
+`gen_ai.request.model` because that is what the SDK wrote when it created the
+span — there is no private dialect of renamed columns to learn.
+
+Two properties are worth knowing before you write against it:
+
+- **The tree is open.** Every attribute node carries an `extra` map, so an
+  attribute this SDK release never heard of still arrives and still round-trips.
+  The server returns the tree as stored, not as an allow-list.
+- **Absent means absent.** Nothing serializes as `null` — a value that is not
+  present is a key that is not there. A real `0` is still a `0`.
+
+A summary is the same envelope carrying the latest turn only, with conversation
+rollups under `gen_ai.usage.*` (token totals) and `introspection.conversation.*`
+(counts with no semantic-convention name). One parser for both reads.
+
+```rust
+use introspection_sdk::ConversationListParams;
+
+let conversations = runner.conversations();
+let mut pages = conversations.list(&ConversationListParams::default())?;
+let page = pages.next_page().await?.unwrap();
+for summary in &page.records {
+    println!("{:?} {:?}", summary.conversation_id(), summary.request_model());
+}
+```
+
+[semconv]: https://github.com/open-telemetry/semantic-conventions-genai
+
 #### Conversation items
 
 `runner.conversations().items.list(...)` returns a
-`ConversationItemPaginator`. Use it as an async `Stream` to iterate items
+`ConversationItemPaginator`. Use it as an async `Stream` to iterate spans
 across pages, or call `next_page()` when the OpenAI-style page metadata
 (`first_id`, `last_id`, `has_more`, and opaque `next`) is needed:
 
@@ -144,7 +178,13 @@ let mut items = conversations.items.list(
 )?;
 
 while let Some(item) = items.next().await {
-    println!("{}", item?.id);
+    let span = item?;
+    // Reach for attributes by their semantic-convention name, or use the
+    // accessors for the common ones.
+    println!("{:?} {:?}", span.span_id, span.operation_name());
+    for message in span.input_messages() {
+        println!("  {}", message.role);
+    }
 }
 
 // Or preserve page metadata explicitly:
@@ -159,9 +199,13 @@ while let Some(page) = pages.next_page().await? {
 ```
 
 Pass a returned `next` token into `ConversationItemListParams::next` to resume
-from a checkpoint. `first_id` and `last_id` are informational item IDs, not
-pagination inputs. `conversations.items.get(...)` fetches a single item with
-the full input history for that span.
+from a checkpoint. `first_id` and `last_id` are informational span IDs, not
+pagination inputs.
+
+`conversations.items.get(...)` fetches a single item carrying the **full input
+history** for that span — unconditionally, with no `include` to remember. That
+is the read to fork or resume a conversation from. The only remaining `include`
+values are `events` and `resource_attributes`.
 
 #### Resilient streaming
 

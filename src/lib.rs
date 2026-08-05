@@ -92,7 +92,9 @@ pub mod agui;
 pub mod api;
 pub mod client;
 pub mod dev_target;
-#[cfg(feature = "otel")]
+// Always compiled — `otel::messages` carries the gen_ai semantic-convention
+// message vocabulary that the REST-only conversations read returns. The OTLP
+// exporter surfaces under it stay gated on the `otel` feature from inside.
 pub mod otel;
 pub mod resources;
 pub mod runner;
@@ -100,26 +102,28 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationItem,
-    ConversationItemGetParams, ConversationItemInclude, ConversationItemList,
-    ConversationItemListParams, ConversationItemPaginator, ConversationItems,
-    ConversationListParams, Conversations, Dimension, Event, EventListParams, Events, Experiment,
-    ExperimentCreate, ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection,
-    ExperimentGoalGuard, ExperimentListParams, ExperimentStatus, ExperimentUpdate, FeedbackEvent,
-    FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate, FileUpload,
-    FileVersions, Files, HavingTerm, IntrospectionAPIError, IntrospectionEventName,
+    Arm, ClusteringRunEvent, ClusteringRunPayload, ConversationItemGetParams,
+    ConversationItemInclude, ConversationItemListParams, ConversationItemPaginator,
+    ConversationItems, ConversationListParams, Conversations, Dimension, Event, EventListParams,
+    Events, Experiment, ExperimentCreate, ExperimentGoal, ExperimentGoalComponent,
+    ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
+    ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams,
+    FileType, FileUpdate, FileUpload, FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput,
+    GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall,
+    GenAiUsage, HavingTerm, IdRef, IntrospectionAPIError, IntrospectionAttributes,
+    IntrospectionConversation, IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime,
     JudgeGoalComponent, JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, Metrics,
-    MetricsConfig, MetricsQuery, MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm,
-    Paginated, PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload,
-    PatternEvent, PatternPayload, Project, ProjectListParams, Recipe, RecipeCreate,
-    RecipeListParams, RecipeUpdate, Repository, RepositoryListParams, ResourceShare, ResumeEntry,
-    RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
+    MetricsConfig, MetricsQuery, MetricsResponse, NameRef, ObservationEvent, ObservationPayload,
+    OrderTerm, Paginated, PaginationParams, Paginator, PatternAssignmentEvent,
+    PatternAssignmentPayload, PatternEvent, PatternPayload, Project, ProjectListParams, Recipe,
+    RecipeCreate, RecipeListParams, RecipeUpdate, Repository, RepositoryListParams, ResourceShare,
+    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
     RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, ShareCreate,
-    ShareListParams, ShareResourceType, Shares, SortDirection, SseEvent, StreamOptions,
-    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension,
-    TypedEvent, UploadSource,
+    ShareListParams, ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus,
+    SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind,
+    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TelemetryGoalComponent, TimeDimension, TokenCount, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
@@ -145,7 +149,9 @@ pub use otel::{
     SpanProcessorError, SpanProcessorResult, TrackOptions, Usage,
 };
 
-#[cfg(feature = "otel")]
+// Always available: the conversations read returns these message types inside
+// `attributes.gen_ai.{input,output}.messages`, with or without the `otel`
+// feature.
 pub use otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,

@@ -44,7 +44,11 @@ async fn gzipped_json_response_is_transparently_decoded() {
     let conversations = Conversations::new(build_http(&server));
 
     let body = json!({
-        "records": [{"conversation_id": "conv-1"}],
+        "records": [{
+            "trace_id": "t1",
+            "start_time": "2026-08-04T22:14:34.462000Z",
+            "attributes": {"gen_ai": {"conversation": {"id": "conv-1"}}},
+        }],
         "count": 1,
         "total_count": 1,
         "next": null,
@@ -67,5 +71,5 @@ async fn gzipped_json_response_is_transparently_decoded() {
         .expect("params validate");
     let page = paginator.next_page().await.unwrap().unwrap();
     assert_eq!(page.count, 1);
-    assert_eq!(page.records[0].conversation_id.as_deref(), Some("conv-1"));
+    assert_eq!(page.records[0].conversation_id(), Some("conv-1"));
 }
