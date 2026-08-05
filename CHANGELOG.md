@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.11.0...v0.12.0) (2026-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **conversations:** `ConversationItem`, `ConversationItemList` and `Conversation` are removed. All three conversation reads — the summary list, the item list and the item detail — now return `GenAiSpan` / `GenAiSpanList`. The message-family `include` values and `span_attributes` are removed from `ConversationItemInclude`, leaving `events` and `resource_attributes`.
+
+### Features
+
+* **conversations:** return GenAI spans, drop the flat ConversationItem ([#61](https://github.com/introspection-org/introspection-rust-sdk/issues/61)) ([ff827c7](https://github.com/introspection-org/introspection-rust-sdk/commit/ff827c7aab1533c869f6fdaa5d88e4f80923b46e))
+
 ## [0.11.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.10.0...v0.11.0) (2026-07-29)
 
 
