@@ -64,7 +64,11 @@ pub struct ToolCallResponsePart {
     /// The tool call ID this result corresponds to.
     pub id: String,
     /// The result content.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// The `result` alias reads back parts written by older deployments, which
+    /// used that key before the semantic convention settled on `response`. It
+    /// is a read-side compatibility shim only — we always write `response`.
+    #[serde(alias = "result", skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
 }
 
@@ -105,7 +109,20 @@ impl ThinkingPart {
 }
 
 /// A content part in a message — text, tool call, tool response, or thinking.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// Serializes untagged: each variant already carries its own `type` field.
+/// Deserialization dispatches on that `type` explicitly rather than by
+/// try-each-variant, because untagged matching is decided by *shape* and every
+/// part shape here is a subset of another — a `{"type":"uri", …}` part matched
+/// [`ThinkingPart`] (whose fields are all optional) and came back out as
+/// `{"type":"uri"}` with its payload silently gone.
+///
+/// [`Self::Other`] is the escape hatch, and it is load-bearing on the read
+/// path: the semconv part vocabulary is `Development`-stability and still
+/// growing (`blob`, `uri`, `file`, `server_tool_call`), so a part type this
+/// SDK release has never seen must neither fail the conversation page that
+/// contains it nor lose its content. It round-trips verbatim instead.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum ContentPart {
     /// Plain text content.
@@ -114,8 +131,39 @@ pub enum ContentPart {
     ToolCallRequest(ToolCallRequestPart),
     /// A tool result returned to the model.
     ToolCallResponse(ToolCallResponsePart),
-    /// Reasoning/thinking content.
+    /// Reasoning/thinking content. Accepts both the `thinking` spelling we
+    /// have always written and the spec's `reasoning`, preserving whichever
+    /// arrived — telemetry is append-only, so both exist forever.
     Thinking(ThinkingPart),
+    /// A part shape this SDK build does not model, preserved as-is.
+    Other(serde_json::Value),
+}
+
+impl<'de> Deserialize<'de> for ContentPart {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let part_type = value.get("type").and_then(serde_json::Value::as_str);
+        // A known `type` whose body does not fit the model is kept whole
+        // rather than rejected: on a read path, dropping a page because one
+        // part gained a field is the worse failure.
+        let typed = match part_type {
+            Some("text") => serde_json::from_value(value.clone()).map(ContentPart::Text),
+            Some("tool_call") => {
+                serde_json::from_value(value.clone()).map(ContentPart::ToolCallRequest)
+            }
+            Some("tool_call_response") => {
+                serde_json::from_value(value.clone()).map(ContentPart::ToolCallResponse)
+            }
+            Some("thinking") | Some("reasoning") => {
+                serde_json::from_value(value.clone()).map(ContentPart::Thinking)
+            }
+            _ => return Ok(ContentPart::Other(value)),
+        };
+        Ok(typed.unwrap_or(ContentPart::Other(value)))
+    }
 }
 
 /// An input message in an LLM conversation (user, system, assistant, tool).
@@ -283,6 +331,64 @@ mod tests {
         let json = serde_json::to_string(&part).unwrap();
         assert!(json.contains(r#""content":"summary text""#));
         assert!(json.contains(r#""signature":"sig123""#));
+    }
+
+    #[test]
+    fn test_unknown_part_type_round_trips_instead_of_failing() {
+        // A `uri` part — spec-defined, not yet modelled here. Decoding must
+        // not fail, and re-encoding must give the part back unchanged.
+        let raw = serde_json::json!({
+            "role": "user",
+            "parts": [{"type": "uri", "modality": "image", "uri": "https://x/y.png"}]
+        });
+
+        let msg: InputMessage = serde_json::from_value(raw.clone()).unwrap();
+
+        assert!(matches!(msg.parts[0], ContentPart::Other(_)));
+        assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
+    }
+
+    #[test]
+    fn test_a_thinking_shaped_unknown_part_is_not_swallowed_as_thinking() {
+        // The regression this dispatch exists to prevent: every field on
+        // `ThinkingPart` is optional, so under untagged matching any tagged
+        // object matched it and lost everything it did not declare.
+        let raw = serde_json::json!({"type": "blob", "mime_type": "image/png", "data": "abc"});
+
+        let part: ContentPart = serde_json::from_value(raw.clone()).unwrap();
+
+        assert!(matches!(part, ContentPart::Other(_)));
+        assert_eq!(serde_json::to_value(&part).unwrap(), raw);
+    }
+
+    #[test]
+    fn test_spec_reasoning_spelling_decodes_and_keeps_its_name() {
+        // Telemetry is append-only: spans written with `thinking` and spans
+        // written with the spec's `reasoning` both exist forever, so the
+        // reader accepts both and gives back whichever it was handed.
+        let raw = serde_json::json!({"type": "reasoning", "content": "hmm"});
+
+        let part: ContentPart = serde_json::from_value(raw.clone()).unwrap();
+
+        assert!(matches!(part, ContentPart::Thinking(_)));
+        assert_eq!(serde_json::to_value(&part).unwrap(), raw);
+    }
+
+    #[test]
+    fn test_legacy_tool_call_response_result_key_is_read_as_response() {
+        let part: ContentPart = serde_json::from_value(serde_json::json!({
+            "type": "tool_call_response",
+            "id": "call_1",
+            "result": "42"
+        }))
+        .unwrap();
+
+        match part {
+            ContentPart::ToolCallResponse(response) => {
+                assert_eq!(response.response.as_deref(), Some("42"))
+            }
+            other => panic!("expected a tool call response, got {other:?}"),
+        }
     }
 
     #[test]

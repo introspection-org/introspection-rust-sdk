@@ -1,7 +1,14 @@
 //! OpenTelemetry-powered surfaces for the Introspection SDK.
 //!
-//! This module is only compiled with the `otel` Cargo feature. It hosts
-//! two independent surfaces that customers can mix-and-match:
+//! Everything here except [`messages`] is compiled only with the `otel` Cargo
+//! feature. [`messages`] is always available because it is the gen_ai
+//! semantic-convention message vocabulary, which the REST-only conversations
+//! read ([`crate::api::genai_span`]) returns — the same types on the way out
+//! over OTLP and on the way back in over `/v1/conversations`, which is the
+//! point of a shared vocabulary.
+//!
+//! The feature-gated part hosts two independent surfaces that customers can
+//! mix-and-match:
 //!
 //! * [`IntrospectionLogs`] — owns an [`opentelemetry_sdk::logs::SdkLoggerProvider`]
 //!   and exports `track` / `feedback` / `identify` events over OTLP HTTP.
@@ -15,10 +22,14 @@
 //! `async-openai` adapter at [`openai`] (gated on the `openai` feature) —
 //! also live under this module.
 
+#[cfg(feature = "otel")]
 pub mod logs;
 pub mod messages;
+#[cfg(feature = "otel")]
 pub mod observation;
+#[cfg(feature = "otel")]
 pub mod span_processor;
+#[cfg(feature = "otel")]
 pub mod types;
 
 #[cfg(feature = "openai")]
@@ -27,6 +38,7 @@ pub mod openai;
 #[cfg(any(feature = "testing", all(test, feature = "otel")))]
 pub mod testing;
 
+#[cfg(feature = "otel")]
 pub use logs::{
     BaggageGuard, IntrospectionLogs, IntrospectionLogsConfig, IntrospectionLogsConfigBuilder,
     IntrospectionLogsError,
@@ -35,11 +47,14 @@ pub use messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
+#[cfg(feature = "otel")]
 pub use observation::{GenerationUpdate, Observation, ObservationConfig, ObservationType, Usage};
+#[cfg(feature = "otel")]
 pub use span_processor::{
     IntrospectionSpanProcessor, SpanProcessorAdvancedOptions, SpanProcessorConfig,
     SpanProcessorConfigBuilder, SpanProcessorError, SpanProcessorResult,
 };
+#[cfg(feature = "otel")]
 pub use types::{
     api_path, attr, baggage, defaults, event_name, generate_event_id, logger_name, severity,
     FeedbackOptions, IdentifyOptions, PropertyValue, TrackOptions,

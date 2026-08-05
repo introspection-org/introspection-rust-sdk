@@ -29,10 +29,11 @@ use std::sync::Arc;
 
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::ApiResult;
+use crate::api::genai_span::GenAiSpan;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Conversation, ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse,
+    ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse,
 };
 
 #[cfg(feature = "arrow")]
@@ -58,14 +59,20 @@ impl Conversations {
 
     /// `GET /v1/conversations` — cursor paginator (JSON).
     ///
-    /// The returned [`Paginator<Conversation>`] auto-paginates as a
+    /// Records are [`GenAiSpan`]s: a conversation summary is the same object
+    /// as a conversation item, carrying the latest turn instead of the full
+    /// history, with the conversation rollups under `gen_ai.usage.*` (tokens)
+    /// and `introspection.conversation.*` (counts that have no
+    /// semantic-convention name). One parser for both reads.
+    ///
+    /// The returned [`Paginator<GenAiSpan>`] auto-paginates as a
     /// [`futures::Stream`] and also exposes [`Paginator::next_page`] /
     /// [`Paginator::collect_all`]. Returns [`IntrospectionAPIError::InvalidConfig`]
     /// up front for an out-of-range `limit` or a `lookback`/`start`/`end`
     /// conflict.
     ///
     /// [`IntrospectionAPIError::InvalidConfig`]: crate::api::error::IntrospectionAPIError::InvalidConfig
-    pub fn list(&self, params: &ConversationListParams) -> ApiResult<Paginator<Conversation>> {
+    pub fn list(&self, params: &ConversationListParams) -> ApiResult<Paginator<GenAiSpan>> {
         let wire = params.to_wire()?;
         Paginator::new(self.http.clone(), "/v1/conversations", &wire)
     }
