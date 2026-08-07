@@ -1413,10 +1413,67 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
-// A conversation summary and a conversation item are the same object — the
-// GenAI span in [`crate::api::genai_span`]. A summary is a span-shaped preview
-// carrying the latest turn plus conversation rollups, so it needs no type of
-// its own.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationAgent {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationUsage {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationCost {
+    pub usd: f64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationMetrics {
+    pub duration_ms: f64,
+    pub trace_count: i64,
+    pub span_count: i64,
+    pub tool_use_count: i64,
+    pub failed_tool_use_count: i64,
+    pub has_errors: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct Conversation {
+    pub object: String,
+    pub id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<Vec<ConversationAgent>>,
+    pub usage: ConversationUsage,
+    pub cost: ConversationCost,
+    pub metrics: ConversationMetrics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_git_commit_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_key: Option<String>,
+}
 
 /// Ergonomic params for `GET /v1/conversations`. `order`/`start`/`end`/
 /// `lookback` map to the wire `direction`/`start_date`/`end_date` window (see
@@ -1438,18 +1495,22 @@ pub struct ConversationListParams {
 
 /// Optional expansions for conversation-item list/detail reads.
 ///
-/// Two values, and the ones that are gone matter more than the ones that are
-/// left. The message-family includes (`gen_ai.input.messages` and friends) are
+/// The message-family includes (`gen_ai.input.messages` and friends) are
 /// deleted: the detail read returns the full history unconditionally, so there
 /// is nothing left for them to gate. A parameter that is *always* required is
 /// not a parameter, it is a trap — forgetting it silently forked a
-/// conversation with one turn of context. `span_attributes` is gone for the
-/// related reason that the attribute tree **is** the response now, not an
-/// optional expansion of it.
+/// conversation with one turn of context. The remaining values are genuine
+/// optional encrypted or structural expansions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ConversationItemInclude {
+    #[serde(rename = "gen_ai.system_instructions")]
+    GenAiSystemInstructions,
+    #[serde(rename = "gen_ai.tool.definitions")]
+    GenAiToolDefinitions,
     #[serde(rename = "events")]
     Events,
+    #[serde(rename = "span_attributes")]
+    SpanAttributes,
     #[serde(rename = "resource_attributes")]
     ResourceAttributes,
 }
@@ -1457,7 +1518,10 @@ pub enum ConversationItemInclude {
 impl ConversationItemInclude {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::GenAiSystemInstructions => "gen_ai.system_instructions",
+            Self::GenAiToolDefinitions => "gen_ai.tool.definitions",
             Self::Events => "events",
+            Self::SpanAttributes => "span_attributes",
             Self::ResourceAttributes => "resource_attributes",
         }
     }
@@ -1476,8 +1540,8 @@ pub struct ConversationItemListParams {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
     pub include: Vec<ConversationItemInclude>,
-    pub agent_name: Option<String>,
-    pub agent_id: Option<String>,
+    /// `root`, an exact invocation id, or omitted for the complete conversation.
+    pub agent: Option<String>,
     pub service_name: Option<String>,
     pub operation_name: Option<String>,
     pub lookback_days: Option<u32>,

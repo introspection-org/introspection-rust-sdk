@@ -45,9 +45,20 @@ async fn gzipped_json_response_is_transparently_decoded() {
 
     let body = json!({
         "records": [{
-            "trace_id": "t1",
-            "start_time": "2026-08-04T22:14:34.462000Z",
-            "attributes": {"gen_ai": {"conversation": {"id": "conv-1"}}},
+            "object": "conversation",
+            "id": "conv-1",
+            "created_at": "2026-08-04T22:14:34.462000Z",
+            "updated_at": "2026-08-04T22:14:37.462000Z",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            "cost": {"usd": 0.001},
+            "metrics": {
+                "duration_ms": 3000.0,
+                "trace_count": 1,
+                "span_count": 1,
+                "tool_use_count": 0,
+                "failed_tool_use_count": 0,
+                "has_errors": false
+            }
         }],
         "count": 1,
         "total_count": 1,
@@ -71,5 +82,5 @@ async fn gzipped_json_response_is_transparently_decoded() {
         .expect("params validate");
     let page = paginator.next_page().await.unwrap().unwrap();
     assert_eq!(page.count, 1);
-    assert_eq!(page.records[0].conversation_id(), Some("conv-1"));
+    assert_eq!(page.records[0].id, "conv-1");
 }

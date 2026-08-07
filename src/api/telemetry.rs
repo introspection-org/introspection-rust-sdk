@@ -27,13 +27,20 @@
 
 use std::sync::Arc;
 
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+
+const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::ApiResult;
-use crate::api::genai_span::GenAiSpan;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse,
+    Conversation, ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse,
 };
 
 #[cfg(feature = "arrow")]
@@ -59,22 +66,29 @@ impl Conversations {
 
     /// `GET /v1/conversations` — cursor paginator (JSON).
     ///
-    /// Records are [`GenAiSpan`]s: a conversation summary is the same object
-    /// as a conversation item, carrying the latest turn instead of the full
-    /// history, with the conversation rollups under `gen_ai.usage.*` (tokens)
-    /// and `introspection.conversation.*` (counts that have no
-    /// semantic-convention name). One parser for both reads.
-    ///
-    /// The returned [`Paginator<GenAiSpan>`] auto-paginates as a
+    /// The returned [`Paginator<Conversation>`] auto-paginates as a
     /// [`futures::Stream`] and also exposes [`Paginator::next_page`] /
     /// [`Paginator::collect_all`]. Returns [`IntrospectionAPIError::InvalidConfig`]
     /// up front for an out-of-range `limit` or a `lookback`/`start`/`end`
     /// conflict.
     ///
     /// [`IntrospectionAPIError::InvalidConfig`]: crate::api::error::IntrospectionAPIError::InvalidConfig
-    pub fn list(&self, params: &ConversationListParams) -> ApiResult<Paginator<GenAiSpan>> {
+    pub fn list(&self, params: &ConversationListParams) -> ApiResult<Paginator<Conversation>> {
         let wire = params.to_wire()?;
         Paginator::new(self.http.clone(), "/v1/conversations", &wire)
+    }
+
+    /// Fetch one conversation summary with its complete agent index.
+    pub async fn get(&self, conversation_id: &str) -> ApiResult<Conversation> {
+        self.http
+            .get_json(
+                &format!(
+                    "/v1/conversations/{}",
+                    utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
+                ),
+                &(),
+            )
+            .await
     }
 
     /// `GET /v1/conversations` with `Accept: application/vnd.apache.arrow.stream`

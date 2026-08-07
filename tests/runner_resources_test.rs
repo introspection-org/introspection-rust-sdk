@@ -600,10 +600,13 @@ async fn conversations_list_maps_window_params_and_paginates() {
         .and(query_param_is_missing("next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [{
-                "trace_id": "t1",
-                "start_time": "2026-08-04T22:14:34.462000Z",
-                "attributes": {"gen_ai": {"conversation": {"id": "c1"}}},
-                "custom_attr": 7,
+                "object": "conversation",
+                "id": "c1",
+                "created_at": "2026-08-04T22:14:34.462000Z",
+                "updated_at": "2026-08-04T22:14:35Z",
+                "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                "cost": {"usd": 0.01},
+                "metrics": {"duration_ms": 538.0, "trace_count": 1, "span_count": 2, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
             }],
             "count": 1,
             "next": "cursor_2",
@@ -615,9 +618,13 @@ async fn conversations_list_maps_window_params_and_paginates() {
         .and(query_param("next", "cursor_2"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [{
-                "trace_id": "t2",
-                "start_time": "2026-08-04T22:15:00Z",
-                "attributes": {"gen_ai": {"conversation": {"id": "c2"}}},
+                "object": "conversation",
+                "id": "c2",
+                "created_at": "2026-08-04T22:15:00Z",
+                "updated_at": "2026-08-04T22:15:01Z",
+                "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+                "cost": {"usd": 0.02},
+                "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
             }],
             "count": 1,
             "next": null,
@@ -638,12 +645,32 @@ async fn conversations_list_maps_window_params_and_paginates() {
     // Page to exhaustion via `next`, bounded.
     let all = paginator.collect_all(10).await.unwrap();
     assert_eq!(all.len(), 2);
-    // A summary is the same span envelope as an item, so it is read the same
-    // way — by semantic-convention name, not by a flat renamed column.
-    assert_eq!(all[0].conversation_id(), Some("c1"));
-    // Unknown telemetry attributes ride along in `extra`.
-    assert_eq!(all[0].extra.get("custom_attr"), Some(&json!(7)));
-    assert_eq!(all[1].conversation_id(), Some("c2"));
+    assert_eq!(all[0].id, "c1");
+    assert_eq!(all[0].usage.total_tokens, 3);
+    assert_eq!(all[1].id, "c2");
+}
+
+#[tokio::test]
+async fn conversations_get_returns_the_complete_agent_index() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "conversation",
+            "id": "conv-1",
+            "created_at": "2026-08-04T22:15:00Z",
+            "updated_at": "2026-08-04T22:15:01Z",
+            "agents": [{"id": "root-run", "name": "agent", "depth": 0}],
+            "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+            "cost": {"usd": 0.02},
+            "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
+        })))
+        .mount(&server)
+        .await;
+
+    let conversation = conversations.get("conv-1").await.unwrap();
+    assert_eq!(conversation.agents.unwrap()[0].id, "root-run");
 }
 
 #[tokio::test]
@@ -672,7 +699,12 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     Mock::given(method("GET"))
         .and(path("/v1/conversations/conv-1/items"))
         .and(query_param("limit", "1"))
+        .and(query_param("include", "gen_ai.system_instructions"))
+        .and(query_param("include", "gen_ai.tool.definitions"))
         .and(query_param("include", "events"))
+        .and(query_param("include", "span_attributes"))
+        .and(query_param("include", "resource_attributes"))
+        .and(query_param("agent", "root"))
         .and(query_param_is_missing("next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "object": "list",
@@ -704,7 +736,14 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
             "conv-1",
             &ConversationItemListParams {
                 limit: Some(1),
-                include: vec![ConversationItemInclude::Events],
+                include: vec![
+                    ConversationItemInclude::GenAiSystemInstructions,
+                    ConversationItemInclude::GenAiToolDefinitions,
+                    ConversationItemInclude::Events,
+                    ConversationItemInclude::SpanAttributes,
+                    ConversationItemInclude::ResourceAttributes,
+                ],
+                agent: Some("root".into()),
                 ..Default::default()
             },
         )
