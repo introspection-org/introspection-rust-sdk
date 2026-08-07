@@ -1,4 +1,4 @@
-//! The GenAI span — the object the `/v1/conversations` surface returns.
+//! The GenAI span returned by conversation item reads.
 //!
 //! A conversation item **is** an OpenTelemetry span, so it is modelled as one:
 //! identity and timing at the top level, everything else under
@@ -7,10 +7,8 @@
 //! that is what the SDK wrote when it created the span — no private dialect to
 //! learn, no renamed columns to memorize.
 //!
-//! Both conversation reads return this same type. The only difference is how
-//! much conversation the message lists carry:
+//! Both item reads return this same type. Only message depth differs:
 //!
-//! - `GET /v1/conversations` — the latest turn only. A preview.
 //! - `GET /v1/conversations/{id}/items` — that turn's input delta.
 //! - `GET /v1/conversations/{id}/items/{item_id}` — the **full history**, so a
 //!   conversation can be resumed with complete context.
@@ -173,8 +171,7 @@ pub struct GenAiTool {
 
 /// `gen_ai.input.messages`.
 ///
-/// The full history on the item detail read, that turn's delta on the items
-/// list, the latest turn only on the conversations list.
+/// The full history on item detail and that turn's delta on the items list.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct GenAiInput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -247,28 +244,9 @@ pub struct IntrospectionRecipe {
 }
 
 /// `introspection.conversation.*`.
-///
-/// On an item these describe the turn's place in the conversation. On a
-/// summary the counts describe the conversation as a whole — these are the
-/// rollups with no semantic-convention name, which is why they live here
-/// rather than under `gen_ai`.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
-pub struct ConversationAgent {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub invocation_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub depth: Option<i64>,
-}
-
 /// `introspection.conversation.*`.
 ///
-/// On an item these describe the turn's place in the conversation. On a
-/// summary the counts describe the conversation as a whole.
+/// On an item these describe the turn's place in the conversation.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct IntrospectionConversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -295,8 +273,6 @@ pub struct IntrospectionConversation {
     pub failed_tool_use_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_errors: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agents: Option<Vec<ConversationAgent>>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }

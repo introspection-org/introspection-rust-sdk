@@ -10,9 +10,9 @@
 //!   [`FileVersions`] namespace.
 //! - [`Shares`] — read-sharing grants for files and conversations.
 //! - [`Conversations`] — telemetry reads with nested [`ConversationItems`]
-//!   for opaque-cursor item list/detail reads. Both return the same object,
-//!   the OTel GenAI span ([`GenAiSpan`]); a summary is a span-shaped preview
-//!   carrying the latest turn plus conversation rollups.
+//!   for opaque-cursor item list/detail reads. Summary reads return a compact
+//!   [`Conversation`] resource; item reads return OTel GenAI spans
+//!   ([`GenAiSpan`]).
 //!
 //! Everything maps 1:1 to existing DP routes; no new HTTP surface area.
 //! Auth reuses the same `INTROSPECTION_TOKEN` bearer used by the OTLP
@@ -182,23 +182,24 @@ pub use conversation_items::{ConversationItemPaginator, ConversationItems};
 pub use error::{ApiResult, IntrospectionAPIError};
 pub use files::{FileUpload, FileVersions, Files, UploadSource};
 pub use genai_span::{
-    ConversationAgent, GenAiAgent, GenAiAttributes, GenAiInput, GenAiOutput, GenAiRequest,
-    GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, IdRef,
-    IntrospectionAttributes, IntrospectionConversation, IntrospectionRecipe, IntrospectionRuntime,
-    NameRef, SpanAttributes, SpanStatus, TokenCount,
+    GenAiAgent, GenAiAttributes, GenAiInput, GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan,
+    GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, IdRef, IntrospectionAttributes,
+    IntrospectionConversation, IntrospectionRecipe, IntrospectionRuntime, NameRef, SpanAttributes,
+    SpanStatus, TokenCount,
 };
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, ConversationItemGetParams,
-    ConversationItemInclude, ConversationItemListParams, ConversationListParams, Dimension, Event,
-    EventListParams, Experiment, ExperimentCreate, ExperimentGoal, ExperimentGoalComponent,
-    ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
-    ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams,
-    FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgeGoalComponent, JudgementEvent,
-    JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, MetricsResponse,
-    ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
+    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
+    ConversationCost, ConversationItemGetParams, ConversationItemInclude,
+    ConversationItemListParams, ConversationListParams, ConversationMetrics, ConversationUsage,
+    Dimension, Event, EventListParams, Experiment, ExperimentCreate, ExperimentGoal,
+    ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams,
+    ExperimentStatus, ExperimentUpdate, FeedbackEvent, FeedbackPayload, File, FileCreateText,
+    FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, JudgeGoalComponent,
+    JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery,
+    MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
     PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Project,
     ProjectListParams, Recipe, RecipeCreate, RecipeListParams, RecipeUpdate, Repository,
     RepositoryListParams, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage,

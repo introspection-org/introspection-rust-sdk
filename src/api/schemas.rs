@@ -1413,10 +1413,67 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
-// A conversation summary and a conversation item are the same object — the
-// GenAI span in [`crate::api::genai_span`]. A summary is a span-shaped preview
-// carrying the latest turn plus conversation rollups, so it needs no type of
-// its own.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationAgent {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationUsage {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationCost {
+    pub usd: f64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationMetrics {
+    pub duration_ms: f64,
+    pub trace_count: i64,
+    pub span_count: i64,
+    pub tool_use_count: i64,
+    pub failed_tool_use_count: i64,
+    pub has_errors: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct Conversation {
+    pub object: String,
+    pub id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<Vec<ConversationAgent>>,
+    pub usage: ConversationUsage,
+    pub cost: ConversationCost,
+    pub metrics: ConversationMetrics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_git_commit_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_key: Option<String>,
+}
 
 /// Ergonomic params for `GET /v1/conversations`. `order`/`start`/`end`/
 /// `lookback` map to the wire `direction`/`start_date`/`end_date` window (see
