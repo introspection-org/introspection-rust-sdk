@@ -102,7 +102,7 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    Arm, ClusteringRunEvent, ClusteringRunPayload, ConversationItemGetParams,
+    Arm, ClusteringRunEvent, ClusteringRunPayload, ConversationAgent, ConversationItemGetParams,
     ConversationItemInclude, ConversationItemListParams, ConversationItemPaginator,
     ConversationItems, ConversationListParams, Conversations, Dimension, Event, EventListParams,
     Events, Experiment, ExperimentCreate, ExperimentGoal, ExperimentGoalComponent,

@@ -672,7 +672,12 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     Mock::given(method("GET"))
         .and(path("/v1/conversations/conv-1/items"))
         .and(query_param("limit", "1"))
+        .and(query_param("include", "gen_ai.system_instructions"))
+        .and(query_param("include", "gen_ai.tool.definitions"))
         .and(query_param("include", "events"))
+        .and(query_param("include", "span_attributes"))
+        .and(query_param("include", "resource_attributes"))
+        .and(query_param("agent", "root"))
         .and(query_param_is_missing("next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "object": "list",
@@ -704,7 +709,14 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
             "conv-1",
             &ConversationItemListParams {
                 limit: Some(1),
-                include: vec![ConversationItemInclude::Events],
+                include: vec![
+                    ConversationItemInclude::GenAiSystemInstructions,
+                    ConversationItemInclude::GenAiToolDefinitions,
+                    ConversationItemInclude::Events,
+                    ConversationItemInclude::SpanAttributes,
+                    ConversationItemInclude::ResourceAttributes,
+                ],
+                agent: Some("root".into()),
                 ..Default::default()
             },
         )

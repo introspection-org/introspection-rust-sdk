@@ -226,8 +226,7 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     for include in &params.include {
         query.push(("include".into(), include.as_str().into()));
     }
-    push_opt_ref(&mut query, "agent_name", params.agent_name.as_deref());
-    push_opt_ref(&mut query, "agent_id", params.agent_id.as_deref());
+    push_opt_ref(&mut query, "agent", params.agent.as_deref());
     push_opt_ref(&mut query, "service_name", params.service_name.as_deref());
     push_opt_ref(
         &mut query,

@@ -1438,18 +1438,22 @@ pub struct ConversationListParams {
 
 /// Optional expansions for conversation-item list/detail reads.
 ///
-/// Two values, and the ones that are gone matter more than the ones that are
-/// left. The message-family includes (`gen_ai.input.messages` and friends) are
+/// The message-family includes (`gen_ai.input.messages` and friends) are
 /// deleted: the detail read returns the full history unconditionally, so there
 /// is nothing left for them to gate. A parameter that is *always* required is
 /// not a parameter, it is a trap — forgetting it silently forked a
-/// conversation with one turn of context. `span_attributes` is gone for the
-/// related reason that the attribute tree **is** the response now, not an
-/// optional expansion of it.
+/// conversation with one turn of context. The remaining values are genuine
+/// optional encrypted or structural expansions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ConversationItemInclude {
+    #[serde(rename = "gen_ai.system_instructions")]
+    GenAiSystemInstructions,
+    #[serde(rename = "gen_ai.tool.definitions")]
+    GenAiToolDefinitions,
     #[serde(rename = "events")]
     Events,
+    #[serde(rename = "span_attributes")]
+    SpanAttributes,
     #[serde(rename = "resource_attributes")]
     ResourceAttributes,
 }
@@ -1457,7 +1461,10 @@ pub enum ConversationItemInclude {
 impl ConversationItemInclude {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::GenAiSystemInstructions => "gen_ai.system_instructions",
+            Self::GenAiToolDefinitions => "gen_ai.tool.definitions",
             Self::Events => "events",
+            Self::SpanAttributes => "span_attributes",
             Self::ResourceAttributes => "resource_attributes",
         }
     }
@@ -1476,8 +1483,8 @@ pub struct ConversationItemListParams {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
     pub include: Vec<ConversationItemInclude>,
-    pub agent_name: Option<String>,
-    pub agent_id: Option<String>,
+    /// `root`, an exact invocation id, or omitted for the complete conversation.
+    pub agent: Option<String>,
     pub service_name: Option<String>,
     pub operation_name: Option<String>,
     pub lookback_days: Option<u32>,

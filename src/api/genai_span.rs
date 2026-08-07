@@ -253,6 +253,23 @@ pub struct IntrospectionRecipe {
 /// rollups with no semantic-convention name, which is why they live here
 /// rather than under `gen_ai`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationAgent {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<i64>,
+}
+
+/// `introspection.conversation.*`.
+///
+/// On an item these describe the turn's place in the conversation. On a
+/// summary the counts describe the conversation as a whole.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct IntrospectionConversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<i64>,
@@ -278,6 +295,8 @@ pub struct IntrospectionConversation {
     pub failed_tool_use_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_errors: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<Vec<ConversationAgent>>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
