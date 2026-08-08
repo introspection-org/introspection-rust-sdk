@@ -16,8 +16,8 @@ use introspection_sdk::api::{
     FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
     IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
     PaginationParams, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType, Shares,
-    SortDirection, TaskCreate, TaskKind, TaskListParams, TaskRunCreate, TaskRunResume, TaskRuns,
-    TaskStatus, TaskUpdate, Tasks,
+    SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt, TaskRunCreate, TaskRunResume,
+    TaskRuns, TaskStatus, TaskUpdate, Tasks,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -279,7 +279,10 @@ async fn task_runs_create_then_cancel() {
         .create(
             "abc",
             &TaskRunCreate {
-                message: Some("go".into()),
+                prompt: Some(TaskPrompt {
+                    text: "go".into(),
+                    images: None,
+                }),
                 ..Default::default()
             },
         )

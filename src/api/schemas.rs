@@ -359,8 +359,6 @@ pub struct TaskCreate {
     /// Recipe agent to run; `None` uses the recipe default (`agents/agent.yaml`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repository_id: Option<String>,
     /// Workspace repositories to clone into `workspace/repos/`, at most 10.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repositories: Option<Vec<TaskRepoRequest>>,
@@ -414,8 +412,6 @@ pub struct TaskPrompt {
 pub struct TaskRunCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<TaskPrompt>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<TaskRunKind>,
     /// Files to attach to this turn — the way to add one mid-conversation.
