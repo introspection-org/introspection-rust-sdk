@@ -490,12 +490,7 @@ fn sdk_surface_matches_the_published_reference() {
             // Runner-bound client: the credential's claim is authoritative for
             // runtime selection and the API ignores a body `runtime_id` from
             // such a caller, so exposing it would do nothing.
-            // `repository_id` is retired from the public create body: the API
-            // accepted it, stamped it into task metadata, and read it nowhere.
-            // Exempted so this stays green against a published reference that
-            // still declares it; the stale-exemption rule fails once the
-            // reference catches up, which is the prompt to delete this.
-            &["runtime_id", "repository_id"],
+            &["runtime_id"],
             "sent here but not accepted by the API (rejected with a 422 — the create body forbids undeclared fields)",
             "accepted by the API but unavailable to callers of this SDK",
             true,
@@ -516,7 +511,7 @@ fn sdk_surface_matches_the_published_reference() {
             // `resume` is a separate typed call on this client, not a field on
             // the create body. `message` was the legacy shorthand for
             // `prompt.text`, retired in the same cycle; self-clears as above.
-            &["resume", "message"],
+            &["resume"],
             "sent here but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",
             true,
