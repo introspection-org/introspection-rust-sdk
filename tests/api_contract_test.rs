@@ -39,6 +39,10 @@
 //! last one survived.
 //!
 //! Run: cargo test --test api_contract_test -- --ignored --nocapture
+//!
+//! Set `INTROSPECTION_OPENAPI_SPEC=<path>` to check against a local spec file
+//! instead of the published one, for the window where an API change has landed
+//! but the reference it generates has not been published yet.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -55,6 +59,37 @@ use serde_json::Value;
 use uuid::Uuid;
 
 const SPEC_URL: &str = "https://docs.introspection.dev/openapi/dataplane.json";
+
+/// Env var pointing the check at a local spec file instead of the published
+/// one. The reason it exists: an API change and the SDK change that follows it
+/// land in different repositories, so there is a window where the only way to
+/// tell whether this SDK matches the *next* reference is to check it against a
+/// candidate spec that is not published yet.
+const SPEC_PATH_ENV: &str = "INTROSPECTION_OPENAPI_SPEC";
+
+/// The reference to check against: a local file when [`SPEC_PATH_ENV`] is set,
+/// otherwise the published one. Returns the source alongside the spec so a
+/// failure report names which reference it disagreed with.
+fn load_reference() -> (Value, String) {
+    if let Ok(path) = std::env::var(SPEC_PATH_ENV) {
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{SPEC_PATH_ENV}={path} is readable: {e}"));
+        let spec = serde_json::from_str(&body)
+            .unwrap_or_else(|e| panic!("{SPEC_PATH_ENV}={path} is JSON: {e}"));
+        return (spec, path);
+    }
+
+    let spec = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("client builds")
+        .get(SPEC_URL)
+        .send()
+        .expect("the published reference is reachable")
+        .json()
+        .expect("the published reference is JSON");
+    (spec, SPEC_URL.to_string())
+}
 
 /// Wire field names produced by serializing a fully populated value.
 fn wire_fields<T: Serialize>(value: &T) -> BTreeSet<String> {
@@ -140,15 +175,7 @@ fn compare(
 #[test]
 #[ignore = "reaches the network: fetches the published API reference"]
 fn sdk_surface_matches_the_published_reference() {
-    let spec: Value = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .expect("client builds")
-        .get(SPEC_URL)
-        .send()
-        .expect("the published reference is reachable")
-        .json()
-        .expect("the published reference is JSON");
+    let (spec, reference) = load_reference();
 
     // Every field populated, so `skip_serializing_if` cannot hide one. No
     // `..Default::default()` anywhere: a new field must fail to compile here.
@@ -586,11 +613,11 @@ fn sdk_surface_matches_the_published_reference() {
 
     assert!(
         report.is_empty(),
-        "the SDK surface has drifted from the published reference:\n\n{report}\nreference: {SPEC_URL}"
+        "the SDK surface has drifted from the published reference:\n\n{report}\nreference: {reference}"
     );
 
     println!(
-        "✓ SDK surface matches the published reference ({} surfaces, {SPEC_URL})",
+        "✓ SDK surface matches the published reference ({} surfaces, {reference})",
         comparisons.len()
     );
 }
