@@ -47,8 +47,8 @@
 use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
-    AgentInfo, ConversationListParams, Dimension, Event, EventListParams, FeedbackEvent,
-    FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
+    AgentInfo, ConversationExportParams, ConversationListParams, Dimension, Event, EventListParams,
+    FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
     IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
     ResourceShare, ShareCreate, ShareListParams, ShareResourceType, SortDirection, Task,
     TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
@@ -108,11 +108,15 @@ fn schema_properties(spec: &Value, name: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Query parameters only. A templated route also declares its path segments as
+/// parameters, and counting those would report a path argument the caller
+/// passes positionally as a query parameter the SDK forgot.
 fn query_parameters(spec: &Value, path: &str, method: &str) -> BTreeSet<String> {
     spec["paths"][path][method]["parameters"]
         .as_array()
         .unwrap_or_else(|| panic!("the reference has no parameters for {method} {path}"))
         .iter()
+        .filter(|p| p["in"].as_str() == Some("query"))
         .filter_map(|p| p["name"].as_str().map(str::to_owned))
         .collect()
 }
@@ -342,6 +346,20 @@ fn sdk_surface_matches_the_published_reference() {
             properties: Some(HashMap::new()),
         },
     });
+
+    // Every field populated, so a new one must be considered here rather than
+    // silently skipped. This surface exists because widening the check still
+    // left the routes this SDK had just *gained* unchecked, and the export
+    // shipped without `start_date`/`end_date` as a result.
+    let conversation_export = ConversationExportParams {
+        agent: Some("root".into()),
+        service_name: Some("svc".into()),
+        operation_name: Some("op".into()),
+        lookback_days: Some(7),
+        share_id: Some(Uuid::nil()),
+        start_date: Some("2026-01-01T00:00:00Z".into()),
+        end_date: Some("2026-01-02T00:00:00Z".into()),
+    };
 
     let conversation_list = ConversationListParams {
         limit: Some(1),
@@ -574,6 +592,15 @@ fn sdk_surface_matches_the_published_reference() {
             "sent as a query parameter the API does not accept",
             "accepted by the API and reachable only through the verbatim `filters` map",
             false,
+        ),
+        compare(
+            "conversation export filters — GET /v1/conversations/{id}/export query parameters",
+            wire_fields(&conversation_export),
+            query_parameters(&spec, "/v1/conversations/{conversation_id}/export", "get"),
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
         ),
         compare(
             "event list filters — GET /v1/events query parameters",

@@ -2833,4 +2833,14 @@ pub struct ConversationExportParams {
     /// Read via a `/v1/shares` grant for this conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_id: Option<Uuid>,
+    /// Lower bound on which records are assembled (ISO 8601).
+    ///
+    /// Named for the wire rather than carrying the ergonomic
+    /// `start`/`end`/`lookback` aliases the list params take, because this
+    /// route's relative window is the separate `lookback_days` integer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<String>,
+    /// Upper bound on which records are assembled (ISO 8601).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_date: Option<String>,
 }
