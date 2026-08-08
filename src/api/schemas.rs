@@ -1,7 +1,6 @@
 //! Wire types for the DP `/v1/tasks` and `/v1/files` surface.
 //!
-//! Mirrored from `apps/dataplane-api/introspection_dataplane/models/{task,file}.py`
-//! and the Pydantic/TS implementations in
+//! Kept in lockstep with the Pydantic/TS implementations in
 //! `introspection-python-sdk` / `introspection-js-sdk`.
 //!
 //! Field names are kept on-the-wire (`snake_case`) so the JSON round-trips
@@ -617,8 +616,8 @@ pub struct FileListParams {
 
 /// A single Server-Sent Event frame.
 ///
-/// The DP does not define the event taxonomy — frames are proxied verbatim
-/// from the agents-worker, so callers branch on `event` and parse `data`
+/// The API does not define the event taxonomy — frames are proxied verbatim,
+/// so callers branch on `event` and parse `data`
 /// themselves (typically `serde_json::from_str(&ev.data)`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SseEvent {
@@ -1213,11 +1212,8 @@ pub struct RunnerDeployment {
 
 /// CP `/run` response — the customer-facing shape.
 ///
-/// Sandbox-internal fields (`credentials` for ext_proc egress, the
-/// `bootstrap` repo manifest, DP `limits`, and the any-llm `llm_proxy`
-/// descriptor) live on `InternalRunnerSpec` on the CP→DP internal
-/// route. They are never returned to customer callers — see the
-/// design doc at `introspection-cloud/docs/design/sdk-api.md`.
+/// The fields it omits are server-internal and are never returned to
+/// customer callers.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RunnerSpec {
     pub session_id: String,
