@@ -51,14 +51,15 @@ impl Runtimes {
 
     /// Look up a runtime by runtime group slug or ID and return a [`RuntimeHandle`].
     ///
-    /// Queries `GET /v1/runtimes?runtime=…&only_active=true` and returns a
-    /// handle to the first match. The server infers the project from the
-    /// API token. Returns `IntrospectionAPIError::Http` with status 404
-    /// if no active runtime with that runtime group slug or ID exists.
+    /// Queries `GET /v1/runtimes?runtime=…` and returns a handle to the
+    /// first match. The route answers newest-first, so a slug published
+    /// more than once resolves to the version the group currently
+    /// serves. The server infers the project from the API token.
+    /// Returns `IntrospectionAPIError::Http` with status 404 if no
+    /// runtime with that runtime group slug or ID exists.
     pub async fn resolve(&self, runtime: &str) -> ApiResult<RuntimeHandle> {
         let mut paginator = self.list(&RuntimeListParams {
             runtime: Some(runtime.into()),
-            only_active: Some(true),
             limit: Some(1),
             ..Default::default()
         });
@@ -67,7 +68,7 @@ impl Runtimes {
             .await?
             .and_then(|p| p.records.into_iter().next())
             .ok_or_else(|| IntrospectionAPIError::Http {
-                message: format!("no active runtime '{runtime}'"),
+                message: format!("no runtime '{runtime}'"),
                 status: 404,
                 code: None,
                 request_id: None,
