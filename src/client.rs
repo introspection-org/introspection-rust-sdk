@@ -20,9 +20,7 @@ use tracing::warn;
 
 use crate::api::http::{HttpClient, HttpConfig};
 use crate::dev_target;
-use crate::resources::{
-    ExperimentHandle, Experiments, Projects, Recipes, Repositories, RuntimeHandle, Runtimes,
-};
+use crate::resources::{ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes};
 use crate::types::{self, ClientConfig};
 
 /// SDK version.
@@ -57,8 +55,6 @@ pub struct IntrospectionClient {
     #[allow(dead_code)]
     service_name: String,
     project_id: Option<uuid::Uuid>,
-    projects: Option<Projects>,
-    repositories: Option<Repositories>,
     runtimes: Option<Runtimes>,
     experiments: Option<Experiments>,
     recipes: Option<Recipes>,
@@ -97,9 +93,8 @@ impl IntrospectionClient {
             warn!("IntrospectionClient: No token provided. REST calls will fail.");
         }
 
-        let (projects, repositories, runtimes, experiments, recipes, cp_http) = if token.is_empty()
-        {
-            (None, None, None, None, None, None)
+        let (runtimes, experiments, recipes, cp_http) = if token.is_empty() {
+            (None, None, None, None)
         } else {
             // INTROSPECTION_DEV_TARGET rides every request as a header so it
             // reaches the paths a runner cannot: a bare `POST /v1/tasks` with a
@@ -120,8 +115,6 @@ impl IntrospectionClient {
                 .map_err(|e| IntrospectionError::OpenTelemetry(e.to_string()))?;
             let http_arc = Arc::new(http);
             (
-                Some(Projects::new(http_arc.clone())),
-                Some(Repositories::new(http_arc.clone())),
                 Some(Runtimes::new(http_arc.clone())),
                 Some(Experiments::new(http_arc.clone())),
                 Some(Recipes::new(http_arc.clone())),
@@ -132,8 +125,6 @@ impl IntrospectionClient {
         Ok(Self {
             service_name,
             project_id,
-            projects,
-            repositories,
             runtimes,
             experiments,
             recipes,
@@ -144,18 +135,6 @@ impl IntrospectionClient {
     /// The resolved project ID from [`ClientConfig::project_id`], if supplied.
     pub fn project_id(&self) -> Option<uuid::Uuid> {
         self.project_id
-    }
-
-    pub fn projects(&self) -> &Projects {
-        self.projects.as_ref().expect(
-            "client.projects() requires a token; set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`",
-        )
-    }
-
-    pub fn repositories(&self) -> &Repositories {
-        self.repositories.as_ref().expect(
-            "client.repositories() requires a token; set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`",
-        )
     }
 
     pub fn runtimes(&self) -> &Runtimes {
@@ -192,14 +171,6 @@ impl IntrospectionClient {
         project: impl Into<crate::api::schemas::StringOrUuid>,
     ) -> ExperimentHandle {
         self.experiments().handle(experiment_id, project)
-    }
-
-    pub fn try_projects(&self) -> Option<&Projects> {
-        self.projects.as_ref()
-    }
-
-    pub fn try_repositories(&self) -> Option<&Repositories> {
-        self.repositories.as_ref()
     }
 
     pub fn try_runtimes(&self) -> Option<&Runtimes> {

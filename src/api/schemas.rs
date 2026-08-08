@@ -495,7 +495,7 @@ pub enum ShareResourceType {
     Conversation,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ResourceShare {
     pub id: Uuid,
     pub org_id: Uuid,
@@ -532,8 +532,6 @@ pub struct ShareListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub include_total: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_type: Option<ShareResourceType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_id: Option<String>,
@@ -545,7 +543,7 @@ pub struct ShareListParams {
 
 // ----- files -----------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct File {
     pub id: Uuid,
     pub org_id: Uuid,
@@ -562,6 +560,12 @@ pub struct File {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default)]
     pub member_id: Option<Uuid>,
+    /// Coalesced caller identity that created this file.
+    #[serde(default)]
+    pub identity_key: Option<String>,
+    /// Task this file was created from (accounting only).
+    #[serde(default)]
+    pub task_id: Option<Uuid>,
     #[serde(default)]
     pub size_bytes: u64,
     #[serde(default = "default_version")]
@@ -638,50 +642,6 @@ impl SseEvent {
     }
 }
 
-// ----- projects (CP) ---------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Project {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub name: String,
-    #[serde(default)]
-    pub slug: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ProjectListParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-}
-
-// ----- repositories (CP) ----------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Repository {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub project_id: Uuid,
-    pub name: String,
-    #[serde(default)]
-    pub slug: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct RepositoryListParams {
-    pub project_id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-}
-
 // ----- recipes (CP) ----------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -701,29 +661,6 @@ pub struct Recipe {
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct RecipeCreate {
-    pub project: StringOrUuid,
-    pub repository_id: Uuid,
-    pub name: String,
-    pub git_ref: String,
-    pub git_commit_sha: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sub_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub struct RecipeUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -1022,46 +959,6 @@ pub struct Experiment {
     pub halted_reason: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-}
-
-/// `POST /v1/experiments` body. Creates a draft that routes nothing until
-/// `start`. `arms` takes 2-20 runtime versions sharing `runtime_group_id`,
-/// and `goal_json` must contain at least one positive-weight judge component.
-#[derive(Debug, Clone, Serialize)]
-pub struct ExperimentCreate {
-    pub project: StringOrUuid,
-    pub name: String,
-    pub runtime_group_id: Uuid,
-    pub arms: Vec<Arm>,
-    pub goal_json: ExperimentGoal,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash_key_fields: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sample_rate: Option<f64>,
-}
-
-/// `PATCH /v1/experiments/{id}`. Status transitions go through start / end /
-/// cancel; `runtime_group_id` and arms are immutable once running.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ExperimentUpdate {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_json: Option<ExperimentGoal>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scoring_interval_seconds: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash_key_fields: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sample_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1519,7 +1416,6 @@ pub struct ConversationListParams {
     pub start: Option<String>,
     pub end: Option<String>,
     pub lookback: Option<String>,
-    pub include_total: Option<bool>,
     /// Arbitrary resource filters merged verbatim onto the query string.
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
@@ -1606,7 +1502,9 @@ impl ConversationListParams {
             start: self.start.as_deref(),
             end: self.end.as_deref(),
             lookback: self.lookback.as_deref(),
-            include_total: self.include_total,
+            // `/v1/conversations` declares no `include_total`; the count is
+            // not available on this read, so there is nothing to ask for.
+            include_total: None,
         }
         .apply(&mut obj)?;
         merge_filters(&mut obj, self.filters.as_ref());
@@ -1957,7 +1855,6 @@ pub struct EventListParams {
     pub start: Option<String>,
     pub end: Option<String>,
     pub lookback: Option<String>,
-    pub include_total: Option<bool>,
     /// Envelope + family-scoped filters merged verbatim onto the query
     /// string. A filter outside the requested family's allow-map is a 422.
     pub filters: Option<HashMap<String, serde_json::Value>>,
@@ -1977,7 +1874,6 @@ impl EventListParams {
             start: None,
             end: None,
             lookback: None,
-            include_total: None,
             filters: None,
         }
     }
@@ -1995,7 +1891,9 @@ impl EventListParams {
             start: self.start.as_deref(),
             end: self.end.as_deref(),
             lookback: self.lookback.as_deref(),
-            include_total: self.include_total,
+            // `/v1/events` declares no `include_total`; the count is not
+            // available on this read, so there is nothing to ask for.
+            include_total: None,
         }
         .apply(&mut obj)?;
         if self
@@ -2301,55 +2199,6 @@ mod tests {
     }
 
     #[test]
-    fn experiment_create_serializes_group_arms_and_judge_goal() {
-        let judge_id = "0195c0de-0000-7000-8000-00000000000d";
-        let body = serde_json::to_value(ExperimentCreate {
-            project: "my-project".into(),
-            name: "prompt-bake-off".into(),
-            runtime_group_id: "0195c0de-0000-7000-8000-00000000000a".parse().unwrap(),
-            arms: vec![
-                Arm {
-                    runtime_id: "0195c0de-0000-7000-8000-00000000000b".parse().unwrap(),
-                    arm_label: "control".into(),
-                    agent_overrides: None,
-                },
-                Arm {
-                    runtime_id: "0195c0de-0000-7000-8000-00000000000c".parse().unwrap(),
-                    arm_label: "variant".into(),
-                    agent_overrides: None,
-                },
-            ],
-            goal_json: ExperimentGoal {
-                components: vec![ExperimentGoalComponent::Judge(JudgeGoalComponent {
-                    judge_id: judge_id.parse().unwrap(),
-                    judge_definition_hash: None,
-                    weight: 1.0,
-                    guard: None,
-                })],
-                ..Default::default()
-            },
-            description: None,
-            environment: None,
-            scoring_interval_seconds: None,
-            hash_key_fields: None,
-            sample_rate: None,
-        })
-        .unwrap();
-
-        assert_eq!(
-            body["runtime_group_id"],
-            "0195c0de-0000-7000-8000-00000000000a"
-        );
-        assert_eq!(body["arms"][0]["arm_label"], "control");
-        assert!(body["arms"][0].get("weight").is_none());
-        let component = &body["goal_json"]["components"][0];
-        assert_eq!(component["source"], "judge");
-        assert_eq!(component["judge_id"], judge_id);
-        assert_eq!(body["goal_json"]["kind"], "composite");
-        assert_eq!(body["goal_json"]["direction"], "maximize");
-    }
-
-    #[test]
     fn experiment_read_parses_typed_goal_and_group() {
         let exp: Experiment = serde_json::from_value(json!({
             "id": "0195c0de-0000-7000-8000-000000000001",
@@ -2440,19 +2289,6 @@ mod tests {
         .expect("runtime list params serialize");
 
         assert_eq!(value["runtime"], "customer-agent");
-        assert!(value.get("name").is_none());
-        assert!(value.get("slug").is_none());
-    }
-
-    #[test]
-    fn project_list_params_serialize_project_not_name_or_slug() {
-        let value = serde_json::to_value(ProjectListParams {
-            project: Some("main".to_string()),
-            ..Default::default()
-        })
-        .expect("project list params serialize");
-
-        assert_eq!(value["project"], "main");
         assert!(value.get("name").is_none());
         assert!(value.get("slug").is_none());
     }
@@ -2876,4 +2712,125 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, IntrospectionAPIError::InvalidConfig(_)));
     }
+}
+
+// ----- trajectory-v1 (conversation export) ----------------------------------
+
+/// One tool invocation inside a [`TrajectoryAssistantRecord`].
+///
+/// `args` is a **JSON-encoded string**, not an object. That is the upstream
+/// trajectory-v1 contract rather than an oversight here: the encoded value is
+/// an object, and a malformed or scalar source value arrives as
+/// `{"_raw": ...}` so the evidence survives without breaking the schema.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrajectoryToolCall {
+    /// Identifier linking this call to its [`TrajectoryRecord::Tool`] result.
+    pub id: String,
+    /// Tool/function name.
+    pub name: String,
+    /// JSON-encoded arguments object.
+    pub args: String,
+}
+
+/// Leading record identifying the session the trajectory came from.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrajectoryMetaRecord {
+    /// Harness that produced the session, e.g. `"claude-code"`.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// A user turn.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrajectoryUserRecord {
+    pub content: String,
+    /// ISO-8601 timestamp.
+    pub timestamp: String,
+}
+
+/// Model reasoning, when the source exposed it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrajectoryReasoningRecord {
+    pub content: String,
+    /// ISO-8601 timestamp.
+    pub timestamp: String,
+}
+
+/// An assistant turn — prose, or tool calls, never both.
+///
+/// The two are distinguished by `content`: a prose record carries text and no
+/// `tool_calls`; a tool-call record carries `content: null`. That null is
+/// load-bearing and always present on the wire, so `content` is
+/// `Option<String>` rather than a skipped field.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrajectoryAssistantRecord {
+    pub content: Option<String>,
+    /// ISO-8601 timestamp.
+    pub timestamp: String,
+    /// Present only on a tool-call record, and then never empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<TrajectoryToolCall>>,
+}
+
+/// A tool result, linked to its call by `tool_call_id`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrajectoryToolRecord {
+    pub tool_call_id: String,
+    pub content: String,
+    /// ISO-8601 timestamp.
+    pub timestamp: String,
+    /// Source-native success status; absent when the source exposes none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+}
+
+/// One record in a trajectory-v1 export, discriminated by `role`.
+///
+/// Unlike [`Event`], this union has no `Unknown` tail: the record vocabulary
+/// is pinned by the `version=1` media-type parameter the client sends, and a
+/// server that does not implement that version answers `406` rather than
+/// returning a shape with new roles in it. A new role therefore arrives as a
+/// new version, not as an unrecognised variant.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "role", rename_all = "lowercase")]
+pub enum TrajectoryRecord {
+    Meta(TrajectoryMetaRecord),
+    User(TrajectoryUserRecord),
+    Reasoning(TrajectoryReasoningRecord),
+    Assistant(TrajectoryAssistantRecord),
+    Tool(TrajectoryToolRecord),
+}
+
+/// The trajectory-v1 wire shape: a non-empty top-level array of records.
+///
+/// A projection derived on read from the stored GenAI messages, not a second
+/// storage format — nothing accepts a trajectory as input, so there is no
+/// `TrajectoryCreate`.
+pub type Trajectory = Vec<TrajectoryRecord>;
+
+/// Query params for `GET /v1/conversations/{id}/export`.
+///
+/// The export is assembled server-side over the whole conversation, so there
+/// is no cursor or page bound here: every field filters what gets assembled.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConversationExportParams {
+    /// Agent selector: `"root"` for the depth-zero transcript, an exact agent
+    /// id for one invocation, or `None` for the complete conversation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_name: Option<String>,
+    /// Partition lookback bound in days (1-365).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookback_days: Option<u16>,
+    /// Read via a `/v1/shares` grant for this conversation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_id: Option<Uuid>,
 }
