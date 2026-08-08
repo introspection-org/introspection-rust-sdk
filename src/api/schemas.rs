@@ -256,8 +256,6 @@ pub struct PaginationParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub include_total: Option<bool>,
 }
 
 // ----- tasks -----------------------------------------------------------------
@@ -670,10 +668,7 @@ pub struct RecipeListParams {
     pub repository_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub git_ref: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub git_commit_sha: Option<String>,
+
     #[serde(flatten)]
     pub pagination: PaginationParams,
 }
@@ -964,8 +959,14 @@ pub struct Experiment {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
     pub project: StringOrUuid,
+    /// Runtime slug or group id.
+    ///
+    /// A `String` rather than a `Uuid`: the route resolves either form, and
+    /// typing it as a uuid made the slug half of that contract unreachable.
+    /// The wire name is `runtime`; `runtime_group_id` is accepted as a legacy
+    /// alias, which is what this field used to send.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_group_id: Option<Uuid>,
+    pub runtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

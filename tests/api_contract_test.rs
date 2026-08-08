@@ -48,9 +48,10 @@ use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
     AgentInfo, ConversationExportParams, ConversationListParams, Dimension, Event, EventListParams,
-    FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
-    IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
-    ResourceShare, ShareCreate, ShareListParams, ShareResourceType, SortDirection, Task,
+    ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
+    FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec,
+    MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, ResourceShare,
+    ShareCreate, ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task,
     TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
     TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
 };
@@ -59,6 +60,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 const SPEC_URL: &str = "https://docs.introspection.dev/openapi/dataplane.json";
+const CP_SPEC_URL: &str = "https://docs.introspection.dev/openapi/controlplane.json";
 
 /// Env var pointing the check at a local spec file instead of the published
 /// one. The reason it exists: an API change and the SDK change that follows it
@@ -67,15 +69,28 @@ const SPEC_URL: &str = "https://docs.introspection.dev/openapi/dataplane.json";
 /// candidate spec that is not published yet.
 const SPEC_PATH_ENV: &str = "INTROSPECTION_OPENAPI_SPEC";
 
+/// Same, for the Control-Plane reference. The two planes are separate services
+/// with separate specs, and the CP half went unchecked entirely until an
+/// experiments filter the API does not accept shipped in two SDKs at once.
+const CP_SPEC_PATH_ENV: &str = "INTROSPECTION_CP_OPENAPI_SPEC";
+
 /// The reference to check against: a local file when [`SPEC_PATH_ENV`] is set,
 /// otherwise the published one. Returns the source alongside the spec so a
 /// failure report names which reference it disagreed with.
+fn load_cp_reference() -> (Value, String) {
+    load_one(CP_SPEC_PATH_ENV, CP_SPEC_URL)
+}
+
 fn load_reference() -> (Value, String) {
-    if let Ok(path) = std::env::var(SPEC_PATH_ENV) {
+    load_one(SPEC_PATH_ENV, SPEC_URL)
+}
+
+fn load_one(env_var: &str, url: &str) -> (Value, String) {
+    if let Ok(path) = std::env::var(env_var) {
         let body = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("{SPEC_PATH_ENV}={path} is readable: {e}"));
-        let spec = serde_json::from_str(&body)
-            .unwrap_or_else(|e| panic!("{SPEC_PATH_ENV}={path} is JSON: {e}"));
+            .unwrap_or_else(|e| panic!("{env_var}={path} is readable: {e}"));
+        let spec =
+            serde_json::from_str(&body).unwrap_or_else(|e| panic!("{env_var}={path} is JSON: {e}"));
         return (spec, path);
     }
 
@@ -83,12 +98,12 @@ fn load_reference() -> (Value, String) {
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client builds")
-        .get(SPEC_URL)
+        .get(url)
         .send()
         .expect("the published reference is reachable")
         .json()
         .expect("the published reference is JSON");
-    (spec, SPEC_URL.to_string())
+    (spec, url.to_string())
 }
 
 /// Wire field names produced by serializing a fully populated value.
@@ -180,6 +195,7 @@ fn compare(
 #[ignore = "reaches the network: fetches the published API reference"]
 fn sdk_surface_matches_the_published_reference() {
     let (spec, reference) = load_reference();
+    let (cp_spec, cp_reference) = load_cp_reference();
 
     // Every field populated, so `skip_serializing_if` cannot hide one. No
     // `..Default::default()` anywhere: a new field must fail to compile here.
@@ -351,6 +367,25 @@ fn sdk_surface_matches_the_published_reference() {
     // silently skipped. This surface exists because widening the check still
     // left the routes this SDK had just *gained* unchecked, and the export
     // shipped without `start_date`/`end_date` as a result.
+    let experiment_list = ExperimentListParams {
+        project: StringOrUuid::from("proj"),
+        runtime: Some("support-agent".into()),
+        environment: Some("production".into()),
+        status: Some(ExperimentStatus::Running),
+        limit: Some(1),
+        next: Some("cursor".into()),
+    };
+
+    let recipe_list = RecipeListParams {
+        project: StringOrUuid::from("proj"),
+        repository_id: Some(Uuid::nil()),
+        name: Some("support".into()),
+        pagination: PaginationParams {
+            limit: Some(1),
+            next: Some("cursor".into()),
+        },
+    };
+
     let conversation_export = ConversationExportParams {
         agent: Some("root".into()),
         service_name: Some("svc".into()),
@@ -594,6 +629,25 @@ fn sdk_surface_matches_the_published_reference() {
             false,
         ),
         compare(
+            "experiment list filters — GET /v1/experiments query parameters",
+            wire_fields(&experiment_list),
+            query_parameters(&cp_spec, "/v1/experiments", "get"),
+            // The deprecated spelling of `project`; this SDK sends the current one.
+            &["project_id"],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
+            "recipe list filters — GET /v1/recipes query parameters",
+            wire_fields(&recipe_list),
+            query_parameters(&cp_spec, "/v1/recipes", "get"),
+            &["project_id"],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
             "conversation export filters — GET /v1/conversations/{id}/export query parameters",
             wire_fields(&conversation_export),
             query_parameters(&spec, "/v1/conversations/{conversation_id}/export", "get"),
@@ -640,11 +694,11 @@ fn sdk_surface_matches_the_published_reference() {
 
     assert!(
         report.is_empty(),
-        "the SDK surface has drifted from the published reference:\n\n{report}\nreference: {reference}"
+        "the SDK surface has drifted from the published reference:\n\n{report}\nreference: {reference} + {cp_reference}"
     );
 
     println!(
-        "✓ SDK surface matches the published reference ({} surfaces, {reference})",
+        "✓ SDK surface matches the published reference ({} surfaces, {reference} + {cp_reference})",
         comparisons.len()
     );
 }
