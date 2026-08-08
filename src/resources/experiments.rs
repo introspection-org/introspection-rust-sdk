@@ -1,5 +1,10 @@
-//! `client.experiments` (CP) — experiment CRUD + lifecycle +
+//! `client.experiments` (CP) — experiment lookup + lifecycle +
 //! `experiment(id, project).run()` to open a [`crate::Runner`].
+//!
+//! Lookup and lifecycle only. A runner brackets its own execution — it
+//! resolves the experiment, then `start` / `end` / `cancel` around the work
+//! it is being measured on. Defining an experiment is a project-authoring
+//! act and lives in the CLI.
 
 use std::sync::Arc;
 
@@ -9,10 +14,7 @@ use uuid::Uuid;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{
-    Experiment, ExperimentCreate, ExperimentListParams, ExperimentUpdate, RunRequest, RunnerSpec,
-    StringOrUuid,
-};
+use crate::api::schemas::{Experiment, ExperimentListParams, RunRequest, RunnerSpec, StringOrUuid};
 use crate::runner::{Runner, RunnerSource};
 
 #[derive(Clone)]
@@ -48,37 +50,6 @@ impl Experiments {
                 },
             )
             .await
-    }
-
-    pub async fn create(&self, body: &ExperimentCreate) -> ApiResult<Experiment> {
-        self.http.post_json("/v1/experiments", body).await
-    }
-
-    pub async fn update(
-        &self,
-        experiment_id: Uuid,
-        project: impl Into<StringOrUuid>,
-        body: &ExperimentUpdate,
-    ) -> ApiResult<Experiment> {
-        let path = format!(
-            "/v1/experiments/{}?project={}",
-            experiment_id,
-            project.into()
-        );
-        self.http.patch_json(&path, body).await
-    }
-
-    pub async fn delete(
-        &self,
-        experiment_id: Uuid,
-        project: impl Into<StringOrUuid>,
-    ) -> ApiResult<()> {
-        let path = format!(
-            "/v1/experiments/{}?project={}",
-            experiment_id,
-            project.into()
-        );
-        self.http.delete_empty(&path).await
     }
 
     pub fn handle(

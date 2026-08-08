@@ -304,7 +304,7 @@ fn is_retryable_status(status: StatusCode, idempotent: bool) -> bool {
     }
 }
 
-async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {
+pub(crate) async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {
     let bytes = res.bytes().await?;
     serde_json::from_slice(&bytes)
         .map_err(|e| IntrospectionAPIError::Decode(format!("failed to parse JSON response: {e}")))

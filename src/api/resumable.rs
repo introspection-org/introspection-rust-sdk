@@ -1,7 +1,5 @@
 //! Transparent stream resume for the task-run stream (INT-252).
 //!
-//! See `docs/design/sdk-resumable-streams.md` in `introspection-cloud`.
-//!
 //! A turn is consumed over a long-lived SSE stream that can be severed before
 //! the turn settles (gateway idle-timeout, load-balancer recycle, network
 //! blip). Rather than surface that as a turn failure — losing every event

@@ -37,11 +37,21 @@ const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
 
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::ApiResult;
+use crate::api::genai_span::GenAiSpan;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Conversation, ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse,
+    Conversation, ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
+    ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse, Trajectory,
 };
+
+/// Base media type of a trajectory-v1 conversation export. The `version`
+/// parameter is appended by the caller; a server that does not implement the
+/// requested version answers `406` rather than silently serving another shape.
+pub const TRAJECTORY_MEDIA_TYPE: &str = "application/vnd.letta.trajectory+json";
+
+/// Accept header selecting the pinned trajectory-v1 export representation.
+pub const TRAJECTORY_V1_ACCEPT: &str = "application/vnd.letta.trajectory+json;version=1";
 
 #[cfg(feature = "arrow")]
 use crate::api::arrow::{decode_arrow_response, ArrowPage, ARROW_STREAM_ACCEPT};
@@ -104,6 +114,111 @@ impl Conversations {
             .await?;
         decode_arrow_response(res).await
     }
+    /// `GET /v1/conversations/{id}/export` — one complete conversation as
+    /// trajectory-v1.
+    ///
+    /// This is not [`ConversationItems::list`] in another coat. The export is
+    /// assembled server-side over the whole conversation, so it carries no
+    /// cursor and no page bound; `params` filters what gets assembled.
+    ///
+    /// The trajectory is a projection derived on read from the stored GenAI
+    /// messages, so a conversation that cannot be represented as trajectory-v1
+    /// answers `422` rather than returning a partial export, and one with no
+    /// exportable records answers `404`.
+    pub async fn export_trajectory(
+        &self,
+        conversation_id: &str,
+        params: &ConversationExportParams,
+    ) -> ApiResult<Trajectory> {
+        let path = format!(
+            "/v1/conversations/{}/export",
+            utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
+        );
+        let res = self
+            .http
+            .get_raw(&path, params, Some(TRAJECTORY_V1_ACCEPT))
+            .await?;
+        crate::api::http::decode_json(res).await
+    }
+
+    /// Load the state of a conversation as of one item.
+    ///
+    /// Returns the span itself: the items read already carries the full input
+    /// history, system instructions, and tool definitions, so composing a
+    /// second type from it would just be copying fields into different names.
+    ///
+    /// When `item_id` is `None` the latest LLM turn is used — the first item
+    /// (the route is descending-only) whose `gen_ai.operation.name` is
+    /// `"chat"`, falling back to the first item that produced any output.
+    /// Returns `Ok(None)` when the conversation has no items.
+    ///
+    /// For the full per-turn transcript instead, walk
+    /// [`ConversationItems::list`], which is newest-first.
+    pub async fn retrieve(
+        &self,
+        conversation_id: &str,
+        item_id: Option<&str>,
+    ) -> ApiResult<Option<GenAiSpan>> {
+        let target_id = match item_id {
+            Some(id) => Some(id.to_string()),
+            None => self.find_latest_turn_id(conversation_id).await?,
+        };
+        let Some(target_id) = target_id else {
+            return Ok(None);
+        };
+        let span = self
+            .items
+            .get(
+                conversation_id,
+                &target_id,
+                &ConversationItemGetParams::default(),
+            )
+            .await?;
+        Ok(Some(span))
+    }
+
+    /// Scan items for the most recent LLM turn. The route sorts descending
+    /// and rejects a cursor that disagrees, so the first match is the latest.
+    async fn find_latest_turn_id(&self, conversation_id: &str) -> ApiResult<Option<String>> {
+        let mut pages = self
+            .items
+            .list(conversation_id, &ConversationItemListParams::default())?;
+        let mut fallback: Option<String> = None;
+        while let Some(page) = pages.next_page().await? {
+            for item in page.data {
+                if item.operation_name() == Some("chat") {
+                    return Ok(item.span_id);
+                }
+                if fallback.is_none() && !item.output_messages().is_empty() {
+                    fallback = item.span_id.clone();
+                }
+            }
+        }
+        Ok(fallback)
+    }
+
+    /// `GET /v1/conversations/{id}/export` as a single Arrow page.
+    ///
+    /// Unlike [`Conversations::list_arrow`], this is one page for the whole
+    /// conversation rather than the first of a cursor walk: the export route
+    /// assembles the complete conversation server-side and streams it in one
+    /// response. Requires the `arrow` feature.
+    #[cfg(feature = "arrow")]
+    pub async fn export_arrow(
+        &self,
+        conversation_id: &str,
+        params: &ConversationExportParams,
+    ) -> ApiResult<ArrowPage> {
+        let path = format!(
+            "/v1/conversations/{}/export",
+            utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
+        );
+        let res = self
+            .http
+            .get_raw(&path, params, Some(ARROW_STREAM_ACCEPT))
+            .await?;
+        decode_arrow_response(res).await
+    }
 }
 
 /// `runner.events.*` — `GET /v1/events` (append-only `otel_logs`).
@@ -134,6 +249,24 @@ impl Events {
     pub fn list(&self, params: &EventListParams) -> ApiResult<Paginator<Event>> {
         let wire = params.to_wire()?;
         Paginator::new(self.http.clone(), "/v1/events", &wire)
+    }
+
+    /// `GET /v1/events/{id}` — read one event by id, across every family.
+    ///
+    /// Unlike [`Events::list`], no `event_name` is supplied, so the family
+    /// is not known in advance. A family this SDK build predates
+    /// deserializes as [`Event::Unknown`] rather than erroring, so a new
+    /// server-side family is not mistaken for a missing event. Returns a
+    /// `404` [`IntrospectionAPIError`] when the id does not resolve within
+    /// the caller's tenant scope.
+    ///
+    /// [`Event::Unknown`]: crate::api::schemas::Event::Unknown
+    /// [`IntrospectionAPIError`]: crate::api::error::IntrospectionAPIError
+    pub async fn get(&self, event_id: &str) -> ApiResult<Event> {
+        #[derive(serde::Serialize)]
+        struct Q {}
+        let path = format!("/v1/events/{}", event_id);
+        self.http.get_json(&path, &Q {}).await
     }
 
     /// `GET /v1/events` as an Arrow stream — one Arrow page. Because the
