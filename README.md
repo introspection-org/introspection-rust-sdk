@@ -8,7 +8,7 @@
   </a>
 </div>
 
-<h4 align="center">Deploy vertical agents that improve in production.</h4>
+<h4 align="center">The infrastructure for long-horizon vertical agents.</h4>
 
 <div align="center">
   <a href="https://introspection.dev"><img src="https://img.shields.io/badge/website-introspection.dev-blue" alt="Website"></a>
@@ -19,10 +19,12 @@
 
 <br>
 
-[Introspection](https://introspection.dev) is the managed cloud for vertical
-agents, powered by Pi. Define an agent as a recipe, deploy it to a
-commit-pinned runtime, and improve it in production with conversations,
-patterns, judges, and experiments.
+[Introspection](https://introspection.dev) is the infrastructure for
+long-horizon vertical agents, powered by Pi. Define an agent as a
+[Recipe](https://pi.recipes) — agents, skills, policies, and evals in plain
+source you own in Git — deploy it to a governed per-customer Runtime, and
+improve it in production with conversations, observations, judges, and
+experiments.
 
 This is the native Rust client for driving Introspection runtimes and tasks,
 alongside optional analytics and OpenTelemetry surfaces. Use
@@ -37,7 +39,7 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 | --- | --- | --- |
 | [`IntrospectionClient`](#1-introspectionclient--introspection-api-runtimes-tasks-files) | Introspection API: runtimes, experiments, runner, tasks, files | _none_ (default) |
 | [`IntrospectionLogs`](#2-introspectionlogs--analytics-events-track-feedback-identify) | Analytics events: `track` / `feedback` / `identify` (OTLP logs) | `otel` |
-| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces-span-processors--instrumentors) | Traces: span processors + LLM SDK instrumentors (OTLP traces) | `otel` |
+| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces) | Traces: span processor + Observation API (OTLP traces) | `otel` |
 
 They share no state. Construct the ones you want, configure independently, mix and match.
 
@@ -331,7 +333,7 @@ Available baggage guards: `set_user_id`, `set_anonymous_id`,
 `set_baggage`. Each returns an RAII guard that clears the value when
 dropped.
 
-### 3. `IntrospectionSpanProcessor` — Traces (span processors + instrumentors)
+### 3. `IntrospectionSpanProcessor` — Traces
 
 A standalone `SpanProcessor` you attach to your own
 `SdkTracerProvider`. Sends spans to the Introspection OTLP collector
