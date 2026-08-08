@@ -18,9 +18,8 @@
 //! These two surfaces share no state. They are also fully independent
 //! from [`crate::IntrospectionClient`] (the always-on REST surface).
 //!
-//! Higher-level helpers — [`messages`], [`observation`], and the
-//! `async-openai` adapter at [`openai`] (gated on the `openai` feature) —
-//! also live under this module.
+//! Higher-level helpers — [`messages`] and [`observation`] — also live
+//! under this module.
 
 #[cfg(feature = "otel")]
 pub mod logs;
@@ -31,9 +30,6 @@ pub mod observation;
 pub mod span_processor;
 #[cfg(feature = "otel")]
 pub mod types;
-
-#[cfg(feature = "openai")]
-pub mod openai;
 
 #[cfg(any(feature = "testing", all(test, feature = "otel")))]
 pub mod testing;
@@ -59,6 +55,3 @@ pub use types::{
     api_path, attr, baggage, defaults, event_name, generate_event_id, logger_name, severity,
     FeedbackOptions, IdentifyOptions, PropertyValue, TrackOptions,
 };
-
-#[cfg(feature = "openai")]
-pub use openai::TracedStream;

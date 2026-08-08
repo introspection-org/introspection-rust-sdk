@@ -57,19 +57,11 @@ With logs/traces export:
 introspection-sdk = { version = "0.1", features = ["otel"] }
 ```
 
-The `async-openai` adapter is experimental:
-
-```toml
-[dependencies]
-introspection-sdk = { version = "0.1", features = ["openai"] }
-```
-
 ### Feature flags
 
 | Feature   | Description                                                        |
 | --------- | ------------------------------------------------------------------ |
 | `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
-| `openai`  | Experimental `async-openai` support (implies `otel`)            |
 | `testing` | In-memory span exporter and test helpers (implies `otel`)          |
 
 ## Three surfaces
@@ -398,32 +390,6 @@ obs.set_ok();
 ```
 
 Observations nest automatically via OpenTelemetry context propagation.
-
-### `async-openai` integration
-
-> **Experimental integration.**
-
-Requires the `openai` feature. Wraps `async-openai` calls with span
-instrumentation.
-
-```rust
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::*;
-use introspection_sdk::otel::openai::traced_chat_completion;
-
-let client = Client::with_config(OpenAIConfig::default());
-let request = CreateChatCompletionRequest {
-    model: "gpt-4o-mini".to_string(),
-    messages: vec![/* … */],
-    ..Default::default()
-};
-
-let response = traced_chat_completion(&tracer, &client, request).await?;
-```
-
-Streaming variant `traced_chat_completion_stream` and the
-`tracing`-based `tracing_traced_chat_completion` are also available.
 
 ## Environment variables
 
