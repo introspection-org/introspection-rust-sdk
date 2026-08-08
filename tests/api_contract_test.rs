@@ -51,10 +51,10 @@ use introspection_sdk::api::schemas::{
     ConversationListParams, Dimension, Event, EventListParams, ExperimentListParams,
     ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate,
     HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery,
-    OrderTerm, PaginationParams, RecipeListParams, ResourceShare, ShareCreate, ShareListParams,
-    ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate,
-    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind,
-    TaskStatus, TimeDimension,
+    OrderTerm, PaginationParams, RecipeListParams, ResourceShare, RuntimeListParams, ShareCreate,
+    ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions,
+    TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate,
+    TaskRunKind, TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -369,7 +369,7 @@ fn sdk_surface_matches_the_published_reference() {
     // left the routes this SDK had just *gained* unchecked, and the export
     // shipped without `start_date`/`end_date` as a result.
     let experiment_list = ExperimentListParams {
-        project: StringOrUuid::from("proj"),
+        project: Some(StringOrUuid::from("proj")),
         runtime: Some("support-agent".into()),
         environment: Some("production".into()),
         status: Some(ExperimentStatus::Running),
@@ -377,8 +377,20 @@ fn sdk_surface_matches_the_published_reference() {
         next: Some("cursor".into()),
     };
 
+    // The last list surface without a declaration, and it had drifted:
+    // `only_active` was a filter the route never accepted, and it was
+    // load-bearing — `resolve()` passed it and trusted the narrowing.
+    let runtime_list = RuntimeListParams {
+        project: Some("proj".into()),
+        runtime: Some(StringOrUuid::from("support-agent")),
+        recipe_id: Some(Uuid::nil()),
+        environment: Some("production".into()),
+        limit: Some(1),
+        next: Some("cursor".into()),
+    };
+
     let recipe_list = RecipeListParams {
-        project: StringOrUuid::from("proj"),
+        project: Some(StringOrUuid::from("proj")),
         repository_id: Some(Uuid::nil()),
         name: Some("support".into()),
         pagination: PaginationParams {
@@ -490,12 +502,7 @@ fn sdk_surface_matches_the_published_reference() {
             // Runner-bound client: the credential's claim is authoritative for
             // runtime selection and the API ignores a body `runtime_id` from
             // such a caller, so exposing it would do nothing.
-            // `repository_id` is retired from the public create body: the API
-            // accepted it, stamped it into task metadata, and read it nowhere.
-            // Exempted so this stays green against a published reference that
-            // still declares it; the stale-exemption rule fails once the
-            // reference catches up, which is the prompt to delete this.
-            &["runtime_id", "repository_id"],
+            &["runtime_id"],
             "sent here but not accepted by the API (rejected with a 422 — the create body forbids undeclared fields)",
             "accepted by the API but unavailable to callers of this SDK",
             true,
@@ -514,9 +521,8 @@ fn sdk_surface_matches_the_published_reference() {
             wire_fields(&run_create),
             schema_properties(&spec, "TaskRunCreate"),
             // `resume` is a separate typed call on this client, not a field on
-            // the create body. `message` was the legacy shorthand for
-            // `prompt.text`, retired in the same cycle; self-clears as above.
-            &["resume", "message"],
+            // the create body.
+            &["resume"],
             "sent here but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",
             true,
@@ -651,6 +657,15 @@ fn sdk_surface_matches_the_published_reference() {
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
             false,
+        ),
+        compare(
+            "runtime list filters — GET /v1/runtimes query parameters",
+            wire_fields(&runtime_list),
+            query_parameters(&cp_spec, "/v1/runtimes", "get"),
+            &["project_id"],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
         ),
         compare(
             "recipe list filters — GET /v1/recipes query parameters",

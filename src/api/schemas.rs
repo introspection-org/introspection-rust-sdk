@@ -663,7 +663,8 @@ pub struct Recipe {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct RecipeListParams {
-    pub project: StringOrUuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -762,8 +763,10 @@ pub struct RuntimeListParams {
     pub runtime: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
+    /// Restrict to runtimes serving this environment. An API key already
+    /// selects its environment, so passing both is a 400.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub only_active: Option<bool>,
+    pub environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -958,7 +961,8 @@ pub struct Experiment {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExperimentListParams {
-    pub project: StringOrUuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
     /// Runtime slug or group id.
     ///
     /// A `String` rather than a `Uuid`: the route resolves either form, and
@@ -2062,6 +2066,16 @@ impl MetricsQuery {
             "from_timestamp",
             "to_timestamp",
         )?;
+        // The list reads let the server default an open-ended window, so
+        // `apply_time_window` sets only the start for a `lookback`. Metrics
+        // requires both ends, so a `lookback` on its own would be a 422 —
+        // close the window at now.
+        if self.lookback.is_some() {
+            obj.insert(
+                "to_timestamp".to_string(),
+                rfc3339_utc(SystemTime::now()).into(),
+            );
+        }
         Ok(serde_json::Value::Object(obj))
     }
 }
@@ -2104,6 +2118,34 @@ mod tests {
     fn task_kind_tolerates_unknown_values() {
         let kind: TaskKind = serde_json::from_str("\"brand_new_kind\"").unwrap();
         assert_eq!(kind, TaskKind::Other("brand_new_kind".to_string()));
+    }
+
+    #[test]
+    fn metrics_lookback_closes_the_window_at_now() {
+        // Metrics requires both ends of the window. The list reads let the
+        // server default an open end, so the shared window helper sets only
+        // the start — which made a `lookback` on its own a guaranteed 422.
+        let body = MetricsQuery {
+            view: "observations".into(),
+            metrics: vec![MetricSpec {
+                measure: "conversation_id".into(),
+                aggregation: "count_distinct".into(),
+            }],
+            lookback: Some("24h".into()),
+            dimensions: None,
+            filters: None,
+            time_dimension: None,
+            order_by: None,
+            having: None,
+            config: None,
+            start: None,
+            end: None,
+        }
+        .to_wire()
+        .unwrap();
+
+        assert!(body.get("from_timestamp").is_some());
+        assert!(body.get("to_timestamp").is_some());
     }
 
     #[test]
