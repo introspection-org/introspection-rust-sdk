@@ -123,7 +123,7 @@ pub use api::{
     RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, ShareCreate, ShareListParams,
     ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions,
     StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
+    TaskKind, TaskListParams, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
     TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension,
     TokenCount, TypedEvent, UploadSource,
 };

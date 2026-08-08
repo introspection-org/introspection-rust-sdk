@@ -206,7 +206,7 @@ pub use schemas::{
     RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
     RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent,
     StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskListParams, TaskMode, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
+    TaskKind, TaskListParams, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
     TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, TypedEvent,
 };
 pub use shares::Shares;

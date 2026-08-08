@@ -68,71 +68,55 @@ impl Serialize for StringOrUuid {
 
 // ----- enums -----------------------------------------------------------------
 
-/// Mode of a task — mirrors the DP `TaskMode` enum.
+/// Execution shape of a task — mirrors the DP `TaskKind` enum.
 ///
-/// The `Other` variant captures any new mode added by the DP that the SDK
+/// `Agent` boots the runtime-agent image and runs an interactive LLM agent;
+/// `Process` runs a one-shot baked script and reports through the same
+/// completion path.
+///
+/// This replaced the retired `TaskMode`. There are no task modes any more:
+/// every agent task is a conversation, and the recipe agent is selected with
+/// `TaskCreate::agent_name`.
+///
+/// The `Other` variant captures any new kind added by the DP that the SDK
 /// has not been recompiled against. The string is the raw on-the-wire value.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum TaskMode {
+pub enum TaskKind {
     #[default]
     Agent,
-    Introspect,
-    SystemReview,
-    SystemInstrumentation,
-    ObservationReview,
-    SecurityReview,
-    RepoIndex,
-    SystemDiscovery,
-    Onboarding,
-    Heartbeat,
-    /// Forward-compatible escape hatch for modes the DP adds later.
+    Process,
+    /// Forward-compatible escape hatch for kinds the DP adds later.
     Other(String),
 }
 
-impl TaskMode {
+impl TaskKind {
     /// On-the-wire string form.
     pub fn as_str(&self) -> &str {
         match self {
             Self::Agent => "agent",
-            Self::Introspect => "introspect",
-            Self::SystemReview => "system_review",
-            Self::SystemInstrumentation => "system_instrumentation",
-            Self::ObservationReview => "observation_review",
-            Self::SecurityReview => "security_review",
-            Self::RepoIndex => "repo_index",
-            Self::SystemDiscovery => "system_discovery",
-            Self::Onboarding => "onboarding",
-            Self::Heartbeat => "heartbeat",
+            Self::Process => "process",
             Self::Other(s) => s,
         }
     }
 }
 
-impl From<&str> for TaskMode {
+impl From<&str> for TaskKind {
     fn from(s: &str) -> Self {
         match s {
             "agent" => Self::Agent,
-            "introspect" => Self::Introspect,
-            "system_review" => Self::SystemReview,
-            "system_instrumentation" => Self::SystemInstrumentation,
-            "observation_review" => Self::ObservationReview,
-            "security_review" => Self::SecurityReview,
-            "repo_index" => Self::RepoIndex,
-            "system_discovery" => Self::SystemDiscovery,
-            "onboarding" => Self::Onboarding,
-            "heartbeat" => Self::Heartbeat,
+            "process" => Self::Process,
             other => Self::Other(other.to_string()),
         }
     }
 }
 
-impl Serialize for TaskMode {
+impl Serialize for TaskKind {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(self.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for TaskMode {
+impl<'de> Deserialize<'de> for TaskKind {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         Ok(Self::from(s.as_str()))
@@ -299,7 +283,7 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_index: Option<i64>,
     #[serde(default)]
-    pub mode: TaskMode,
+    pub kind: TaskKind,
     #[serde(default = "default_task_status")]
     pub status: TaskStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -328,19 +312,68 @@ fn default_task_status() -> TaskStatus {
     TaskStatus::Pending
 }
 
+/// A reference to an already-uploaded file, attached to a task or a turn.
+///
+/// Bytes go through `POST /v1/files` first; a task only ever carries the
+/// reference. `name` is the workspace-relative path to mount at — omit it and
+/// the file is mounted under its own name. It must be relative and must not
+/// traverse outside the task's files directory.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TaskFileRef {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
+/// One `repositories[]` entry: a repository plus the state to clone it at.
+///
+/// The recipe's `runtime.github.repositories` grant decides what a runtime
+/// MAY clone; this decides what a task DOES clone, and at what ref. An entry
+/// outside the grant is dropped by the server, never a launch failure.
+///
+/// `repo` is a registered `owner/name` slug. Leave `git_ref` and `depth`
+/// unset to take the repository's default branch and a shallow clone — both
+/// defaults belong to the platform, so the SDK does not restate them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TaskRepoRequest {
+    pub repo: String,
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
+}
+
 /// POST /v1/tasks body. All fields optional — the DP fills in defaults.
+///
+/// Note there is no `runtime_id`: this client is runner-bound, and a runner
+/// credential's JWT claim is authoritative for runtime selection, so the
+/// field is only meaningful to browser/session callers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TaskCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    /// Recipe agent to run; `None` uses the recipe default (`agents/agent.yaml`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<TaskMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_id: Option<String>,
+    pub agent_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository_id: Option<String>,
+    /// Workspace repositories to clone into `workspace/repos/`, at most 10.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repositories: Option<Vec<TaskRepoRequest>>,
+    /// Files to attach before the first turn, by id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<TaskFileRef>>,
+    /// Seconds the sandbox stays warm between turns before teardown. `0` tears
+    /// it down as soon as it is provisioned; `None` uses the deployment default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_seconds: Option<u32>,
+    /// Fork from a shared conversation: the `/v1/shares` grant id for the source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_share_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -367,8 +400,6 @@ pub struct TaskListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub modes: Option<Vec<TaskMode>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub require_automation_id: Option<bool>,
 }
 
@@ -387,6 +418,14 @@ pub struct TaskRunCreate {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<TaskRunKind>,
+    /// Files to attach to this turn — the way to add one mid-conversation.
+    ///
+    /// The workspace is built when the sandbox starts, so a file attached on a
+    /// later turn is materialized into the running sandbox before that turn
+    /// runs, and joins the task's set so a restart replays it. Not accepted
+    /// alongside a resume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<TaskFileRef>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -2159,16 +2198,63 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn task_mode_round_trips_known_variants() {
-        let mode: TaskMode = serde_json::from_str("\"agent\"").unwrap();
-        assert_eq!(mode, TaskMode::Agent);
-        assert_eq!(serde_json::to_string(&mode).unwrap(), "\"agent\"");
+    fn task_kind_round_trips_known_variants() {
+        for (wire, kind) in [("agent", TaskKind::Agent), ("process", TaskKind::Process)] {
+            let parsed: TaskKind = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
+            assert_eq!(parsed, kind);
+            assert_eq!(
+                serde_json::to_string(&parsed).unwrap(),
+                format!("\"{wire}\"")
+            );
+        }
     }
 
     #[test]
-    fn task_mode_tolerates_unknown_values() {
-        let mode: TaskMode = serde_json::from_str("\"brand_new_mode\"").unwrap();
-        assert_eq!(mode, TaskMode::Other("brand_new_mode".to_string()));
+    fn task_kind_tolerates_unknown_values() {
+        let kind: TaskKind = serde_json::from_str("\"brand_new_kind\"").unwrap();
+        assert_eq!(kind, TaskKind::Other("brand_new_kind".to_string()));
+    }
+
+    #[test]
+    fn task_create_omits_the_fields_the_caller_left_unset() {
+        // `TaskCreate` is `extra="forbid"` server-side, so a field the caller
+        // did not ask for must not appear at all — a null is a 422, and `ref` /
+        // `depth` defaults belong to the platform, not to this struct.
+        let body = serde_json::to_value(TaskCreate {
+            prompt: Some("hello".into()),
+            repositories: Some(vec![TaskRepoRequest {
+                repo: "acme/api-service".into(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            body,
+            json!({"prompt": "hello", "repositories": [{"repo": "acme/api-service"}]})
+        );
+    }
+
+    #[test]
+    fn task_create_serialises_the_repository_ref_under_its_wire_name() {
+        // The field is `ref` on the wire and `git_ref` in Rust, because `ref`
+        // is a keyword. A rename that silently stopped applying would send an
+        // entry the server clones at the default branch instead.
+        let body = serde_json::to_value(TaskCreate {
+            repositories: Some(vec![TaskRepoRequest {
+                repo: "acme/api-service".into(),
+                git_ref: Some("main".into()),
+                depth: Some(0),
+            }]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            body["repositories"][0],
+            json!({"repo": "acme/api-service", "ref": "main", "depth": 0})
+        );
     }
 
     #[test]

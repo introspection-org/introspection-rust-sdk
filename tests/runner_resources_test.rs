@@ -16,7 +16,7 @@ use introspection_sdk::api::{
     FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
     IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
     PaginationParams, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType, Shares,
-    SortDirection, TaskCreate, TaskListParams, TaskMode, TaskRunCreate, TaskRunResume, TaskRuns,
+    SortDirection, TaskCreate, TaskKind, TaskListParams, TaskRunCreate, TaskRunResume, TaskRuns,
     TaskStatus, TaskUpdate, Tasks,
 };
 use introspection_sdk::AgUiEvent;
@@ -92,9 +92,10 @@ async fn tasks_create_returns_task_and_run() {
 
     Mock::given(method("POST"))
         .and(path("/v1/tasks"))
+        // The create body carries only what the caller set. `kind` is a field
+        // of the task the server returns, never one the client sends.
         .and(body_json(json!({
             "prompt": "hi",
-            "mode": "agent",
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "task": {
@@ -103,7 +104,7 @@ async fn tasks_create_returns_task_and_run() {
                 "project_id": "00000000-0000-0000-0000-00000000bbbb",
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
-                "mode": "agent",
+                "kind": "agent",
                 "status": "awaiting_user",
                 "is_archived": false,
                 "identity_key": "user:customer-1",
@@ -120,14 +121,13 @@ async fn tasks_create_returns_task_and_run() {
     let handle = tasks
         .start(&TaskCreate {
             prompt: Some("hi".into()),
-            mode: Some(TaskMode::Agent),
             ..Default::default()
         })
         .await
         .unwrap();
     assert_eq!(handle.run.id, "run_001");
     let task = handle.task.unwrap();
-    assert_eq!(task.mode, TaskMode::Agent);
+    assert_eq!(task.kind, TaskKind::Agent);
     assert_eq!(task.status, TaskStatus::AwaitingUser);
     assert_eq!(task.identity_key.as_deref(), Some("user:customer-1"));
 }
@@ -147,7 +147,7 @@ async fn tasks_update_patches_title() {
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z",
             "title": "renamed",
-            "mode": "agent",
+            "kind": "agent",
             "status": "running",
             "is_archived": false,
         })))
@@ -1194,7 +1194,7 @@ fn task_response(status: &str) -> serde_json::Value {
         "project_id": "00000000-0000-0000-0000-00000000bbbb",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
-        "mode": "agent",
+        "kind": "agent",
         "status": status,
         "is_archived": false,
     })
