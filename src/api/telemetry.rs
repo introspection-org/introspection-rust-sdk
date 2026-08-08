@@ -37,9 +37,9 @@ const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
 
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::ApiResult;
+use crate::api::genai_span::GenAiSpan;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::genai_span::GenAiSpan;
 use crate::api::schemas::{
     Conversation, ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
     ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse, Trajectory,
