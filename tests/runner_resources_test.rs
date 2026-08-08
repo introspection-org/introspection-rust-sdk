@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
-    ConversationListParams, Conversations, Event, EventListParams, Events, FileCreateText,
-    FileListParams, FileUpdate, FileUpload, FileVersions, Files, HttpClient, HttpConfig,
-    IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics, MetricsQuery,
-    PaginationParams, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType, Shares,
-    SortDirection, TaskCreate, TaskListParams, TaskMode, TaskRunCreate, TaskRunResume, TaskRuns,
-    TaskStatus, TaskUpdate, Tasks,
+    ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,
+    ConversationItemListParams, ConversationListParams, Conversations, Event, EventListParams,
+    Events, FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersions, Files,
+    HttpClient, HttpConfig, IntrospectionAPIError, IntrospectionEventName, MetricSpec, Metrics,
+    MetricsQuery, PaginationParams, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType,
+    Shares, SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt, TaskRunCreate,
+    TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -92,9 +92,10 @@ async fn tasks_create_returns_task_and_run() {
 
     Mock::given(method("POST"))
         .and(path("/v1/tasks"))
+        // The create body carries only what the caller set. `kind` is a field
+        // of the task the server returns, never one the client sends.
         .and(body_json(json!({
             "prompt": "hi",
-            "mode": "agent",
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "task": {
@@ -103,7 +104,7 @@ async fn tasks_create_returns_task_and_run() {
                 "project_id": "00000000-0000-0000-0000-00000000bbbb",
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
-                "mode": "agent",
+                "kind": "agent",
                 "status": "awaiting_user",
                 "is_archived": false,
                 "identity_key": "user:customer-1",
@@ -120,14 +121,13 @@ async fn tasks_create_returns_task_and_run() {
     let handle = tasks
         .start(&TaskCreate {
             prompt: Some("hi".into()),
-            mode: Some(TaskMode::Agent),
             ..Default::default()
         })
         .await
         .unwrap();
     assert_eq!(handle.run.id, "run_001");
     let task = handle.task.unwrap();
-    assert_eq!(task.mode, TaskMode::Agent);
+    assert_eq!(task.kind, TaskKind::Agent);
     assert_eq!(task.status, TaskStatus::AwaitingUser);
     assert_eq!(task.identity_key.as_deref(), Some("user:customer-1"));
 }
@@ -147,7 +147,7 @@ async fn tasks_update_patches_title() {
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-01T00:00:00Z",
             "title": "renamed",
-            "mode": "agent",
+            "kind": "agent",
             "status": "running",
             "is_archived": false,
         })))
@@ -279,7 +279,10 @@ async fn task_runs_create_then_cancel() {
         .create(
             "abc",
             &TaskRunCreate {
-                message: Some("go".into()),
+                prompt: Some(TaskPrompt {
+                    text: "go".into(),
+                    images: None,
+                }),
                 ..Default::default()
             },
         )
@@ -1194,7 +1197,7 @@ fn task_response(status: &str) -> serde_json::Value {
         "project_id": "00000000-0000-0000-0000-00000000bbbb",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
-        "mode": "agent",
+        "kind": "agent",
         "status": status,
         "is_archived": false,
     })
@@ -1298,4 +1301,150 @@ async fn write_does_not_retry_on_503() {
     ));
     // Exactly one attempt — no retry for a write.
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+// --- events.get -------------------------------------------------------------
+
+#[tokio::test]
+async fn events_get_reads_one_event_without_an_event_name_param() {
+    let server = MockServer::start().await;
+    let http = build_http(&server);
+
+    Mock::given(method("GET"))
+        .and(path("/v1/events/evt-1"))
+        .and(query_param_is_missing("event_name"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "evt-1",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "event_name": "introspection.feedback",
+            "conversation_id": "conv-1",
+            "payload": {"name": "thumbs_up", "sentiment": "positive"}
+        })))
+        .mount(&server)
+        .await;
+
+    let event = Events::new(http).get("evt-1").await.unwrap();
+    match event {
+        Event::Feedback(e) => assert_eq!(e.id, "evt-1"),
+        other => panic!("expected a feedback event, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn events_get_surfaces_an_unrecognised_family_as_unknown() {
+    // A family added server-side must not be reported as a missing event: the
+    // caller named an id, and that id plainly resolved.
+    let server = MockServer::start().await;
+    let http = build_http(&server);
+
+    Mock::given(method("GET"))
+        .and(path("/v1/events/evt-future"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "evt-future",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "event_name": "introspection.seventh_family",
+            "payload": {"anything": 1}
+        })))
+        .mount(&server)
+        .await;
+
+    let event = Events::new(http).get("evt-future").await.unwrap();
+    assert!(
+        matches!(event, Event::Unknown(_)),
+        "a future family must degrade, not error"
+    );
+}
+
+// --- conversations export ---------------------------------------------------
+
+#[tokio::test]
+async fn conversations_export_trajectory_negotiates_v1_and_types_records() {
+    let server = MockServer::start().await;
+    let http = build_http(&server);
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(wiremock::matchers::header(
+            "accept",
+            "application/vnd.letta.trajectory+json;version=1",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"role": "meta", "source": "claude-code", "model": "opus"},
+            {"role": "user", "content": "fix it", "timestamp": "2025-01-01T00:00:00Z"},
+            {
+                "role": "assistant",
+                "content": null,
+                "timestamp": "2025-01-01T00:00:01Z",
+                "tool_calls": [{"id": "call_1", "name": "edit", "args": "{\"path\":\"a.py\"}"}]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "ok",
+                "timestamp": "2025-01-01T00:00:02Z",
+                "ok": true
+            },
+            {"role": "assistant", "content": "done", "timestamp": "2025-01-01T00:00:03Z"}
+        ])))
+        .mount(&server)
+        .await;
+
+    let records = Conversations::new(http)
+        .export_trajectory("conv-1", &ConversationExportParams::default())
+        .await
+        .unwrap();
+
+    assert_eq!(records.len(), 5);
+    match &records[2] {
+        TrajectoryRecord::Assistant(a) => {
+            // `content: null` is what marks a tool-call record, so it must
+            // survive deserialization rather than collapsing to a default.
+            assert!(a.content.is_none());
+            let calls = a.tool_calls.as_ref().expect("tool calls");
+            assert_eq!(calls[0].name, "edit");
+            // args stays a JSON-encoded string; that is the upstream contract.
+            assert_eq!(calls[0].args, "{\"path\":\"a.py\"}");
+        }
+        other => panic!("expected an assistant tool-call record, got {other:?}"),
+    }
+    match &records[4] {
+        TrajectoryRecord::Assistant(a) => {
+            assert_eq!(a.content.as_deref(), Some("done"));
+            assert!(a.tool_calls.is_none());
+        }
+        other => panic!("expected assistant prose, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn conversations_export_sends_filters_and_no_pagination() {
+    let server = MockServer::start().await;
+    let http = build_http(&server);
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(query_param("agent", "root"))
+        .and(query_param("lookback_days", "7"))
+        // The export is assembled server-side over the whole conversation, so
+        // a cursor or page bound here would be meaningless.
+        .and(query_param_is_missing("limit"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"role": "meta", "source": "claude-code"}
+        ])))
+        .mount(&server)
+        .await;
+
+    let records = Conversations::new(http)
+        .export_trajectory(
+            "conv-1",
+            &ConversationExportParams {
+                agent: Some("root".into()),
+                lookback_days: Some(7),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 1);
 }

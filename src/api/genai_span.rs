@@ -27,9 +27,6 @@
 //!   every optional field is `skip_serializing_if = "Option::is_none"`, every
 //!   collection `skip_serializing_if` empty. A real `0` still serializes: a
 //!   turn that genuinely produced no output tokens is a fact, not an absence.
-//!
-//! See `docs/design/conversations-genai-representation.md` in
-//! `introspection-cloud`.
 
 use std::collections::HashMap;
 

@@ -1,7 +1,7 @@
 //! AG-UI protocol event types.
 //!
 //! These types faithfully mirror the [AG-UI protocol] event taxonomy as
-//! emitted by the Introspection runtime-worker and validated by the JS
+//! emitted by the Introspection platform and validated by the JS
 //! (`@ag-ui/core`) and Python (`ag-ui-protocol`) SDKs. We own the types
 //! rather than depend on a third-party Rust port because the published Rust
 //! crates diverge from the dialect Introspection speaks on the wire — they

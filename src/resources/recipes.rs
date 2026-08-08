@@ -1,8 +1,9 @@
-//! `client.recipes` (CP) — recipe CRUD.
+//! `client.recipes` (CP) — recipe lookup.
 //!
-//! Recipes are pure CRUD: no handle subtype, no `.run()` lifecycle. They
-//! describe a (repository, git_ref, git_commit_sha [, sub_path]) tuple
-//! used by platform-managed runtime versions.
+//! Read-only: a runner resolves the recipe it is running under, it does not
+//! author one. Defining a recipe is a project-authoring act and lives in the
+//! CLI. A recipe describes a (repository, git_ref, git_commit_sha
+//! [, sub_path]) tuple used by platform-managed runtime versions.
 
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use uuid::Uuid;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{Recipe, RecipeCreate, RecipeListParams, RecipeUpdate};
+use crate::api::schemas::{Recipe, RecipeListParams};
 
 /// `client.recipes` namespace. Holds a CP-bound HTTP client.
 #[derive(Clone)]
@@ -37,22 +38,5 @@ impl Recipes {
         struct Q {}
         let path = format!("/v1/recipes/{}", recipe_id);
         self.http.get_json(&path, &Q {}).await
-    }
-
-    /// `POST /v1/recipes`.
-    pub async fn create(&self, body: &RecipeCreate) -> ApiResult<Recipe> {
-        self.http.post_json("/v1/recipes", body).await
-    }
-
-    /// `PATCH /v1/recipes/{id}`.
-    pub async fn update(&self, recipe_id: Uuid, body: &RecipeUpdate) -> ApiResult<Recipe> {
-        let path = format!("/v1/recipes/{}", recipe_id);
-        self.http.patch_json(&path, body).await
-    }
-
-    /// `DELETE /v1/recipes/{id}`.
-    pub async fn delete(&self, recipe_id: Uuid) -> ApiResult<()> {
-        let path = format!("/v1/recipes/{}", recipe_id);
-        self.http.delete_empty(&path).await
     }
 }

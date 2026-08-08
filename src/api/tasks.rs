@@ -13,7 +13,7 @@ use crate::api::paginator::Paginator;
 use crate::api::resumable::{stream_resumable, StreamOptions};
 use crate::api::schemas::{
     Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
-    TaskMode, TaskRun, TaskRunCreate, TaskRunResponse, TaskRunResume, TaskUpdate,
+    TaskRun, TaskRunCreate, TaskRunResponse, TaskRunResume, TaskUpdate,
 };
 
 /// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
@@ -272,7 +272,6 @@ impl Tasks {
     pub async fn start_prompt(&self, prompt: impl Into<String>) -> ApiResult<RunHandle> {
         self.start(&TaskCreate {
             prompt: Some(prompt.into()),
-            mode: Some(TaskMode::Agent),
             ..Default::default()
         })
         .await
