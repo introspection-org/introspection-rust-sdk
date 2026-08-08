@@ -217,6 +217,16 @@ impl Stream for ConversationItemPaginator {
     }
 }
 
+impl ConversationItemListParams {
+    /// The lowered query exactly as it goes on the wire.
+    ///
+    /// Exposed so the contract test compares the parameters actually sent
+    /// rather than the struct's field names, which are not the same thing.
+    pub fn to_wire(&self) -> Vec<(String, String)> {
+        list_query(self)
+    }
+}
+
 fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     let mut query = Vec::new();
     push_opt(&mut query, "limit", params.limit);

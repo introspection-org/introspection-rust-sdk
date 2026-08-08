@@ -39,9 +39,10 @@ use crate::api::conversation_items::ConversationItems;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
+use crate::api::genai_span::GenAiSpan;
 use crate::api::schemas::{
-    Conversation, ConversationExportParams, ConversationListParams, Event, EventListParams,
-    MetricsQuery, MetricsResponse, Trajectory,
+    Conversation, ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
+    ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse, Trajectory,
 };
 
 /// Base media type of a trajectory-v1 conversation export. The `version`
@@ -138,6 +139,62 @@ impl Conversations {
             .get_raw(&path, params, Some(TRAJECTORY_V1_ACCEPT))
             .await?;
         crate::api::http::decode_json(res).await
+    }
+
+    /// Load the state of a conversation as of one item.
+    ///
+    /// Returns the span itself: the items read already carries the full input
+    /// history, system instructions, and tool definitions, so composing a
+    /// second type from it would just be copying fields into different names.
+    ///
+    /// When `item_id` is `None` the latest LLM turn is used — the first item
+    /// (the route is descending-only) whose `gen_ai.operation.name` is
+    /// `"chat"`, falling back to the first item that produced any output.
+    /// Returns `Ok(None)` when the conversation has no items.
+    ///
+    /// For the full per-turn transcript instead, walk
+    /// [`ConversationItems::list`], which is newest-first.
+    pub async fn retrieve(
+        &self,
+        conversation_id: &str,
+        item_id: Option<&str>,
+    ) -> ApiResult<Option<GenAiSpan>> {
+        let target_id = match item_id {
+            Some(id) => Some(id.to_string()),
+            None => self.find_latest_turn_id(conversation_id).await?,
+        };
+        let Some(target_id) = target_id else {
+            return Ok(None);
+        };
+        let span = self
+            .items
+            .get(
+                conversation_id,
+                &target_id,
+                &ConversationItemGetParams::default(),
+            )
+            .await?;
+        Ok(Some(span))
+    }
+
+    /// Scan items for the most recent LLM turn. The route sorts descending
+    /// and rejects a cursor that disagrees, so the first match is the latest.
+    async fn find_latest_turn_id(&self, conversation_id: &str) -> ApiResult<Option<String>> {
+        let mut pages = self
+            .items
+            .list(conversation_id, &ConversationItemListParams::default())?;
+        let mut fallback: Option<String> = None;
+        while let Some(page) = pages.next_page().await? {
+            for item in page.data {
+                if item.operation_name() == Some("chat") {
+                    return Ok(item.span_id);
+                }
+                if fallback.is_none() && !item.output_messages().is_empty() {
+                    fallback = item.span_id.clone();
+                }
+            }
+        }
+        Ok(fallback)
     }
 
     /// `GET /v1/conversations/{id}/export` as a single Arrow page.

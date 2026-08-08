@@ -47,7 +47,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
-    AgentInfo, ConversationExportParams, ConversationListParams, Dimension, Event, EventListParams,
+    AgentInfo, ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
+    ConversationListParams,
+    Dimension, Event, EventListParams,
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
     FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec,
     MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, ResourceShare,
@@ -396,6 +398,19 @@ fn sdk_surface_matches_the_published_reference() {
         end_date: Some("2026-01-02T00:00:00Z".into()),
     };
 
+    let conversation_item_list = ConversationItemListParams {
+        limit: Some(1),
+        next: Some("cursor".into()),
+        include: vec![ConversationItemInclude::Events],
+        agent: Some("root".into()),
+        service_name: Some("svc".into()),
+        operation_name: Some("op".into()),
+        lookback_days: Some(7),
+        share_id: Some(Uuid::nil()),
+        start_date: Some("2026-01-01T00:00:00Z".into()),
+        end_date: Some("2026-01-02T00:00:00Z".into()),
+    };
+
     let conversation_list = ConversationListParams {
         limit: Some(1),
         next: Some("cursor".into()),
@@ -651,6 +666,22 @@ fn sdk_surface_matches_the_published_reference() {
             "conversation export filters — GET /v1/conversations/{id}/export query parameters",
             wire_fields(&conversation_export),
             query_parameters(&spec, "/v1/conversations/{conversation_id}/export", "get"),
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
+        ),
+        // The items route is where the ordering bug hid in the other two SDKs:
+        // they declared an `order` the route never accepted and omitted the
+        // window/share params it did. A sub-resource is still a route.
+        compare(
+            "conversation item list filters — GET /v1/conversations/{id}/items query parameters",
+            conversation_item_list
+                .to_wire()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<BTreeSet<String>>(),
+            query_parameters(&spec, "/v1/conversations/{conversation_id}/items", "get"),
             &[],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
