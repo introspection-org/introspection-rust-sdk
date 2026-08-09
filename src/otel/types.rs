@@ -245,6 +245,16 @@ impl PropertyValue {
         }
     }
 
+    /// Whether this value carries nothing.
+    ///
+    /// Only `Json(Null)` can: the other variants always hold a value. A null
+    /// property is dropped rather than emitted, so a key the caller left
+    /// empty is absent on the wire instead of arriving as the string
+    /// `"null"`.
+    pub fn is_null(&self) -> bool {
+        matches!(self, PropertyValue::Json(serde_json::Value::Null))
+    }
+
     /// Convert to the OTLP value the backend expects on the wire.
     ///
     /// Stringifying everything meant `with_property("rating", 5)` shipped

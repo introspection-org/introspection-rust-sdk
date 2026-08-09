@@ -371,21 +371,21 @@ impl IntrospectionLogs {
             attributes.push((Key::new(types::attr::AGENT_ID), id.into()));
         }
 
-        if let Some(props) = properties {
-            for (key, value) in props {
-                attributes.push((
-                    Key::new(format!("{}{}", types::attr::PROPERTIES_PREFIX, key)),
-                    value.to_otel_value(),
-                ));
-            }
-        }
-
-        if let Some(t) = traits {
-            for (key, value) in t {
-                attributes.push((
-                    Key::new(format!("{}{}", types::attr::TRAITS_PREFIX, key)),
-                    value.to_otel_value(),
-                ));
+        // A null value is an absent value: the key is omitted rather than
+        // shipped as the string "null". `PropertyValue::Json` is reachable
+        // with `serde_json::Value::Null` inside it, and stringifying that
+        // produced a `properties.x = "null"` attribute that reads as the
+        // four-character string on the way back out.
+        for (prefix, source) in [
+            (types::attr::PROPERTIES_PREFIX, properties),
+            (types::attr::TRAITS_PREFIX, traits),
+        ] {
+            let Some(map) = source else { continue };
+            for (key, value) in map {
+                if value.is_null() {
+                    continue;
+                }
+                attributes.push((Key::new(format!("{prefix}{key}")), value.to_otel_value()));
             }
         }
 
@@ -766,6 +766,52 @@ mod tests {
         assert!(
             records[0][&format!("{}button_id", types::attr::PROPERTIES_PREFIX)].contains("submit")
         );
+    }
+
+    /// A null property is absent, not the four-character string `"null"`.
+    ///
+    /// `PropertyValue::Json` accepts `serde_json::Value::Null`, and
+    /// stringifying it put `properties.note = "null"` on the wire — a value a
+    /// consumer reads back as text, indistinguishable from a caller who meant
+    /// the word. Null traits are dropped the same way.
+    #[test]
+    fn a_null_property_is_omitted_rather_than_stringified() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.track(
+            "Button Clicked",
+            Some(
+                TrackOptions::new()
+                    .with_property("note", serde_json::Value::Null)
+                    .with_property("kept", "yes"),
+            ),
+        );
+        logs.identify(
+            "user_42",
+            Some(
+                IdentifyOptions::new()
+                    .with_trait("plan", serde_json::Value::Null)
+                    .with_trait("email", "a@b.c"),
+            ),
+        );
+
+        let records = emitted(&exporter);
+        let props = format!("{}note", types::attr::PROPERTIES_PREFIX);
+        let kept = format!("{}kept", types::attr::PROPERTIES_PREFIX);
+        assert!(
+            !records[0].contains_key(&props),
+            "null property was emitted"
+        );
+        assert!(
+            records[0].contains_key(&kept),
+            "sibling property was dropped"
+        );
+
+        let plan = format!("{}plan", types::attr::TRAITS_PREFIX);
+        let email = format!("{}email", types::attr::TRAITS_PREFIX);
+        assert!(!records[1].contains_key(&plan), "null trait was emitted");
+        assert!(records[1].contains_key(&email), "sibling trait was dropped");
     }
 
     #[test]
