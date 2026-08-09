@@ -284,10 +284,17 @@ it's pure exponential — the retry happens either way):
 - **`502` / `503` / `504`** — retried for **GET only** (idempotent reads), since
   re-sending a non-idempotent write on a transient gateway error isn't safe.
 
+`Retry-After` is understood in both RFC 9110 forms — delta-seconds and an
+HTTP-date.
+
 Retries are bounded (`HttpConfig::max_retries`, default 2); once the budget is
 spent the status surfaces as a normal `IntrospectionAPIError::Http { status, .. }`
-so the caller can inspect it and back off further. Streaming has its own resume
-budget (above); multipart uploads are not auto-retried.
+so the caller can inspect it and back off further. The error carries what the
+response said: `status()`, `code()` (the DP's machine-readable code — a `401`
+with `runner_expired` means refresh the runner, not rotate the key),
+`request_id()`, `body()`, and `retry_after()` for scheduling your own retry
+with the server's number. Streaming has its own resume budget (above);
+multipart uploads are not auto-retried.
 
 ### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)
 
@@ -333,6 +340,16 @@ Available baggage guards: `set_user_id`, `set_anonymous_id`,
 `set_conversation_id`, `set_previous_response_id`, `set_agent`,
 `set_baggage`. Each returns an RAII guard that clears the value when
 dropped.
+
+When you are starting a conversation rather than continuing one, take
+the id from `conversation`, which mints one in the same
+`intro_conv_<hex>` shape the rest of the platform uses:
+
+```rust,no_run
+let (conversation_id, _scope) = logs.conversation(None);
+logs.track("Turn Completed", None);
+// `conversation_id` is what to record feedback against later.
+```
 
 ### 3. `IntrospectionSpanProcessor` — Traces
 
