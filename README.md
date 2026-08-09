@@ -145,26 +145,24 @@ project-scoped token for a federated `customer` member, and
 `auth::authorization_code_token` (RFC 6749 / PKCE) completes a hosted-login
 callback. No refresh token is issued: re-mint once `expires_in` lapses.
 
-#### Conversations are GenAI spans
+#### Conversation items are GenAI spans
 
-Every conversation read — the summary list and the item list/detail — returns
-the same object: `GenAiSpan`, an OpenTelemetry span with identity and timing at
-the top level and everything else under `attributes`, keyed by its
-[GenAI semantic-convention][semconv] name. `gen_ai.request.model` is reached as
-`gen_ai.request.model` because that is what the SDK wrote when it created the
-span — there is no private dialect of renamed columns to learn.
+A conversation read comes in two shapes. The **summary** list returns
+`Conversation`: an envelope with the id, timings, and the conversation-level
+`usage`, `cost`, and `metrics` rollups. Every **item** read — the item list and
+the single-item detail — returns `GenAiSpan`, an OpenTelemetry span with
+identity and timing at the top level and everything else under `attributes`,
+keyed by its [GenAI semantic-convention][semconv] name. `gen_ai.request.model`
+is reached as `gen_ai.request.model` because that is what the SDK wrote when it
+created the span — there is no private dialect of renamed columns to learn.
 
-Two properties are worth knowing before you write against it:
+Two properties of the span tree are worth knowing before you write against it:
 
 - **The tree is open.** Every attribute node carries an `extra` map, so an
   attribute this SDK release never heard of still arrives and still round-trips.
   The server returns the tree as stored, not as an allow-list.
 - **Absent means absent.** Nothing serializes as `null` — a value that is not
   present is a key that is not there. A real `0` is still a `0`.
-
-A summary is the same envelope carrying the latest turn only, with conversation
-rollups under `gen_ai.usage.*` (token totals) and `introspection.conversation.*`
-(counts with no semantic-convention name). One parser for both reads.
 
 ```rust
 use introspection_sdk::ConversationListParams;
@@ -173,7 +171,7 @@ let conversations = runner.conversations();
 let mut pages = conversations.list(&ConversationListParams::default())?;
 let page = pages.next_page().await?.unwrap();
 for summary in &page.records {
-    println!("{:?} {:?}", summary.conversation_id(), summary.request_model());
+    println!("{} {} tokens", summary.id, summary.usage.total_tokens);
 }
 ```
 
