@@ -51,6 +51,10 @@ where
 {
     async_stream::stream! {
         let mut buf = String::new();
+        // Bytes received that did not form a complete codepoint. A chunk
+        // boundary lands wherever TCP put it, so any multi-byte character --
+        // an emoji, an accent, any CJK text -- can straddle two chunks.
+        let mut pending: Vec<u8> = Vec::new();
         let mut cur = SseEvent::empty();
         let mut has_content = false;
         let mut stream = Box::pin(stream);
@@ -63,16 +67,32 @@ where
                     return;
                 }
             };
-            // SSE is required to be UTF-8.
-            match std::str::from_utf8(&bytes) {
-                Ok(s) => buf.push_str(s),
-                Err(_) => {
-                    yield Err(IntrospectionAPIError::Decode(
-                        "SSE stream emitted non-UTF-8 bytes".to_string(),
-                    ));
-                    return;
+            // SSE is required to be UTF-8, but only the *stream* is; an
+            // individual chunk can end mid-character. Decode as far as the
+            // last complete codepoint and carry the remainder forward.
+            pending.extend_from_slice(&bytes);
+            let decoded_upto = match std::str::from_utf8(&pending) {
+                Ok(s) => {
+                    buf.push_str(s);
+                    pending.len()
                 }
-            }
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    // `error_len() == None` means the bytes after `valid_up_to`
+                    // are a truncated-but-legal prefix: more of the character
+                    // is still in flight. Anything else is genuinely invalid.
+                    if e.error_len().is_some() {
+                        yield Err(IntrospectionAPIError::Decode(
+                            "SSE stream emitted non-UTF-8 bytes".to_string(),
+                        ));
+                        return;
+                    }
+                    // Safe: `valid_up_to` is the length of the valid prefix.
+                    buf.push_str(std::str::from_utf8(&pending[..valid]).expect("valid prefix"));
+                    valid
+                }
+            };
+            pending.drain(..decoded_upto);
 
             while let Some(nl) = buf.find('\n') {
                 let mut line = buf[..nl].to_string();
@@ -200,6 +220,53 @@ mod tests {
                 }
                 out
             })
+    }
+
+    /// Parse a stream that has been chopped into the given byte-sized chunks,
+    /// the way TCP actually delivers one.
+    fn parse_chunks(chunks: Vec<Vec<u8>>) -> Vec<ApiResult<SseEvent>> {
+        let chunks: Vec<Result<Bytes, reqwest::Error>> =
+            chunks.into_iter().map(|c| Ok(Bytes::from(c))).collect();
+        let s = stream::iter(chunks);
+        let parsed = parse_sse_bytes(s);
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let mut out = Vec::new();
+                tokio::pin!(parsed);
+                while let Some(ev) = parsed.next().await {
+                    out.push(ev);
+                }
+                out
+            })
+    }
+
+    #[test]
+    fn survives_a_codepoint_split_across_chunks() {
+        // "data: caf\u{e9} \u{1f389}\n\n" cut mid-character twice: once inside the
+        // two-byte e-acute, once inside the four-byte emoji.
+        let full = "data: caf\u{e9} \u{1f389}\n\n".as_bytes().to_vec();
+        let e_acute_mid = full.iter().position(|b| *b == 0xC3).unwrap() + 1;
+        let emoji_mid = full.iter().position(|b| *b == 0xF0).unwrap() + 2;
+        let events = parse_chunks(vec![
+            full[..e_acute_mid].to_vec(),
+            full[e_acute_mid..emoji_mid].to_vec(),
+            full[emoji_mid..].to_vec(),
+        ]);
+        let events: Vec<_> = events.into_iter().map(|e| e.unwrap()).collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "caf\u{e9} \u{1f389}");
+    }
+
+    #[test]
+    fn still_rejects_genuinely_invalid_utf8() {
+        // 0xFF can never begin a UTF-8 sequence, so this is not a truncation.
+        let events = parse_chunks(vec![b"data: ".to_vec(), vec![0xFF], b"\n\n".to_vec()]);
+        assert!(matches!(
+            events.first(),
+            Some(Err(IntrospectionAPIError::Decode(_)))
+        ));
     }
 
     #[test]

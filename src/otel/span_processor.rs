@@ -207,7 +207,7 @@ enum InnerProcessor {
 #[derive(Debug)]
 pub struct IntrospectionSpanProcessor {
     inner: InnerProcessor,
-    service_name: String,
+    service_name: Option<String>,
     /// Conversation id minted per trace, for spans that arrive without one.
     /// Bounded: see [`MAX_TRACKED_TRACES`].
     trace_conversations: Mutex<(HashMap<TraceId, String>, VecDeque<TraceId>)>,
@@ -275,10 +275,15 @@ impl IntrospectionSpanProcessor {
             None => return Err(SpanProcessorError::TokenRequired),
         };
 
+        // Stays `None` when the caller did not ask for one. Defaulting here
+        // and then applying it in `set_resource` would rewrite the
+        // `service.name` of a provider the caller had already labelled: a
+        // process that built its provider as "checkout-api" would see every
+        // LLM span arrive at Introspection as "introspection-client". Python
+        // and JS both only merge when the option is set.
         let service_name = config
             .service_name
-            .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
-            .unwrap_or_else(|| crate::types::defaults::SERVICE_NAME.to_string());
+            .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok());
 
         // Building a stand-in here instead of using the caller's exporter
         // would silently discard it and export to the stand-in's endpoint.
@@ -307,7 +312,8 @@ impl IntrospectionSpanProcessor {
 
                 info!(
                     "IntrospectionSpanProcessor initialized: service={}, endpoint={}",
-                    service_name, endpoint
+                    service_name.as_deref().unwrap_or("<provider default>"),
+                    endpoint
                 );
 
                 let mut headers = HashMap::new();
@@ -367,6 +373,26 @@ impl IntrospectionSpanProcessor {
             service_name,
             trace_conversations: Mutex::new((HashMap::new(), VecDeque::new())),
         })
+    }
+
+    /// The resource the inner processor should use, given the provider's.
+    ///
+    /// `service_name` is a documented constructor argument, and the provider's
+    /// resource is the only place it can land -- SpanData carries no resource
+    /// of its own. It is applied only when the caller set it: an unset option
+    /// must leave a provider the caller already labelled alone.
+    fn resource_for(&self, provider: &opentelemetry_sdk::Resource) -> opentelemetry_sdk::Resource {
+        let Some(name) = &self.service_name else {
+            return provider.clone();
+        };
+        let mut builder = opentelemetry_sdk::Resource::builder().with_service_name(name.clone());
+        for kv in provider.iter() {
+            if kv.0.as_str() != "service.name" {
+                builder = builder
+                    .with_attribute(opentelemetry::KeyValue::new(kv.0.clone(), kv.1.clone()));
+            }
+        }
+        builder.build()
     }
 
     /// The conversation id minted for `trace_id`, creating one on first sight.
@@ -455,22 +481,7 @@ impl IntrospectionSpanProcessor {
 
 impl OtelSpanProcessor for IntrospectionSpanProcessor {
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        // `service_name` is a documented constructor argument. The provider's
-        // resource is the only place it can land -- SpanData carries no
-        // resource of its own -- and without this the option was inert.
-        let resource = if self.service_name.is_empty() {
-            resource.clone()
-        } else {
-            let mut builder =
-                opentelemetry_sdk::Resource::builder().with_service_name(self.service_name.clone());
-            for kv in resource.iter() {
-                if kv.0.as_str() != "service.name" {
-                    builder = builder
-                        .with_attribute(opentelemetry::KeyValue::new(kv.0.clone(), kv.1.clone()));
-                }
-            }
-            builder.build()
-        };
+        let resource = self.resource_for(resource);
         match &mut self.inner {
             InnerProcessor::Batch(p) => p.set_resource(&resource),
             InnerProcessor::Simple(p) => p.set_resource(&resource),
@@ -780,6 +791,56 @@ mod tests {
                 .build(),
         )
         .unwrap()
+    }
+
+    /// Build a processor with the given `service_name` and a nowhere exporter.
+    fn processor_named(service_name: Option<&str>) -> IntrospectionSpanProcessor {
+        let mut config = SpanProcessorConfig::builder().advanced(SpanProcessorAdvancedOptions {
+            span_exporter: Some(Arc::new(
+                SpanExporter::builder()
+                    .with_http()
+                    .with_endpoint("http://localhost:19876/v1/traces")
+                    .build()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+        if let Some(name) = service_name {
+            config = config.service_name(name);
+        } else {
+            // The constructor also reads this, and a set value would make the
+            // unset case indistinguishable.
+            unsafe { env::remove_var("INTROSPECTION_SERVICE_NAME") };
+        }
+        IntrospectionSpanProcessor::new(config.token("t").build()).unwrap()
+    }
+
+    fn service_name_of(resource: &opentelemetry_sdk::Resource) -> Option<String> {
+        resource
+            .iter()
+            .find(|kv| kv.0.as_str() == "service.name")
+            .map(|kv| kv.1.to_string())
+    }
+
+    #[test]
+    fn test_an_unset_service_name_leaves_the_providers_resource_alone() {
+        let caller = opentelemetry_sdk::Resource::builder()
+            .with_service_name("checkout-api")
+            .with_attribute(KeyValue::new("deployment.environment", "prod"))
+            .build();
+
+        // Unset: rewriting the label the caller chose would land every LLM
+        // span at Introspection under the SDK's own default name.
+        let unset = processor_named(None).resource_for(&caller);
+        assert_eq!(service_name_of(&unset).as_deref(), Some("checkout-api"));
+
+        // Set: the documented option still wins, and the caller's other
+        // resource attributes survive.
+        let named = processor_named(Some("explicit")).resource_for(&caller);
+        assert_eq!(service_name_of(&named).as_deref(), Some("explicit"));
+        assert!(named
+            .iter()
+            .any(|kv| kv.0.as_str() == "deployment.environment"));
     }
 
     #[test]

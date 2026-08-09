@@ -87,9 +87,16 @@ impl HttpClient {
             ));
         }
         let headers = cfg.build_default_headers()?;
+        // `read_timeout`, not `timeout`. The latter is a total deadline that
+        // runs "until the response body has finished", which for an SSE run
+        // or a chunked download means the connection is severed once the
+        // configured window elapses no matter how healthy the stream is. A
+        // read timeout resets on every successful read, so it still catches a
+        // stalled connection. Unary calls re-apply the total deadline
+        // per-request in `send_retrying` / `post_multipart`.
         let inner = reqwest::Client::builder()
             .default_headers(headers)
-            .timeout(cfg.timeout)
+            .read_timeout(cfg.timeout)
             .build()?;
         Ok(Self {
             inner,
@@ -139,7 +146,7 @@ impl HttpClient {
     {
         let mut attempt: u32 = 0;
         loop {
-            let res = build().send().await?;
+            let res = build().timeout(self.cfg.timeout).send().await?;
             let retryable = is_retryable_status(res.status(), idempotent);
             if retryable && attempt < self.cfg.max_retries {
                 let delay = backoff_delay(
@@ -219,6 +226,7 @@ impl HttpClient {
             .inner
             .post(self.url(path))
             .multipart(form)
+            .timeout(self.cfg.timeout)
             .send()
             .await?;
         decode_json(expect_ok(res).await?).await
