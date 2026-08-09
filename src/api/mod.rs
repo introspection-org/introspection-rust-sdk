@@ -213,4 +213,4 @@ pub use schemas::{
 pub use shares::Shares;
 pub use sse::{parse_agui_response, parse_sse_response};
 pub use tasks::{RunHandle, TaskRuns, Tasks};
-pub use telemetry::{Conversations, Events, Metrics};
+pub use telemetry::{ConversationExportFormat, Conversations, Events, Metrics};
