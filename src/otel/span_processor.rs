@@ -110,12 +110,21 @@ pub struct SpanProcessorAdvancedOptions {
     /// ceiling. Ignored when `max_batch_size == Some(1)`, which
     /// selects the unqueued `SimpleSpanProcessor`.
     ///
-    /// There is deliberately no `export_timeout_ms` beside it:
-    /// `opentelemetry_sdk` 0.32 puts
-    /// `with_max_export_timeout` behind an experimental feature, so the knob
-    /// could be accepted here but not applied. Set `OTEL_BSP_EXPORT_TIMEOUT`
-    /// instead — the SDK reads it.
     pub max_queue_size: Option<usize>,
+
+    /// Deadline for one OTLP export, in milliseconds. `None` uses
+    /// [`crate::otel::types::defaults::EXPORT_TIMEOUT_MS`] (30000).
+    ///
+    /// Applied to the exporter's HTTP request, which is the only place a
+    /// per-export deadline takes effect. `BatchConfig::max_export_timeout` is
+    /// dead code in `opentelemetry_sdk` 0.32 unless the experimental
+    /// async-runtime processor is enabled — it is populated from
+    /// `OTEL_BSP_EXPORT_TIMEOUT` and then never read — so this option, not
+    /// that env var, is what bounds an export.
+    ///
+    /// Ignored when a caller supplies their own `span_exporter`, which
+    /// carries its own transport and deadline.
+    pub export_timeout_ms: Option<u64>,
 }
 
 /// Configuration for the Introspection span processor.
@@ -350,14 +359,19 @@ impl IntrospectionSpanProcessor {
                     headers.extend(additional);
                 }
 
-                let http_client = new_blocking_http_client(Duration::from_secs(30));
+                let export_timeout = Duration::from_millis(
+                    advanced
+                        .export_timeout_ms
+                        .unwrap_or(types::defaults::EXPORT_TIMEOUT_MS),
+                );
+                let http_client = new_blocking_http_client(export_timeout);
 
                 SpanExporter::builder()
                     .with_http()
                     .with_http_client(http_client)
                     .with_endpoint(&endpoint)
                     .with_headers(headers)
-                    .with_timeout(Duration::from_secs(30))
+                    .with_timeout(export_timeout)
                     .build()
                     .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?
             };
@@ -599,6 +613,7 @@ mod tests {
                 flush_interval_ms: None,
                 max_batch_size: None,
                 max_queue_size: None,
+                export_timeout_ms: None,
             }),
         )
         .unwrap();

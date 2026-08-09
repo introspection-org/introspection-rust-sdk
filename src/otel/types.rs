@@ -367,6 +367,15 @@ pub mod defaults {
     /// Default OTLP collector base URL.
     pub const BASE_OTEL_URL: &str = "https://otel.introspection.dev";
     pub const FLUSH_INTERVAL_MS: u64 = 5000;
+    /// Default deadline for one OTLP export, in milliseconds.
+    ///
+    /// Matches the OpenTelemetry default. This bounds the HTTP request the
+    /// exporter makes, which is the only place a per-export deadline takes
+    /// effect here: `BatchConfig::max_export_timeout` is `#[allow(dead_code)]`
+    /// in `opentelemetry_sdk` 0.32 unless the experimental async-runtime
+    /// processor is enabled, so setting it — or `OTEL_BSP_EXPORT_TIMEOUT` —
+    /// changes nothing.
+    pub const EXPORT_TIMEOUT_MS: u64 = 30_000;
     /// Default export batch size. The OTel default of 512 would hold
     /// analytics events five times longer before sending them, in batches
     /// five times the size.

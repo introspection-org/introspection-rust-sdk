@@ -110,6 +110,13 @@ name = "span_attributes_test"
 path = "tests/span_attributes_test.rs"
 required-features = ["testing"]
 
+# Drives the span processor against a slow mock collector, so it needs the
+# OTel surface for the same reason as the test above.
+[[test]]
+name = "export_timeout_test"
+path = "tests/export_timeout_test.rs"
+required-features = ["otel"]
+
 # Linting configuration
 # Run: cargo clippy -- -W clippy::all -W clippy::pedantic
 # Or use: cargo clippy --all-targets -- -W warnings
