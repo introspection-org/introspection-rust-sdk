@@ -19,7 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 # Default: REST-only client (runtimes / experiments / Runner / tasks / files).
 # Add the `otel` feature for the OTLP exporter, `track` / `feedback` /
-# `identify`, the span processor, and the observation helpers.
+# `identify`, and the span processor.
 default = []
 otel = [
     "dep:opentelemetry",
@@ -100,11 +100,6 @@ path = "examples/api/runtimes.rs"
 # compile with `testing`. Cargo cannot feature-gate an integration test from
 # inside the file, so declare the requirement here: a plain `cargo test` skips
 # them instead of failing to build.
-[[test]]
-name = "observation_test"
-path = "tests/observation_test.rs"
-required-features = ["testing"]
-
 [[test]]
 name = "span_attributes_test"
 path = "tests/span_attributes_test.rs"

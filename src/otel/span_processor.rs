@@ -93,6 +93,12 @@ pub struct SpanProcessorAdvancedOptions {
     /// Maximum batch size before auto-flush. Set to `1` for sequential
     /// (immediate) export — useful for multi-turn conversations.
     /// Default: uses the OTel SDK default.
+    ///
+    /// **`Some(1)` costs you an OTLP round trip per span, on the thread that
+    /// ended it.** It swaps the background `BatchSpanProcessor` for a
+    /// `SimpleSpanProcessor`, whose `on_end` exports synchronously. Reach for
+    /// it only when the backend genuinely must ingest span N before span N+1;
+    /// otherwise leave it unset and let the batcher export off-thread.
     pub max_batch_size: Option<usize>,
 }
 
@@ -176,7 +182,9 @@ enum InnerProcessor {
 ///
 /// Set `max_batch_size` to `1` to export each span individually on end, ensuring
 /// sequential processing by the backend. This is useful for multi-turn conversations
-/// where each turn must be ingested before the next arrives.
+/// where each turn must be ingested before the next arrives — at the price of a
+/// synchronous OTLP round trip inside `on_end`, on whichever thread closed the
+/// span. Leave it unset unless you need that ordering.
 ///
 /// # Example
 ///

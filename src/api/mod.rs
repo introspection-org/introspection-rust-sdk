@@ -140,9 +140,9 @@
 //! never surfaced. Use [`TaskRuns::stream_with`] to tune the recovery bounds or
 //! opt into an `introspection.reconnect` `CUSTOM` event on each reconnect.
 //!
-//! The raw frame layer ([`parse_sse_response`] /
-//! [`crate::SseEvent`]) remains available for advanced callers who want the
-//! untyped `event` / `data` / `id` wire shape.
+//! The raw frame layer ([`parse_sse_response`] / [`crate::SseEvent`]) remains
+//! available for advanced callers who want the untyped `event` / `data` / `id`
+//! wire shape.
 //!
 //! [`Event`]: crate::agui::Event
 //! [`Event::Unknown`]: crate::agui::Event::Unknown
@@ -212,6 +212,6 @@ pub use schemas::{
     TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
 };
 pub use shares::Shares;
-pub use sse::{parse_agui_response, parse_sse_response};
+pub use sse::parse_sse_response;
 pub use tasks::{RunHandle, TaskRuns, Tasks};
 pub use telemetry::{ConversationExportFormat, Conversations, Events, Metrics};

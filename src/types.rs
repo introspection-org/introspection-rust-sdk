@@ -46,9 +46,6 @@ pub struct AdvancedOptions {
 
     /// Additional HTTP headers to include in requests.
     pub additional_headers: Option<HashMap<String, String>>,
-
-    /// Enable debug logging
-    pub debug: bool,
 }
 
 /// Configuration options for the REST [`crate::IntrospectionClient`].
@@ -60,7 +57,6 @@ pub struct AdvancedOptions {
 ///
 /// let config = ClientConfig::builder()
 ///     .token("your-token")
-///     .service_name("my-service")
 ///     .build()
 ///     .unwrap();
 /// ```
@@ -70,11 +66,6 @@ pub struct ClientConfig {
     /// Authentication token (env: `INTROSPECTION_TOKEN`).
     #[builder(setter(into))]
     pub token: Option<String>,
-
-    /// Service name for telemetry (env: `INTROSPECTION_SERVICE_NAME`,
-    /// default: `"introspection-client"`).
-    #[builder(setter(into))]
-    pub service_name: Option<String>,
 
     /// Resolved project ID for callers that need to carry an internal project
     /// UUID. User-facing project selectors are passed as `project` on the
@@ -110,6 +101,8 @@ impl ClientConfig {
 
 /// Default configuration values shared across the REST surface.
 pub mod defaults {
+    /// Default `service.name` stamped on the OTel surfaces when neither the
+    /// config nor `INTROSPECTION_SERVICE_NAME` supplies one.
     pub const SERVICE_NAME: &str = "introspection-client";
     /// Default DP REST API base URL (used by `client.tasks` / `client.files`).
     pub const BASE_API_URL: &str = "https://api.introspection.dev";
@@ -130,13 +123,8 @@ mod tests {
 
     #[test]
     fn test_client_config_builder() {
-        let config = ClientConfig::builder()
-            .token("test-token")
-            .service_name("test-service")
-            .build()
-            .unwrap();
+        let config = ClientConfig::builder().token("test-token").build().unwrap();
 
         assert_eq!(config.token, Some("test-token".to_string()));
-        assert_eq!(config.service_name, Some("test-service".to_string()));
     }
 }

@@ -208,11 +208,10 @@ pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
 // `crate::otel` for top-level access.
 #[cfg(feature = "otel")]
 pub use otel::{
-    BaggageGuard, FeedbackOptions, GenerationUpdate, IdentifyOptions, IntrospectionLogs,
-    IntrospectionLogsConfig, IntrospectionLogsConfigBuilder, IntrospectionLogsError,
-    IntrospectionSpanProcessor, Observation, ObservationConfig, ObservationType, PropertyValue,
-    SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
-    SpanProcessorError, SpanProcessorResult, TrackOptions, Usage,
+    BaggageGuard, FeedbackOptions, IdentifyOptions, IntrospectionLogs, IntrospectionLogsConfig,
+    IntrospectionLogsConfigBuilder, IntrospectionLogsError, IntrospectionSpanProcessor,
+    PropertyValue, SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
+    SpanProcessorError, SpanProcessorResult, TrackOptions,
 };
 
 // Always available: the conversations read returns these message types inside

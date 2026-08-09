@@ -1,13 +1,11 @@
 //! Server-Sent Events parsing for the task-run stream.
 //!
-//! Two layers:
-//!
-//! - [`parse_sse_response`] is the low-level parser: it yields raw
-//!   [`SseEvent`] frames (the `event` / `data` / `id` wire shape) verbatim.
-//! - [`parse_agui_response`] is the typed layer used by
-//!   [`crate::api::TaskRuns::stream`]: it keeps only `ag_ui` frames and
-//!   decodes their `data` into a typed [`crate::agui::Event`], dropping
-//!   transport frames (`heartbeat`, `done`, `result`).
+//! [`parse_sse_response`] is the low-level parser: it yields raw [`SseEvent`]
+//! frames (the `event` / `data` / `id` wire shape) verbatim.
+//! [`decode_agui_event`] lifts one `ag_ui` frame's `data` into a typed
+//! [`crate::agui::Event`]. The resumable stream (`crate::api::resumable`)
+//! composes the two, skipping transport frames (`heartbeat`, `done`,
+//! `result`) as it tracks frame ids for resumption.
 
 use bytes::Bytes;
 use futures::stream::Stream;
@@ -26,9 +24,9 @@ pub(crate) const AG_UI_FRAME: &str = "ag_ui";
 ///
 /// An unrecognised event `type` decodes to [`Event::Unknown`] (never an
 /// error); a structurally invalid payload yields
-/// [`IntrospectionAPIError::Decode`]. Shared by the plain typed layer
-/// ([`parse_agui_frames`]) and the resumable stream (`crate::api::resumable`),
-/// which tracks frame ids itself but reuses this for the decode step.
+/// [`IntrospectionAPIError::Decode`]. Used by the resumable stream
+/// (`crate::api::resumable`), which tracks frame ids itself and reuses this
+/// for the decode step.
 pub(crate) fn decode_agui_event(data: &str) -> ApiResult<Event> {
     serde_json::from_str::<Event>(data)
         .map_err(|e| IntrospectionAPIError::Decode(format!("failed to decode AG-UI event: {e}")))
@@ -147,52 +145,6 @@ where
         }
         if has_content {
             yield Ok(cur);
-        }
-    }
-}
-
-/// Adapt a raw `text/event-stream` [`reqwest::Response`] into a typed
-/// [`Event`] stream.
-///
-/// Only `ag_ui` frames are surfaced; transport frames (`heartbeat`, `done`,
-/// `result`) are dropped. A frame whose `data` fails to decode into an
-/// [`Event`] yields [`IntrospectionAPIError::Decode`] and ends the stream —
-/// the same terminal behaviour a transport drop has. An unrecognised event
-/// `type` decodes to [`Event::Unknown`] rather than erroring, so a future
-/// protocol addition never severs the stream.
-pub fn parse_agui_response(response: reqwest::Response) -> impl Stream<Item = ApiResult<Event>> {
-    parse_agui_frames(parse_sse_response(response))
-}
-
-/// Lift a raw [`SseEvent`] stream into a typed [`Event`] stream. Split out
-/// from [`parse_agui_response`] so it can be unit-tested without a live HTTP
-/// response.
-fn parse_agui_frames<S>(frames: S) -> impl Stream<Item = ApiResult<Event>>
-where
-    S: Stream<Item = ApiResult<SseEvent>>,
-{
-    async_stream::stream! {
-        let mut frames = Box::pin(frames);
-        while let Some(frame) = frames.next().await {
-            let frame = match frame {
-                Ok(f) => f,
-                Err(e) => {
-                    yield Err(e);
-                    return;
-                }
-            };
-            // Transport frames (heartbeat / done / result) carry no AG-UI
-            // payload — skip them.
-            if frame.event != AG_UI_FRAME {
-                continue;
-            }
-            match decode_agui_event(&frame.data) {
-                Ok(event) => yield Ok(event),
-                Err(e) => {
-                    yield Err(e);
-                    return;
-                }
-            }
         }
     }
 }
@@ -316,40 +268,18 @@ mod tests {
         assert_eq!(events[0].retry, Some(1500));
     }
 
-    // --- typed AG-UI layer (`parse_agui_frames`) ---
-
-    fn agui_frame(event: &str, data: &str) -> ApiResult<SseEvent> {
-        Ok(SseEvent {
-            event: event.to_string(),
-            data: data.to_string(),
-            id: None,
-            retry: None,
-        })
-    }
-
-    fn collect_agui(frames: Vec<ApiResult<SseEvent>>) -> Vec<ApiResult<Event>> {
-        let s = parse_agui_frames(stream::iter(frames));
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let mut out = Vec::new();
-                tokio::pin!(s);
-                while let Some(ev) = s.next().await {
-                    out.push(ev);
-                }
-                out
-            })
-    }
+    // --- typed decode (`decode_agui_event`) ---
+    //
+    // Frame filtering and error propagation live in the resumable stream and
+    // are covered against a live mock server in tests/resumable_test.rs.
 
     #[test]
-    fn typed_layer_decodes_ag_ui_frames() {
-        let out = collect_agui(vec![agui_frame(
-            "ag_ui",
+    fn decodes_a_known_ag_ui_event() {
+        let ev = decode_agui_event(
             r#"{"type":"TEXT_MESSAGE_CONTENT","messageId":"run-1:text:0","delta":"hello"}"#,
-        )]);
-        assert_eq!(out.len(), 1);
-        match out.into_iter().next().unwrap().unwrap() {
+        )
+        .unwrap();
+        match ev {
             Event::TextMessageContent(e) => {
                 assert_eq!(e.message_id, "run-1:text:0");
                 assert_eq!(e.delta, "hello");
@@ -359,46 +289,15 @@ mod tests {
     }
 
     #[test]
-    fn typed_layer_skips_transport_frames() {
-        let out = collect_agui(vec![
-            agui_frame("heartbeat", r#"{"runId":"r1"}"#),
-            agui_frame(
-                "ag_ui",
-                r#"{"type":"RUN_STARTED","threadId":"t1","runId":"r1"}"#,
-            ),
-            agui_frame("done", "{}"),
-        ]);
-        assert_eq!(out.len(), 1);
-        assert!(matches!(
-            out.into_iter().next().unwrap().unwrap(),
-            Event::RunStarted(_)
-        ));
+    fn an_unrecognised_event_type_decodes_to_unknown_rather_than_erroring() {
+        // A future protocol addition must never sever a live stream.
+        let ev = decode_agui_event(r#"{"type":"SOME_FUTURE_EVENT","x":1}"#).unwrap();
+        assert!(matches!(ev, Event::Unknown));
     }
 
     #[test]
-    fn typed_layer_propagates_transport_error() {
-        let out = collect_agui(vec![
-            agui_frame(
-                "ag_ui",
-                r#"{"type":"RUN_STARTED","threadId":"t1","runId":"r1"}"#,
-            ),
-            Err(IntrospectionAPIError::Decode("boom".to_string())),
-        ]);
-        assert_eq!(out.len(), 2);
-        assert!(matches!(out[0], Ok(Event::RunStarted(_))));
-        assert!(matches!(out[1], Err(IntrospectionAPIError::Decode(_))));
-    }
-
-    #[test]
-    fn typed_layer_unknown_event_does_not_error() {
-        let out = collect_agui(vec![agui_frame(
-            "ag_ui",
-            r#"{"type":"SOME_FUTURE_EVENT","x":1}"#,
-        )]);
-        assert_eq!(out.len(), 1);
-        assert!(matches!(
-            out.into_iter().next().unwrap().unwrap(),
-            Event::Unknown
-        ));
+    fn a_structurally_invalid_payload_is_a_decode_error() {
+        let err = decode_agui_event("not json").unwrap_err();
+        assert!(matches!(err, IntrospectionAPIError::Decode(_)));
     }
 }

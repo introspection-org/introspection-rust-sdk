@@ -39,7 +39,7 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 | --- | --- | --- |
 | [`IntrospectionClient`](#1-introspectionclient--introspection-api-runtimes-tasks-files) | Introspection API: runtimes, experiments, runner, tasks, files | _none_ (default) |
 | [`IntrospectionLogs`](#2-introspectionlogs--analytics-events-track-feedback-identify) | Analytics events: `track` / `feedback` / `identify` (OTLP logs) | `otel` |
-| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces) | Traces: span processor + Observation API (OTLP traces) | `otel` |
+| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces) | Traces: span processor (OTLP traces) | `otel` |
 
 They share no state. Construct the ones you want, configure independently, mix and match.
 
@@ -361,38 +361,6 @@ let provider = SdkTracerProvider::builder()
 `SpanProcessorAdvancedOptions` lets you override the OTLP collector URL
 (`base_otel_url`), add HTTP headers, or inject a custom `SpanExporter`
 for tests.
-
-## Higher-level helpers (otel feature)
-
-### Observation API
-
-Instruments LLM calls and pipeline steps as OpenTelemetry spans with
-[gen_ai semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
-
-```rust
-use introspection_sdk::otel::{GenerationUpdate, Observation, ObservationConfig};
-use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
-
-let provider = SdkTracerProvider::builder().build();
-let tracer = provider.tracer("my-app");
-
-let mut obs = Observation::start(
-    &tracer,
-    ObservationConfig::generation("chat", "gpt-4o-mini"),
-);
-// ... make the API call ...
-obs.update_generation(
-    GenerationUpdate::new()
-        .with_response_model("gpt-4o-mini")
-        .with_response_id("chatcmpl-abc123")
-        .with_usage(12, 8),
-);
-obs.set_ok();
-// span ends when `obs` is dropped
-```
-
-Observations nest automatically via OpenTelemetry context propagation.
 
 ## Environment variables
 

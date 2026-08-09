@@ -53,14 +53,10 @@ pub type Result<T> = std::result::Result<T, IntrospectionError>;
 /// OpenTelemetry-based `track` / `feedback` / `identify` flow, enable
 /// the `otel` Cargo feature.
 pub struct IntrospectionClient {
-    #[allow(dead_code)]
-    service_name: String,
     project_id: Option<uuid::Uuid>,
     runtimes: Runtimes,
     experiments: Experiments,
     recipes: Recipes,
-    #[allow(dead_code)]
-    cp_http: Arc<HttpClient>,
 }
 
 impl IntrospectionClient {
@@ -73,12 +69,6 @@ impl IntrospectionClient {
             .clone()
             .or_else(|| env::var("INTROSPECTION_TOKEN").ok())
             .unwrap_or_default();
-
-        let service_name = config
-            .service_name
-            .clone()
-            .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
-            .unwrap_or_else(|| types::defaults::SERVICE_NAME.to_string());
 
         let project_id = config.project_id;
 
@@ -116,12 +106,10 @@ impl IntrospectionClient {
         let cp_http = Arc::new(http);
 
         Ok(Self {
-            service_name,
             project_id,
             runtimes: Runtimes::new(cp_http.clone()),
             experiments: Experiments::new(cp_http.clone()),
-            recipes: Recipes::new(cp_http.clone()),
-            cp_http,
+            recipes: Recipes::new(cp_http),
         })
     }
 

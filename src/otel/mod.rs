@@ -17,15 +17,10 @@
 //!
 //! These two surfaces share no state. They are also fully independent
 //! from [`crate::IntrospectionClient`] (the always-on REST surface).
-//!
-//! Higher-level helpers — [`messages`] and [`observation`] — also live
-//! under this module.
 
 #[cfg(feature = "otel")]
 pub mod logs;
 pub mod messages;
-#[cfg(feature = "otel")]
-pub mod observation;
 #[cfg(feature = "otel")]
 pub mod span_processor;
 #[cfg(feature = "otel")]
@@ -46,8 +41,6 @@ pub use messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
-#[cfg(feature = "otel")]
-pub use observation::{GenerationUpdate, Observation, ObservationConfig, ObservationType, Usage};
 #[cfg(feature = "otel")]
 pub use span_processor::{
     IntrospectionSpanProcessor, SpanProcessorAdvancedOptions, SpanProcessorConfig,
