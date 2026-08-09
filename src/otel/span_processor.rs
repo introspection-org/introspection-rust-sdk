@@ -1,13 +1,14 @@
 //! Span processor that sends traces to the introspection API.
 
+use opentelemetry::trace::TraceId;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::trace::{
     BatchSpanProcessor, SimpleSpanProcessor, SpanData, SpanProcessor as OtelSpanProcessor,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, info};
@@ -207,7 +208,17 @@ enum InnerProcessor {
 pub struct IntrospectionSpanProcessor {
     inner: InnerProcessor,
     service_name: String,
+    /// Conversation id minted per trace, for spans that arrive without one.
+    /// Bounded: see [`MAX_TRACKED_TRACES`].
+    trace_conversations: Mutex<(HashMap<TraceId, String>, VecDeque<TraceId>)>,
 }
+
+/// How many traces the conversation-id fallback remembers.
+///
+/// The map would otherwise grow for the process's lifetime, one entry per
+/// trace. Matching the other SDKs' bound keeps the eviction point the same
+/// everywhere.
+const MAX_TRACKED_TRACES: usize = 4096;
 
 /// A span carrying any of these is LLM-relevant and gets exported. Everything
 /// else on the provider (HTTP clients, framework spans, database drivers)
@@ -354,11 +365,33 @@ impl IntrospectionSpanProcessor {
         Ok(Self {
             inner,
             service_name,
+            trace_conversations: Mutex::new((HashMap::new(), VecDeque::new())),
         })
     }
 
-    /// Stamp baggage-derived attributes onto a span and drop the deprecated
-    /// provider key.
+    /// The conversation id minted for `trace_id`, creating one on first sight.
+    fn conversation_id_for_trace(&self, trace_id: TraceId) -> String {
+        let mut guard = self
+            .trace_conversations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (ids, order) = &mut *guard;
+        if let Some(existing) = ids.get(&trace_id) {
+            return existing.clone();
+        }
+        let conversation_id = format!("intro_conv_{}", uuid::Uuid::new_v4().simple());
+        ids.insert(trace_id, conversation_id.clone());
+        order.push_back(trace_id);
+        while order.len() > MAX_TRACKED_TRACES {
+            if let Some(oldest) = order.pop_front() {
+                ids.remove(&oldest);
+            }
+        }
+        conversation_id
+    }
+
+    /// Stamp baggage-derived attributes onto a span, resolve its conversation
+    /// id, and drop the deprecated provider key.
     ///
     /// Baggage wins over a pre-stamped attribute so per-call identity set with
     /// [`crate::otel::IntrospectionLogs`]'s guards overrides whatever the
@@ -382,6 +415,23 @@ impl IntrospectionSpanProcessor {
                 .retain(|kv| kv.key.as_str() != attribute_key);
             span.attributes
                 .push(opentelemetry::KeyValue::new(attribute_key, value));
+        }
+
+        // Baggage won above, and an id the emitter set itself is still on the
+        // span, so anything left without one has no conversation at all. Mint
+        // a stable id per trace: without it the spans of a single run reach
+        // Introspection unable to be grouped, which is what the other SDKs
+        // avoid by doing exactly this.
+        let has_conversation = span
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == types::attr::CONVERSATION_ID);
+        if !has_conversation {
+            let conversation_id = self.conversation_id_for_trace(span.span_context.trace_id());
+            span.attributes.push(opentelemetry::KeyValue::new(
+                types::attr::CONVERSATION_ID,
+                conversation_id,
+            ));
         }
 
         // An emitter that recorded messages without naming the operation is
@@ -709,6 +759,89 @@ mod tests {
                 "{marker} should mark a span for export"
             );
         }
+    }
+
+    /// Build a processor whose exporter goes nowhere; these tests only look
+    /// at what `enrich` did to the span.
+    fn enriching_processor() -> IntrospectionSpanProcessor {
+        IntrospectionSpanProcessor::new(
+            SpanProcessorConfig::builder()
+                .service_name("enrich-test")
+                .advanced(SpanProcessorAdvancedOptions {
+                    span_exporter: Some(Arc::new(
+                        SpanExporter::builder()
+                            .with_http()
+                            .with_endpoint("http://localhost:19876/v1/traces")
+                            .build()
+                            .unwrap(),
+                    )),
+                    ..Default::default()
+                })
+                .build(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_conversation_id_falls_back_to_one_id_per_trace() {
+        let processor = enriching_processor();
+
+        // No baggage, no conversation attribute: the spans of one run would
+        // otherwise reach Introspection with nothing to group them by.
+        let mut first = span_with(vec![KeyValue::new(
+            types::attr::GEN_AI_REQUEST_MODEL,
+            "claude",
+        )]);
+        processor.enrich(&mut first);
+        let minted = attr(&first, types::attr::CONVERSATION_ID)
+            .map(|v| v.to_string())
+            .expect("a conversation id");
+        assert!(minted.starts_with("intro_conv_"), "got {minted}");
+
+        // Same trace -> same id.
+        let mut same_trace = first.clone();
+        same_trace
+            .attributes
+            .retain(|kv| kv.key.as_str() != types::attr::CONVERSATION_ID);
+        processor.enrich(&mut same_trace);
+        assert_eq!(
+            attr(&same_trace, types::attr::CONVERSATION_ID).map(|v| v.to_string()),
+            Some(minted.clone())
+        );
+
+        // A different trace is a different conversation.
+        let mut other = span_with(vec![KeyValue::new(
+            types::attr::GEN_AI_REQUEST_MODEL,
+            "claude",
+        )]);
+        processor.enrich(&mut other);
+        assert_ne!(
+            attr(&other, types::attr::CONVERSATION_ID).map(|v| v.to_string()),
+            Some(minted)
+        );
+    }
+
+    #[test]
+    fn test_an_emitters_own_conversation_id_survives() {
+        let processor = enriching_processor();
+        let mut span = span_with(vec![
+            KeyValue::new(types::attr::GEN_AI_REQUEST_MODEL, "claude"),
+            KeyValue::new(types::attr::CONVERSATION_ID, "conv_from_emitter"),
+        ]);
+        processor.enrich(&mut span);
+        assert_eq!(
+            attr(&span, types::attr::CONVERSATION_ID).map(|v| v.to_string()),
+            Some("conv_from_emitter".to_string())
+        );
+        // Exactly one: a minted id appended alongside the emitter's would be
+        // ambiguous on the wire even though the first one still reads back.
+        assert_eq!(
+            span.attributes
+                .iter()
+                .filter(|kv| kv.key.as_str() == types::attr::CONVERSATION_ID)
+                .count(),
+            1
+        );
     }
 
     #[test]
