@@ -56,10 +56,23 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # Both jobs above and below run --all-features only, so a lint or a doc
+      # link that is fine there and broken on a REST-only install lands green.
+      # That is not hypothetical: three intra-doc links pointed at items the
+      # `otel` and `arrow` features gate away, and `cargo doc` on the default
+      # install emitted five warnings that nothing here ever saw.
+      - name: Run clippy (default features, REST only)
+        run: cargo clippy --all-targets -- -D warnings
+
       - name: Check rustdoc
         # Broken intra-doc links are invisible without this: nothing else in
         # CI runs rustdoc.
         run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Check rustdoc (default features, REST only)
+        run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
