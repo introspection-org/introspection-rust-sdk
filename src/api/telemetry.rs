@@ -29,16 +29,6 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-use futures::{Stream, StreamExt};
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
-
-const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
-
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::genai_span::{GenAiSpan, GenAiSpanList};
@@ -48,6 +38,8 @@ use crate::api::schemas::{
     Conversation, ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
     ConversationListParams, Event, EventListParams, MetricsQuery, MetricsResponse, Trajectory,
 };
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 
 /// Base media type of a trajectory-v1 conversation export. The `version`
 /// parameter is appended by the caller; a server that does not implement the
@@ -130,7 +122,7 @@ impl Conversations {
     fn export_path(conversation_id: &str) -> String {
         format!(
             "/v1/conversations/{}/export",
-            utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
+            crate::api::encoding::encode(conversation_id)
         )
     }
 
