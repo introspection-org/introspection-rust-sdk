@@ -279,6 +279,17 @@ pub fn generate_event_id() -> String {
     format!("intro_event_{}-{}", timestamp_hex, random_part)
 }
 
+/// Mint a conversation id.
+///
+/// Format: `intro_conv_<32 hex>`, identical to what the JS and Python SDKs
+/// mint, so a conversation started in any of them is the same shape in the
+/// backend. Also what [`crate::otel::IntrospectionSpanProcessor`] falls back
+/// to for a trace that arrives without one — one minter, so the two cannot
+/// drift apart.
+pub fn new_conversation_id() -> String {
+    format!("intro_conv_{}", Uuid::new_v4().simple())
+}
+
 /// Standard log attribute keys used by the Introspection SDK.
 /// These follow OpenTelemetry semantic conventions where applicable.
 pub mod attr {
@@ -354,12 +365,18 @@ pub mod defaults {
 }
 
 /// Log severity text constants.
-pub mod severity {
+///
+/// Crate-internal: the severity this SDK emits is not a knob, and neither the
+/// JS nor the Python SDK puts it on their public surface.
+pub(crate) mod severity {
     pub const INFO: &str = "INFO";
 }
 
 /// Logger names for OpenTelemetry instrumentation scope.
-pub mod logger_name {
+///
+/// Crate-internal: a consumer telling the surfaces apart reads the scope off
+/// the record it received, not off a constant compiled into their binary.
+pub(crate) mod logger_name {
     /// Instrumentation scope name on every analytics record.
     ///
     /// The crate name, per the OTel convention that the scope names the
@@ -372,7 +389,7 @@ pub mod logger_name {
 }
 
 /// API endpoint paths.
-pub mod api_path {
+pub(crate) mod api_path {
     pub const LOGS: &str = "/v1/logs";
     pub const TRACES: &str = "/v1/traces";
 }

@@ -476,6 +476,33 @@ impl IntrospectionLogs {
         BaggageGuard::new(types::baggage::CONVERSATION_ID, conversation_id)
     }
 
+    /// Scope a conversation, minting an id when the caller has none.
+    ///
+    /// The counterpart of the JS SDK's `conversation()` and the Python SDK's
+    /// `conversation()` context manager. Without it a Rust caller starting a
+    /// fresh conversation had to invent an id, and an invented one does not
+    /// match the `intro_conv_<hex>` shape the rest of the platform mints.
+    ///
+    /// Returns the id alongside the guard, since a caller that did not
+    /// supply one still needs to know what it got — to correlate feedback
+    /// against, or to hand to another process.
+    ///
+    /// ```rust,no_run
+    /// # use introspection_sdk::otel::IntrospectionLogs;
+    /// # let logs = IntrospectionLogs::builder().token("t").build().unwrap();
+    /// let (conversation_id, _scope) = logs.conversation(None);
+    /// logs.track("Turn Completed", None);
+    /// # let _ = conversation_id;
+    /// ```
+    #[must_use = "the returned guard must be held to maintain the baggage context"]
+    pub fn conversation(&self, conversation_id: Option<&str>) -> (String, BaggageGuard) {
+        let id = conversation_id
+            .map(str::to_string)
+            .unwrap_or_else(types::new_conversation_id);
+        let guard = BaggageGuard::new(types::baggage::CONVERSATION_ID, &id);
+        (id, guard)
+    }
+
     /// Set previous response ID in OpenTelemetry baggage.
     #[must_use = "the returned guard must be held to maintain the baggage context"]
     pub fn set_previous_response_id(&self, previous_response_id: &str) -> BaggageGuard {
@@ -815,5 +842,67 @@ mod tests {
         }
 
         assert_eq!(logs.get_user_id(), None);
+    }
+
+    #[test]
+    fn conversation_mints_an_id_in_the_shape_the_other_sdks_mint() {
+        let logs = IntrospectionLogs::builder()
+            .token("test-token")
+            .build()
+            .unwrap();
+
+        let (id, _scope) = logs.conversation(None);
+        // `intro_conv_` + 32 hex, the same shape the JS and Python SDKs
+        // produce and the same one the span processor falls back to.
+        assert!(id.starts_with("intro_conv_"), "got {id}");
+        let hex = &id["intro_conv_".len()..];
+        assert_eq!(hex.len(), 32);
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+
+        let cx = Context::current();
+        assert_eq!(
+            cx.baggage()
+                .get(types::baggage::CONVERSATION_ID)
+                .map(|v| v.to_string()),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn conversation_honours_an_id_the_caller_already_has() {
+        let logs = IntrospectionLogs::builder()
+            .token("test-token")
+            .build()
+            .unwrap();
+
+        let (id, _scope) = logs.conversation(Some("conv_from_upstream"));
+        assert_eq!(id, "conv_from_upstream");
+        let cx = Context::current();
+        assert_eq!(
+            cx.baggage()
+                .get(types::baggage::CONVERSATION_ID)
+                .map(|v| v.to_string()),
+            Some("conv_from_upstream".to_string())
+        );
+    }
+
+    #[test]
+    fn the_conversation_scope_is_released_with_its_guard() {
+        let logs = IntrospectionLogs::builder()
+            .token("test-token")
+            .build()
+            .unwrap();
+
+        {
+            let (_id, _scope) = logs.conversation(None);
+            assert!(Context::current()
+                .baggage()
+                .get(types::baggage::CONVERSATION_ID)
+                .is_some());
+        }
+        assert!(Context::current()
+            .baggage()
+            .get(types::baggage::CONVERSATION_ID)
+            .is_none());
     }
 }

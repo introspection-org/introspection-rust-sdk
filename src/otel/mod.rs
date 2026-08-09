@@ -48,6 +48,6 @@ pub use span_processor::{
 };
 #[cfg(feature = "otel")]
 pub use types::{
-    api_path, attr, baggage, defaults, event_name, generate_event_id, logger_name, severity,
-    FeedbackOptions, IdentifyOptions, PropertyValue, TrackOptions,
+    attr, baggage, defaults, event_name, generate_event_id, new_conversation_id, FeedbackOptions,
+    IdentifyOptions, PropertyValue, TrackOptions,
 };

@@ -413,7 +413,10 @@ impl IntrospectionSpanProcessor {
         if let Some(existing) = ids.get(&trace_id) {
             return existing.clone();
         }
-        let conversation_id = format!("intro_conv_{}", uuid::Uuid::new_v4().simple());
+        // The same minter `IntrospectionLogs::conversation` uses, so an id
+        // the SDK invents here is indistinguishable from one a caller
+        // started a conversation with.
+        let conversation_id = types::new_conversation_id();
         ids.insert(trace_id, conversation_id.clone());
         order.push_back(trace_id);
         while order.len() > MAX_TRACKED_TRACES {
