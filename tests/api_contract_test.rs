@@ -47,15 +47,18 @@
 use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
-    AgentInfo, ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
-    ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
-    Dimension, Event, EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent,
-    FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
-    IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
-    PaginationParams, RecipeListParams, ResourceShare, RuntimeListParams, ShareCreate,
-    ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions,
-    TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate,
-    TaskRunKind, TaskStatus, TimeDimension,
+    AgentInfo, ConnectionCreateParams, ConnectionSubjectType, ConnectorAuthMode,
+    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorStatus,
+    ConnectorUpdateParams, ConversationExportParams, ConversationItemInclude,
+    ConversationItemListParams, ConversationListParams, ConversationResolution,
+    ConversationSentiment, ConversationStatus, Dimension, Event, EventListParams,
+    ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
+    FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec,
+    MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, ResourceShare,
+    RunnerIdentity, RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType,
+    SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind,
+    TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus,
+    TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -400,6 +403,61 @@ fn sdk_surface_matches_the_published_reference() {
         },
     };
 
+    let connector_list = ConnectorListParams {
+        project: Some(StringOrUuid::from("proj")),
+        limit: Some(1),
+        next: Some("cursor".into()),
+    };
+
+    let connector_create = ConnectorCreateParams {
+        slug: Some("slack-support".into()),
+        environment: Some("production".into()),
+        agent_member_id: Some(Uuid::nil()),
+        authorization_endpoint: Some("https://slack.com/oauth/v2/authorize".into()),
+        token_endpoint: Some("https://slack.com/api/oauth.v2.access".into()),
+        scopes: Some(vec!["chat:write".into()]),
+        api_hosts: Some(vec!["slack.com".into()]),
+        client_id: Some("client".into()),
+        client_secret: Some("secret".into()),
+        signing_secret: Some("signing".into()),
+        metadata: Some(Default::default()),
+        issuer: Some("https://slack.com".into()),
+        person_server_mode: Some("managed".into()),
+        person_server_url: Some("https://ps.example".into()),
+        approval_policy: Some("human".into()),
+        application_id: Some(Uuid::nil()),
+        assertion_audience: Some("https://slack.com".into()),
+        webhook_url: Some("https://api.example/webhooks".into()),
+        ..ConnectorCreateParams::new("Slack", "slack", ConnectorAuthMode::OauthStored)
+    };
+
+    let connector_update = ConnectorUpdateParams {
+        name: Some("Slack".into()),
+        agent_member_id: Some(Uuid::nil()),
+        scopes: Some(vec!["chat:write".into()]),
+        api_hosts: Some(vec!["slack.com".into()]),
+        status: Some(ConnectorStatus::Active),
+        metadata: Some(Default::default()),
+        webhook_url: Some("https://api.example/webhooks".into()),
+        client_secret: Some("secret".into()),
+        signing_secret: Some("signing".into()),
+    };
+
+    let connection_create = ConnectionCreateParams {
+        subject_type: Some(ConnectionSubjectType::App),
+        scopes_granted: Some(vec!["chat:write".into()]),
+        refresh_token: Some("refresh".into()),
+        token_expires_at: Some("2026-08-08T21:00:00Z".into()),
+        ..ConnectionCreateParams::new("xoxb-token")
+    };
+
+    let connector_authorize = ConnectorAuthorizeParams {
+        runtime: Some(StringOrUuid::from("support-agent")),
+        subject: Some(ConnectionSubjectType::App),
+        return_url: Some("https://app.example/done".into()),
+        expires_in: Some(3600),
+    };
+
     let conversation_export = ConversationExportParams {
         agent: Some("root".into()),
         service_name: Some("svc".into()),
@@ -711,6 +769,69 @@ fn sdk_surface_matches_the_published_reference() {
             &["project_id"],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
+            "connector list filters — GET /v1/connectors query parameters",
+            wire_fields(&connector_list),
+            query_parameters(&cp_spec, "/v1/connectors", "get"),
+            &["project_id"],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
+            "connection list filters — GET /v1/connectors/{id}/connections query parameters",
+            wire_fields(&PaginationParams {
+                limit: Some(1),
+                next: Some("cursor".into()),
+            }),
+            query_parameters(
+                &cp_spec,
+                "/v1/connectors/{connector_id}/connections",
+                "get",
+            ),
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
+            "ConnectorCreate — POST /v1/connectors body",
+            wire_fields(&connector_create),
+            schema_properties(&cp_spec, "ConnectorCreate"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "ConnectorUpdate — PATCH /v1/connectors/{id} body",
+            wire_fields(&connector_update),
+            schema_properties(&cp_spec, "ConnectorUpdate"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "ConnectionCreate — POST /v1/connectors/{id}/connections body",
+            wire_fields(&connection_create),
+            schema_properties(&cp_spec, "ConnectionCreate"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            // `connector_id` is the method's first argument, merged into the
+            // body by `authorize`, so it is absent from the params struct.
+            "ConnectAuthorizeRequest — POST /v1/oauth/connections/authorize body",
+            wire_fields(&connector_authorize),
+            schema_properties(&cp_spec, "ConnectAuthorizeRequest"),
+            &["connector_id"],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
             false,
         ),
         compare(

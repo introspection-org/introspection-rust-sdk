@@ -192,8 +192,11 @@ pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
-    ConversationCost, ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,
+    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Connection, ConnectionCreateParams,
+    ConnectionStatus, ConnectionSubjectType, Connector, ConnectorAuthMode, ConnectorAuthorization,
+    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorStatus,
+    ConnectorUpdateParams, Conversation, ConversationAgent, ConversationCost,
+    ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,
     ConversationItemListParams, ConversationListParams, ConversationMetrics,
     ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
     Dimension, Event, EventListParams, Experiment, ExperimentGoal, ExperimentGoalComponent,

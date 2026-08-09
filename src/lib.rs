@@ -105,30 +105,33 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
-    ConversationCost, ConversationExportFormat, ConversationExportParams,
-    ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
-    ConversationItemPaginator, ConversationItems, ConversationListParams, ConversationMetrics,
-    ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
-    Conversations, Dimension, Event, EventListParams, Events, Experiment, ExperimentGoal,
-    ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams,
-    ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams,
-    FileType, FileUpdate, FileUpload, FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput,
-    GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall,
-    GenAiUsage, HavingTerm, IdRef, IntrospectionAPIError, IntrospectionAttributes,
-    IntrospectionConversation, IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime,
-    JudgeGoalComponent, JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, Metrics,
-    MetricsConfig, MetricsQuery, MetricsResponse, NameRef, ObservationEvent, ObservationPayload,
-    OrderTerm, Paginated, PaginationParams, Paginator, PatternAssignmentEvent,
-    PatternAssignmentPayload, PatternEvent, PatternPayload, Recipe, RecipeListParams,
-    ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest,
-    RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams,
-    RuntimeLlmMode, ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection,
-    SpanAttributes, SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions,
-    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams,
-    TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension,
-    TokenCount, Trajectory, TypedEvent, UploadSource,
+    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Connection, ConnectionCreateParams,
+    ConnectionStatus, ConnectionSubjectType, Connector, ConnectorAuthMode, ConnectorAuthorization,
+    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorStatus,
+    ConnectorUpdateParams, Conversation, ConversationAgent, ConversationCost,
+    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
+    ConversationItemInclude, ConversationItemListParams, ConversationItemPaginator,
+    ConversationItems, ConversationListParams, ConversationMetrics, ConversationResolution,
+    ConversationSentiment, ConversationStatus, ConversationUsage, Conversations, Dimension, Event,
+    EventListParams, Events, Experiment, ExperimentGoal, ExperimentGoalComponent,
+    ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
+    FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate,
+    FileUpload, FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput, GenAiOutput,
+    GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage,
+    HavingTerm, IdRef, IntrospectionAPIError, IntrospectionAttributes, IntrospectionConversation,
+    IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime, JudgeGoalComponent,
+    JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig,
+    MetricsQuery, MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm,
+    Paginated, PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload,
+    PatternEvent, PatternPayload, Recipe, RecipeListParams, ResourceShare, ResumeEntry, RunCaller,
+    RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment,
+    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate,
+    ShareListParams, ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus,
+    SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest,
+    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus,
+    TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent,
+    UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
@@ -141,7 +144,9 @@ pub use auth::{
     OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
-pub use resources::{ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes};
+pub use resources::{
+    Connections, Connectors, ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes,
+};
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
 

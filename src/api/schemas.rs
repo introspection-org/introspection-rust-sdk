@@ -984,6 +984,499 @@ pub struct ExperimentListParams {
     pub next: Option<String>,
 }
 
+// ----- connectors (CP) -------------------------------------------------------
+
+/// How a connector authenticates against its provider — mirrors the CP
+/// `ConnectorAuthMode` enum.
+///
+/// The variant is `Static` for the on-the-wire `"static"` value because
+/// `static` is a Rust keyword. The `Other` variant captures any mode the CP
+/// adds after this SDK is compiled; the string is the raw on-the-wire value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectorAuthMode {
+    /// `"static"` on the wire.
+    Static,
+    OauthStored,
+    IdentityAssertion,
+    FederatedExchange,
+    PersonAuthorized,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl ConnectorAuthMode {
+    /// On-the-wire string form.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Static => "static",
+            Self::OauthStored => "oauth_stored",
+            Self::IdentityAssertion => "identity_assertion",
+            Self::FederatedExchange => "federated_exchange",
+            Self::PersonAuthorized => "person_authorized",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for ConnectorAuthMode {
+    fn from(s: &str) -> Self {
+        match s {
+            "static" => Self::Static,
+            "oauth_stored" => Self::OauthStored,
+            "identity_assertion" => Self::IdentityAssertion,
+            "federated_exchange" => Self::FederatedExchange,
+            "person_authorized" => Self::PersonAuthorized,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for ConnectorAuthMode {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ConnectorAuthMode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Lifecycle status of a connector — mirrors the CP `ConnectorStatus` enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectorStatus {
+    Pending,
+    Active,
+    Error,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl ConnectorStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::Active => "active",
+            Self::Error => "error",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for ConnectorStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "pending" => Self::Pending,
+            "active" => Self::Active,
+            "error" => Self::Error,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for ConnectorStatus {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ConnectorStatus {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Lifecycle status of a connection — mirrors the CP `ConnectionStatus` enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionStatus {
+    PendingAuthorization,
+    Active,
+    RefreshFailed,
+    Revoked,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl ConnectionStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::PendingAuthorization => "pending_authorization",
+            Self::Active => "active",
+            Self::RefreshFailed => "refresh_failed",
+            Self::Revoked => "revoked",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for ConnectionStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "pending_authorization" => Self::PendingAuthorization,
+            "active" => Self::Active,
+            "refresh_failed" => Self::RefreshFailed,
+            "revoked" => Self::Revoked,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for ConnectionStatus {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ConnectionStatus {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Who a connection acts as — mirrors the CP `ConnectionSubjectType` enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionSubjectType {
+    App,
+    User,
+    Federated,
+    Person,
+    Workspace,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl ConnectionSubjectType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::App => "app",
+            Self::User => "user",
+            Self::Federated => "federated",
+            Self::Person => "person",
+            Self::Workspace => "workspace",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for ConnectionSubjectType {
+    fn from(s: &str) -> Self {
+        match s {
+            "app" => Self::App,
+            "user" => Self::User,
+            "federated" => Self::Federated,
+            "person" => Self::Person,
+            "workspace" => Self::Workspace,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for ConnectionSubjectType {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ConnectionSubjectType {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// A connector — the CP read model returned by every `/v1/connectors` route.
+///
+/// `client_secret` and `signing_secret` are **write-only**: accepted on create
+/// and update, absent from every response — which is why this read model does
+/// not have them. `requires_runtime` is server-derived and is the **only**
+/// signal for whether [`ConnectorAuthorizeParams::runtime`] must be set;
+/// never hardcode a provider list.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Connector {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    /// Stable per-org identifier; create is idempotent on it.
+    pub slug: String,
+    pub name: String,
+    /// Provider slug, e.g. `"slack"`, `"gmail"`, `"stripe"`.
+    pub provider: String,
+    pub auth_mode: ConnectorAuthMode,
+    /// Create-time fact (`development` / `staging` / `production`), not
+    /// updatable.
+    pub environment: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_member_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub api_hosts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// `managed` / `byo` / `discovered`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_server_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_server_url: Option<String>,
+    /// `human` / `judge_advises_human` / `judge_auto_within_envelope`.
+    pub approval_policy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion_audience: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+    pub status: ConnectorStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_member_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Server-derived: whether [`Connectors::authorize`] must name a runtime
+    /// for this connector (chat providers need the agent that replies).
+    ///
+    /// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
+    #[serde(default)]
+    pub requires_runtime: bool,
+}
+
+/// A connection under a connector. Access/refresh tokens are **never**
+/// serialized by the API, so they do not appear here.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Connection {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub connector_id: Uuid,
+    /// `None` = org-owned (app subject); for a Slack workspace install this
+    /// points at the workspace customer member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    /// Runtime group answering this connection's channels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    pub subject_type: ConnectionSubjectType,
+    #[serde(default)]
+    pub scopes_granted: Vec<String>,
+    pub status: ConnectionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<String>,
+}
+
+/// Filters supported by `GET /v1/connectors`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectorListParams {
+    /// Project slug or id. May be omitted when the token is project-scoped;
+    /// otherwise the server rejects the request with a 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+}
+
+/// `POST /v1/connectors` body. `name`, `provider`, and `auth_mode` are
+/// required; build with [`Self::new`] and struct-update syntax for the rest:
+/// `ConnectorCreateParams { slug: Some("slack-support".into()), ..ConnectorCreateParams::new(...) }`.
+///
+/// `client_secret` and `signing_secret` are **write-only**: they are accepted
+/// here (and on update) but never returned on any read. `issuer` drives
+/// server-side OAuth discovery (endpoints resolved from `.well-known` when
+/// omitted) and is not persisted.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectorCreateParams {
+    pub name: String,
+    /// Provider slug, e.g. `"slack"`, `"gmail"`, `"stripe"`.
+    pub provider: String,
+    pub auth_mode: ConnectorAuthMode,
+    /// Derived from `name` server-side when omitted; create is idempotent on
+    /// the resulting slug.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+    /// Defaults to `"production"` server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_hosts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Write-only; never present on a read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// Write-only; never present on a read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// OAuth discovery: when set and the endpoints are omitted, the server
+    /// resolves them from `.well-known`. Not persisted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub person_server_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub person_server_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assertion_audience: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+}
+
+impl ConnectorCreateParams {
+    /// Create params with the three required fields set and every optional
+    /// field unset. Combine with struct-update syntax.
+    pub fn new(
+        name: impl Into<String>,
+        provider: impl Into<String>,
+        auth_mode: ConnectorAuthMode,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            provider: provider.into(),
+            auth_mode,
+            slug: None,
+            environment: None,
+            agent_member_id: None,
+            authorization_endpoint: None,
+            token_endpoint: None,
+            scopes: None,
+            api_hosts: None,
+            client_id: None,
+            client_secret: None,
+            signing_secret: None,
+            metadata: None,
+            issuer: None,
+            person_server_mode: None,
+            person_server_url: None,
+            approval_policy: None,
+            application_id: None,
+            assertion_audience: None,
+            webhook_url: None,
+        }
+    }
+}
+
+/// `PATCH /v1/connectors/{id}` body — only these fields are mutable
+/// (`environment`, `provider`, `auth_mode`, and `slug` are create-time facts).
+/// Only provided fields change; omitting `client_secret` / `signing_secret`
+/// means "unchanged", not "clear".
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectorUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_hosts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<ConnectorStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+    /// Write-only; omitted = unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// Write-only; omitted = unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_secret: Option<String>,
+}
+
+/// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
+/// where the caller supplies an already-minted provider token.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectionCreateParams {
+    pub access_token: String,
+    /// Defaults to `App` server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_type: Option<ConnectionSubjectType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes_granted: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<String>,
+}
+
+impl ConnectionCreateParams {
+    /// A registered-mode body carrying only the token the route requires.
+    pub fn new(access_token: impl Into<String>) -> Self {
+        Self {
+            access_token: access_token.into(),
+            subject_type: None,
+            scopes_granted: None,
+            refresh_token: None,
+            token_expires_at: None,
+        }
+    }
+}
+
+/// `POST /v1/oauth/connections/authorize` options (the `connector_id` itself
+/// is the first argument to [`Connectors::authorize`]).
+///
+/// `runtime` is required (the server 422s without it) when the connector's
+/// `requires_runtime` is true — it names the agent that replies on the
+/// connected channel. `expires_in` bounds how long the minted URL stays valid
+/// (60–86400 seconds, default 600); raise it when handing the URL to someone
+/// else to open.
+///
+/// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectorAuthorizeParams {
+    /// Runtime selector (slug or runtime group id).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<StringOrUuid>,
+    /// `App` (default) / `User` / `Person`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<ConnectionSubjectType>,
+    /// Where the browser lands after consent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_url: Option<String>,
+    /// Seconds the URL stays valid (60–86400, default 600).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<u32>,
+}
+
+/// Response of `POST /v1/oauth/connections/authorize` — a freshly minted
+/// consent URL.
+///
+/// Each call writes a fresh **single-use** OAuth `state`: two calls give two
+/// different URLs, and responses must never be cached — mint a new one per
+/// hand-off. The `state` is deliberately not a response field and must never
+/// be parsed out of the URL, logged, or surfaced.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectorAuthorization {
+    pub authorize_url: String,
+    /// Seconds the URL stays valid.
+    pub expires_in: u64,
+    pub expires_at: String,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
