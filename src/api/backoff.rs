@@ -43,7 +43,7 @@ fn backoff_delay_with_jitter(
 /// Reading only the numeric form turned every date-valued header into
 /// `None`, which the retry path reads as "no floor supplied" and replaces
 /// with its own much shorter backoff — re-hitting a rate limiter that had
-/// just said exactly when to come back. The JS and Python SDKs understand
+/// just said exactly when to come back. RFC 9110 admits both forms, so
 /// both forms.
 ///
 /// A date already in the past means "retry now", not a negative delay.
@@ -55,7 +55,7 @@ pub(crate) fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
 
     if let Ok(secs) = value.parse::<f64>() {
         // Clamped rather than rejected, matching the date branch below and
-        // the other SDKs: a negative delay is not a thing to wait for, and
+        // A negative delay is not a thing to wait for, and
         // "the server sent a nonsense value" still means retry now.
         return secs
             .is_finite()
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn a_negative_delta_means_now_rather_than_a_negative_delay() {
-        // All three SDKs clamp: an unclamped negative became a negative
+        // Clamped: an unclamped negative became a negative
         // floor in the backoff below.
         let mut h = HeaderMap::new();
         h.insert(reqwest::header::RETRY_AFTER, "-5".parse().unwrap());

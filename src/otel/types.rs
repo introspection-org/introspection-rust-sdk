@@ -245,13 +245,12 @@ impl PropertyValue {
         }
     }
 
-    /// Convert to the OTLP value the other SDKs put on the wire.
+    /// Convert to the OTLP value the backend expects on the wire.
     ///
     /// Stringifying everything meant `with_property("rating", 5)` shipped
-    /// `AnyValue::string("5")` where the JS SDK ships `AnyValue::int(5)`:
-    /// same key, same prefix, different value kind on a contract that is
-    /// supposed to be identical across SDKs. Only JSON stays a string,
-    /// which is what JS's `JSON.stringify` produces for it too.
+    /// `AnyValue::string("5")` where the backend expects `AnyValue::int(5)`:
+    /// same key, same prefix, wrong value kind, so a numeric property
+    /// arrived unaggregatable. Only JSON stays a string.
     pub fn to_otel_value(&self) -> opentelemetry::logs::AnyValue {
         use opentelemetry::logs::AnyValue;
         match self {
@@ -281,9 +280,9 @@ pub fn generate_event_id() -> String {
 
 /// Mint a conversation id.
 ///
-/// Format: `intro_conv_<32 hex>`, identical to what the JS and Python SDKs
-/// mint, so a conversation started in any of them is the same shape in the
-/// backend. Also what [`crate::otel::IntrospectionSpanProcessor`] falls back
+/// Format: `intro_conv_<32 hex>`, the shape the backend expects, so a
+/// conversation started here is indistinguishable from one started
+/// anywhere else. Also what [`crate::otel::IntrospectionSpanProcessor`] falls back
 /// to for a trace that arrives without one — one minter, so the two cannot
 /// drift apart.
 pub fn new_conversation_id() -> String {
@@ -358,16 +357,16 @@ pub mod defaults {
     /// Default OTLP collector base URL.
     pub const BASE_OTEL_URL: &str = "https://otel.introspection.dev";
     pub const FLUSH_INTERVAL_MS: u64 = 5000;
-    /// Default export batch size. Matches the JS SDK; the OTel default of
-    /// 512 would send analytics events from a Rust process in batches five
-    /// times the size, five times less often, than from a Node one.
+    /// Default export batch size. The OTel default of 512 would hold
+    /// analytics events five times longer before sending them, in batches
+    /// five times the size.
     pub const MAX_BATCH_SIZE: usize = 100;
 }
 
 /// Log severity text constants.
 ///
 /// Crate-internal: the severity this SDK emits is not a knob, and neither the
-/// JS nor the Python SDK puts it on their public surface.
+/// this is not a knob callers need.
 pub(crate) mod severity {
     pub const INFO: &str = "INFO";
 }
@@ -384,7 +383,7 @@ pub(crate) mod logger_name {
     /// language already rides the resource as `telemetry.sdk.language`
     /// (`"rust"` here), which is the semconv-designated place for it, so
     /// encoding it again in the scope would duplicate a standard attribute in
-    /// a non-standard field. All four Introspection SDKs use this same name.
+    /// a non-standard field.
     pub const SDK: &str = "introspection-sdk";
 }
 

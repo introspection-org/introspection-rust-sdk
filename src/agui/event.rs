@@ -347,7 +347,7 @@ pub struct RawEvent {
 ///
 /// Introspection rides this channel for its own markers — e.g. the
 /// `introspection.reconnect` event the resumable stream surfaces — so they are
-/// expressible identically across the JS / Python / Rust SDKs.
+/// expressible identically in every language Introspection supports.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomEvent {

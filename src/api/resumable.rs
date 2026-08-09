@@ -20,7 +20,7 @@
 //! [`StreamOptions::emit_reconnect_events`], which injects an
 //! `introspection.reconnect` AG-UI `CUSTOM` event
 //! ([`crate::agui::introspection`]) into the stream on each reconnect /
-//! readiness wait — the same marker channel the JS / Python SDKs use, so it is
+//! readiness wait — the marker channel the DP itself emits, so it is
 //! expressible identically across all three.
 
 use std::sync::Arc;

@@ -100,6 +100,22 @@ pub struct SpanProcessorAdvancedOptions {
     /// it only when the backend genuinely must ingest span N before span N+1;
     /// otherwise leave it unset and let the batcher export off-thread.
     pub max_batch_size: Option<usize>,
+
+    /// Maximum spans buffered before new ones are dropped. `None` uses the
+    /// OpenTelemetry default (2048).
+    ///
+    /// Distinct from [`Self::max_batch_size`], which bounds one export rather
+    /// than the queue behind it. Under a burst larger than the queue the
+    /// processor drops spans silently, and this is the knob that raises the
+    /// ceiling. Ignored when `max_batch_size == Some(1)`, which
+    /// selects the unqueued `SimpleSpanProcessor`.
+    ///
+    /// There is deliberately no `export_timeout_ms` beside it:
+    /// `opentelemetry_sdk` 0.32 puts
+    /// `with_max_export_timeout` behind an experimental feature, so the knob
+    /// could be accepted here but not applied. Set `OTEL_BSP_EXPORT_TIMEOUT`
+    /// instead — the SDK reads it.
+    pub max_queue_size: Option<usize>,
 }
 
 /// Configuration for the Introspection span processor.
@@ -224,7 +240,7 @@ pub struct IntrospectionSpanProcessor {
 /// How many traces the conversation-id fallback remembers.
 ///
 /// The map would otherwise grow for the process's lifetime, one entry per
-/// trace. Matching the other SDKs' bound keeps the eviction point the same
+/// trace. A fixed bound keeps the eviction point predictable
 /// everywhere.
 const MAX_TRACKED_TRACES: usize = 4096;
 
@@ -369,6 +385,9 @@ impl IntrospectionSpanProcessor {
             if let Some(batch_size) = max_batch_size {
                 batch_config = batch_config.with_max_export_batch_size(batch_size);
             }
+            if let Some(queue_size) = advanced.max_queue_size {
+                batch_config = batch_config.with_max_queue_size(queue_size);
+            }
             InnerProcessor::Batch(
                 BatchSpanProcessor::builder(exporter_for_processor)
                     .with_batch_config(batch_config.build())
@@ -457,8 +476,7 @@ impl IntrospectionSpanProcessor {
         // Baggage won above, and an id the emitter set itself is still on the
         // span, so anything left without one has no conversation at all. Mint
         // a stable id per trace: without it the spans of a single run reach
-        // Introspection unable to be grouped, which is what the other SDKs
-        // avoid by doing exactly this.
+        // Introspection unable to be grouped.
         let has_conversation = span
             .attributes
             .iter()
@@ -580,11 +598,41 @@ mod tests {
                 span_exporter: None,
                 flush_interval_ms: None,
                 max_batch_size: None,
+                max_queue_size: None,
             }),
         )
         .unwrap();
 
         assert!(processor.force_flush().is_ok());
+    }
+
+    /// `max_queue_size` reaches the batch config rather than being accepted
+    /// and dropped.
+    ///
+    /// A burst larger than the OTel default of 2048 drops spans silently,
+    /// and there was no knob here to raise it. The `BatchSpanProcessor`
+    /// prints its resolved bound, which is the only observation point
+    /// OpenTelemetry offers.
+    #[test]
+    fn max_queue_size_reaches_the_batch_config() {
+        let processor = IntrospectionSpanProcessor::new(
+            SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
+                max_queue_size: Some(64),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        assert!(
+            format!("{processor:?}").contains("max_queue_size: 64"),
+            "queue bound never reached the processor: {processor:?}"
+        );
+
+        let default =
+            IntrospectionSpanProcessor::new(SpanProcessorConfig::with_token("t")).unwrap();
+        assert!(
+            format!("{default:?}").contains("max_queue_size: 2048"),
+            "an unset option must leave the OTel default in place: {default:?}"
+        );
     }
 
     #[test]

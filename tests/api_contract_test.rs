@@ -685,7 +685,7 @@ fn sdk_surface_matches_the_published_reference() {
             "accepted by the API but not exposed here",
             true,
         ),
-        // The items route is where the ordering bug hid in the other two SDKs:
+        // The items route is where the ordering bug hid:
         // they declared an `order` the route never accepted and omitted the
         // window/share params it did. A sub-resource is still a route.
         compare(

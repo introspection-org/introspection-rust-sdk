@@ -93,7 +93,7 @@ let mut events = runner.tasks()
     .into_stream().await?;
 
 // `stream()` yields typed AG-UI protocol events (see `introspection_sdk::agui`),
-// matching the JS (`@ag-ui/core`) and Python SDKs. Transport frames
+// matching the AG-UI protocol's own taxonomy. Transport frames
 // (heartbeats) are handled internally; an unknown future event type surfaces
 // as `AgUiEvent::Unknown` rather than failing the stream.
 while let Some(event) = events.next().await {
@@ -117,6 +117,34 @@ for file and conversation sharing grants.
 
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
+
+#### Authenticating without an API key
+
+`introspection_sdk::auth` wraps the Control Plane's `POST /v1/oauth/token`
+grants, so server code (CI jobs, hosted-login backends, federation brokers)
+does not hand-roll a form-encoded token POST. All three return the same
+`OAuthToken`, which carries the `dp_url` the CP resolved for the token's
+project — hand that to a browser client so it needs no separate Data Plane
+configuration.
+
+```rust
+use introspection_sdk::{auth::ServiceAccountTokenParams, IntrospectionClient};
+
+// client_credentials — the headless counterpart to a long-lived API key.
+let client = IntrospectionClient::from_service_account(
+    ServiceAccountTokenParams::builder()
+        .client_id(std::env::var("INTRO_SA_CLIENT_ID")?)
+        .client_secret(std::env::var("INTRO_SA_CLIENT_SECRET")?)
+        .project(std::env::var("INTRO_PROJECT")?)
+        .build()?,
+    None,
+).await?;
+```
+
+`auth::token_exchange` (RFC 8693) trades an end user's partner-IdP token for a
+project-scoped token for a federated `customer` member, and
+`auth::authorization_code_token` (RFC 6749 / PKCE) completes a hosted-login
+callback. No refresh token is issued: re-mint once `expires_in` lapses.
 
 #### Conversations are GenAI spans
 
@@ -269,8 +297,8 @@ while let Some(event) = stream.next().await {
 }
 ```
 
-The same `introspection.reconnect` marker rides the `CUSTOM` channel in the JS
-and Python SDKs, so it is expressible identically across all three.
+The `introspection.reconnect` marker rides the protocol's `CUSTOM` channel, so
+it needs no transport-specific handling.
 
 #### Retries (429 / 5xx)
 

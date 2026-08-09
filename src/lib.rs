@@ -5,7 +5,8 @@
 //!
 //! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
 //!    `Runner`, `tasks`, `files`, `shares`, and runner telemetry reads). Always available, no OpenTelemetry
-//!    dependency. No feature flag required.
+//!    dependency. No feature flag required. [`auth`] mints the token it
+//!    takes when you have OAuth credentials rather than an API key.
 //! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
 //!    `track` / `feedback` / `identify` analytics events. Owns its own
 //!    `SdkLoggerProvider`. Requires the `otel` Cargo feature.
@@ -91,6 +92,7 @@
 
 pub mod agui;
 pub mod api;
+pub mod auth;
 pub mod client;
 pub mod dev_target;
 // Always compiled — `otel::messages` carries the gen_ai semantic-convention
@@ -200,6 +202,10 @@ pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // taxonomy lives in `crate::agui`; these aliases give the common types a
 // discoverable name at the crate root (`Event` alone would be ambiguous).
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
+pub use auth::{
+    authorization_code_token, service_account_token, token_exchange, AuthorizationCodeParams,
+    OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
+};
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use resources::{ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes};
 pub use runner::{Runner, RunnerSource};

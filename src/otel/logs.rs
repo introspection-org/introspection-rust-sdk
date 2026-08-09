@@ -68,8 +68,7 @@ pub type Result<T> = std::result::Result<T, IntrospectionLogsError>;
 ///
 /// The version matters as much as the name: it is how a record is traced back
 /// to the release that produced it. `logger(name)` leaves it unset, so every
-/// event this crate sent was unattributable to a version -- the other SDKs all
-/// carry one.
+/// event this crate sent was unattributable to a version.
 fn sdk_scope() -> InstrumentationScope {
     InstrumentationScope::builder(types::logger_name::SDK)
         .with_version(crate::VERSION)
@@ -124,6 +123,17 @@ pub struct IntrospectionLogsConfig {
 
     /// OTLP max export batch size. `None` uses the OpenTelemetry default.
     pub max_batch_size: Option<usize>,
+
+    /// Maximum records buffered before new ones are dropped. `None` uses the
+    /// OpenTelemetry default (2048). Bounds the queue, not one export — see
+    /// [`crate::otel::SpanProcessorAdvancedOptions::max_queue_size`].
+    ///
+    /// There is deliberately no `export_timeout_ms` beside it:
+    /// `opentelemetry_sdk` 0.32 puts
+    /// `with_max_export_timeout` behind an experimental feature, so the knob
+    /// could be accepted here but not applied. Set `OTEL_BLRP_EXPORT_TIMEOUT`
+    /// (or `OTEL_BSP_EXPORT_TIMEOUT` for spans) instead — the SDK reads both.
+    pub max_queue_size: Option<usize>,
 }
 
 impl IntrospectionLogsConfigBuilder {
@@ -212,7 +222,7 @@ impl IntrospectionLogs {
         // Defaulted rather than left to the OTel defaults (1000ms / 512), so
         // analytics events leave a Rust process on the same cadence as every
         // other SDK and as this crate's own span processor.
-        let batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default()
+        let mut batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default()
             .with_scheduled_delay(Duration::from_millis(
                 config
                     .flush_interval_ms
@@ -223,6 +233,13 @@ impl IntrospectionLogs {
                     .max_batch_size
                     .unwrap_or(types::defaults::MAX_BATCH_SIZE),
             );
+        // Applied only when set, so an unset option leaves the OpenTelemetry
+        // default in charge. The batch size and flush interval above are
+        // defaulted deliberately; this one has no Introspection-specific
+        // value to prefer, so the OpenTelemetry default is the right one.
+        if let Some(queue_size) = config.max_queue_size {
+            batch_config = batch_config.with_max_queue_size(queue_size);
+        }
         let processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(exporter)
             .with_batch_config(batch_config.build())
             .build();
@@ -407,7 +424,7 @@ impl IntrospectionLogs {
         // The caller's extras go in first: `name` and `comments` are named
         // arguments, so a `with_property("name", ...)` must not silently
         // replace the feedback name this call is about. Matches the Node and
-        // browser SDKs, where the same ordering bug shipped.
+        // same ordering bug on the browser side.
         let mut properties: HashMap<String, PropertyValue> = options.extra.clone();
         properties.insert("name".to_string(), PropertyValue::String(name.to_string()));
         if let Some(comments) = &options.comments {
@@ -478,9 +495,8 @@ impl IntrospectionLogs {
 
     /// Scope a conversation, minting an id when the caller has none.
     ///
-    /// The counterpart of the JS SDK's `conversation()` and the Python SDK's
-    /// `conversation()` context manager. Without it a Rust caller starting a
-    /// fresh conversation had to invent an id, and an invented one does not
+    /// Without it a caller starting a fresh conversation had to invent an
+    /// id, and an invented one does not
     /// match the `intro_conv_<hex>` shape the rest of the platform mints.
     ///
     /// Returns the id alongside the guard, since a caller that did not
@@ -726,7 +742,7 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-        // Stringifying these shipped AnyValue::String where the JS SDK ships
+        // Stringifying these shipped AnyValue::String where the backend expects
         // an int/double/bool for the same key.
         assert!(matches!(attrs["properties.rating"], AnyValue::Int(5)));
         assert!(matches!(attrs["properties.ratio"], AnyValue::Double(_)));
@@ -852,7 +868,7 @@ mod tests {
             .unwrap();
 
         let (id, _scope) = logs.conversation(None);
-        // `intro_conv_` + 32 hex, the same shape the JS and Python SDKs
+        // `intro_conv_` + 32 hex, the shape the backend
         // produce and the same one the span processor falls back to.
         assert!(id.starts_with("intro_conv_"), "got {id}");
         let hex = &id["intro_conv_".len()..];

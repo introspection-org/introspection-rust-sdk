@@ -139,6 +139,60 @@ impl IntrospectionClient {
         self.experiments().handle(experiment_id, project)
     }
 
+    /// Authenticate as a confidential service account and return a ready
+    /// client.
+    ///
+    /// Mints a short-lived, project-scoped CP access token via the
+    /// `client_credentials` grant (see
+    /// [`crate::auth::service_account_token`]) and wires it in as the bearer
+    /// token, so the runtime flow works exactly as it does with an API key.
+    ///
+    /// The token is not auto-refreshed: it lives for `expires_in` seconds, so
+    /// re-mint (call this again) for long-lived processes once it lapses.
+    /// Call [`crate::auth::service_account_token`] directly if you also need
+    /// the resolved `dp_url` (e.g. to hand a browser the Data Plane
+    /// endpoint).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use introspection_sdk::{auth::ServiceAccountTokenParams, IntrospectionClient};
+    ///
+    /// # async fn main_() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = IntrospectionClient::from_service_account(
+    ///     ServiceAccountTokenParams::builder()
+    ///         .client_id(std::env::var("INTRO_SA_CLIENT_ID")?)
+    ///         .client_secret(std::env::var("INTRO_SA_CLIENT_SECRET")?)
+    ///         .project(std::env::var("INTRO_PROJECT")?)
+    ///         .build()?,
+    ///     None,
+    /// )
+    /// .await?;
+    /// let runtime = client.runtime("customer-agent").await?;
+    /// # let _ = runtime;
+    /// # Ok(()) }
+    /// ```
+    pub async fn from_service_account(
+        params: crate::auth::ServiceAccountTokenParams,
+        advanced: Option<types::AdvancedOptions>,
+    ) -> crate::api::error::ApiResult<Self> {
+        // Resolved before the params move into the mint call, so the client
+        // talks to the same CP host the token was minted against. Leaving it
+        // to `new()` would send a token minted against a staging CP to
+        // whatever `INTROSPECTION_BASE_API_URL` happened to say.
+        let base_api_url = crate::auth::resolve_base_api_url(params.base_api_url.as_deref());
+        let token = crate::auth::service_account_token(params).await?;
+        let advanced = types::AdvancedOptions {
+            base_api_url: advanced
+                .as_ref()
+                .and_then(|a| a.base_api_url.clone())
+                .or(Some(base_api_url)),
+            additional_headers: advanced.and_then(|a| a.additional_headers),
+        };
+        Self::new(ClientConfig::with_token(token.access_token).advanced(advanced))
+            .map_err(|e| crate::api::error::IntrospectionAPIError::InvalidConfig(e.to_string()))
+    }
+
     /// Graceful shutdown. The REST build has nothing to flush, so this
     /// is a no-op — kept for API parity with the `otel` build.
     pub fn shutdown(self) -> Result<()> {

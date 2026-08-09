@@ -62,7 +62,7 @@ impl HttpConfig {
         // unconditional insert silently discarded a caller-supplied
         // User-Agent.
         // `introspection-sdk/<version>`, the same string the OTLP exporters
-        // in this crate send and the same one the Python and Node SDKs send.
+        // in this crate send.
         // It used to be language-tagged, which duplicated in a non-standard
         // place what the crate name and version already say.
         h.entry(reqwest::header::USER_AGENT).or_insert_with(|| {
@@ -356,7 +356,7 @@ async fn expect_ok(res: Response) -> ApiResult<Response> {
     Err(to_api_error(res, status).await)
 }
 
-async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIError {
+pub(crate) async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIError {
     let request_id = res
         .headers()
         .get("x-request-id")
@@ -394,7 +394,7 @@ async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIErro
                 message,
                 // The envelope's `code` used to be dropped on the floor, so
                 // `runner_expired` on a 401 was indistinguishable from a bad
-                // API key. The JS and Python SDKs both read it.
+                // API key.
                 code: extract_code(&value),
                 request_id,
                 body: Some(value),

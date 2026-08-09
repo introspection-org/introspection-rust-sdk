@@ -28,7 +28,7 @@ pub use event::{
 
 /// Introspection's extensions to the AG-UI protocol, carried on the `CUSTOM`
 /// event channel so they interoperate with any AG-UI consumer and are
-/// expressible identically across the JS / Python / Rust SDKs.
+/// expressible identically in every language Introspection supports.
 pub mod introspection {
     use super::event::{BaseEvent, CustomEvent, Event};
     use serde_json::Value;

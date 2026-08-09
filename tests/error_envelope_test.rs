@@ -5,7 +5,7 @@
 //! were read and discarded: `IntrospectionAPIError::Http` had a public `code`
 //! field hardcoded to `None` with no accessor, and the retry floor lived only
 //! inside the retry loop, so a caller handling the error after the budget was
-//! spent had nothing to schedule against. The JS and Python SDKs surface both.
+//! spent had nothing to schedule against.
 //!
 //! This drives real requests through the client rather than calling the
 //! private translator, so the header read (which has to happen before the
@@ -129,7 +129,7 @@ async fn a_non_json_error_body_still_carries_the_retry_floor() {
 #[tokio::test]
 async fn every_request_names_the_sdk_and_its_release() {
     // The same `introspection-sdk/<version>` string the OTLP exporters in
-    // this crate send, and the same one the other SDKs send. It used to be
+    // this crate send. It used to be
     // language-tagged here and nowhere else.
     let server = MockServer::start().await;
     Mock::given(method("GET"))

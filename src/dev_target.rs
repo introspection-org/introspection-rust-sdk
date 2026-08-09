@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn ordinary_machine_names_survive_encoding_intact() {
-        // The three SDKs must put the same bytes on the wire for the same
+        // The header must carry the same bytes on the wire for the same
         // target: a hyphenated hostname is the common case, and encoding it
         // differently from the JS and Python clients would show up in every
         // header and log line even though routing tolerates it.

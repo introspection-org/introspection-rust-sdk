@@ -1,7 +1,7 @@
 //! REST API surface for the Introspection Data Plane (`/v1/tasks`,
 //! `/v1/files`, `/v1/shares`).
 //!
-//! Runner-bound resource namespaces mirror the corresponding JS / Python SDKs:
+//! Runner-bound resource namespaces mirror the REST API's own grouping:
 //!
 //! - [`Tasks`] — task lifecycle (list / create / update / archive / delete)
 //!   with nested [`TaskRuns`] and a cursor-style [`Tasks::start_prompt`]

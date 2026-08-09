@@ -11,10 +11,9 @@ use thiserror::Error;
 
 /// HTTP error from the Introspection DP REST API.
 ///
-/// Mirrors the shape of the JS `IntrospectionAPIError` and Python
-/// `IntrospectionAPIError`: a status code, optional machine-readable code,
-/// optional request ID (from `X-Request-Id`), and the raw response body
-/// (parsed JSON when the response was JSON, else the text).
+/// Carries a status code, the optional machine-readable code from the error
+/// envelope, the optional request ID (from `X-Request-Id`), and the raw
+/// response body (parsed JSON when the response was JSON, else the text).
 #[derive(Error, Debug)]
 pub enum IntrospectionAPIError {
     /// Non-2xx HTTP response from the DP.
@@ -24,8 +23,8 @@ pub enum IntrospectionAPIError {
         status: u16,
         /// Machine-readable error code from the response body, when the DP
         /// sent one. This is what distinguishes an expired runner JWT from
-        /// any other `401`, and it is how the JS and Python SDKs pick their
-        /// typed error subclass.
+        /// any other `401`, so a caller can branch on the cause rather than
+        /// on the status alone.
         code: Option<String>,
         request_id: Option<String>,
         body: Option<serde_json::Value>,
