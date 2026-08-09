@@ -22,9 +22,18 @@ pub enum IntrospectionAPIError {
     Http {
         message: String,
         status: u16,
+        /// Machine-readable error code from the response body, when the DP
+        /// sent one. This is what distinguishes an expired runner JWT from
+        /// any other `401`, and it is how the JS and Python SDKs pick their
+        /// typed error subclass.
         code: Option<String>,
         request_id: Option<String>,
         body: Option<serde_json::Value>,
+        /// `Retry-After`, when the response carried one. A floor on when to
+        /// come back, not advice — the retry path already honours it, and a
+        /// caller handling the error after the budget is spent needs the
+        /// same number.
+        retry_after: Option<std::time::Duration>,
     },
 
     /// Network / transport layer failure (DNS, TLS, connection reset, …).
@@ -51,7 +60,8 @@ pub enum IntrospectionAPIError {
 }
 
 impl IntrospectionAPIError {
-    /// Build an `Http` variant.
+    /// Build an `Http` variant for a response that carried no error
+    /// envelope to read a `code` or a `Retry-After` out of.
     pub(crate) fn http(
         status: u16,
         message: impl Into<String>,
@@ -64,6 +74,7 @@ impl IntrospectionAPIError {
             code: None,
             request_id,
             body,
+            retry_after: None,
         }
     }
 
@@ -79,6 +90,29 @@ impl IntrospectionAPIError {
     pub fn request_id(&self) -> Option<&str> {
         match self {
             Self::Http { request_id, .. } => request_id.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Machine-readable error code from the response body, if the DP sent
+    /// one. `"runner_expired"` on a `401` means the Runner's session token
+    /// has aged out and the runner needs refreshing, which is otherwise
+    /// indistinguishable from a bad API key.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            Self::Http { code, .. } => code.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// How long the server asked the caller to wait, from `Retry-After`.
+    ///
+    /// Present on a `429` (and any other status that carried the header)
+    /// once the transparent retry budget is spent, so a caller scheduling
+    /// its own retry uses the server's number rather than guessing.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            Self::Http { retry_after, .. } => *retry_after,
             _ => None,
         }
     }

@@ -61,12 +61,13 @@ impl HttpConfig {
         // `entry`, not `insert`: additional_headers is applied above, and an
         // unconditional insert silently discarded a caller-supplied
         // User-Agent.
+        // `introspection-sdk/<version>`, the same string the OTLP exporters
+        // in this crate send and the same one the Python and Node SDKs send.
+        // It used to be language-tagged, which duplicated in a non-standard
+        // place what the crate name and version already say.
         h.entry(reqwest::header::USER_AGENT).or_insert_with(|| {
-            HeaderValue::from_str(&format!(
-                "introspection-sdk-rust/{}",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .expect("static user agent is valid")
+            HeaderValue::from_str(&format!("introspection-sdk/{}", crate::VERSION))
+                .expect("static user agent is valid")
         });
         Ok(h)
     }
@@ -361,6 +362,10 @@ async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIErro
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
+    // Read before the body is consumed. The transparent retry path already
+    // honours this; carrying it on the error is what lets a caller schedule
+    // its own retry with the server's number once the budget is spent.
+    let retry_after = retry_after_from(res.headers());
     let ct = res
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -384,7 +389,17 @@ async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIErro
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let message =
                 extract_message(&value).unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
-            return IntrospectionAPIError::http(status.as_u16(), message, request_id, Some(value));
+            return IntrospectionAPIError::Http {
+                status: status.as_u16(),
+                message,
+                // The envelope's `code` used to be dropped on the floor, so
+                // `runner_expired` on a 401 was indistinguishable from a bad
+                // API key. The JS and Python SDKs both read it.
+                code: extract_code(&value),
+                request_id,
+                body: Some(value),
+                retry_after,
+            };
         }
     }
     let text = String::from_utf8_lossy(&body_bytes).into_owned();
@@ -393,7 +408,19 @@ async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIErro
     } else {
         (Some(serde_json::Value::String(text.clone())), text)
     };
-    IntrospectionAPIError::http(status.as_u16(), message, request_id, body)
+    IntrospectionAPIError::Http {
+        status: status.as_u16(),
+        message,
+        code: None,
+        request_id,
+        body,
+        retry_after,
+    }
+}
+
+/// The DP's machine-readable error code, when the envelope carries one.
+fn extract_code(value: &serde_json::Value) -> Option<String> {
+    value.as_object()?.get("code")?.as_str().map(str::to_string)
 }
 
 fn extract_message(value: &serde_json::Value) -> Option<String> {

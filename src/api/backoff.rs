@@ -37,15 +37,31 @@ fn backoff_delay_with_jitter(
     floor + jitter_room.mul_f64(random.clamp(0.0, 1.0))
 }
 
-/// Parse a `Retry-After` response header as a delay. Only the delta-seconds
-/// form is honoured (what the DP emits); an HTTP-date value is ignored.
+/// Parse a `Retry-After` response header as a delay.
+///
+/// RFC 9110 defines the value as *either* delta-seconds or an HTTP-date.
+/// Reading only the numeric form turned every date-valued header into
+/// `None`, which the retry path reads as "no floor supplied" and replaces
+/// with its own much shorter backoff — re-hitting a rate limiter that had
+/// just said exactly when to come back. The JS and Python SDKs understand
+/// both forms.
+///
+/// A date already in the past means "retry now", not a negative delay.
 pub(crate) fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
-    headers
+    let value = headers
         .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .filter(|secs| secs.is_finite() && *secs >= 0.0)
-        .map(Duration::from_secs_f64)
+        .and_then(|v| v.to_str().ok())?
+        .trim();
+
+    if let Ok(secs) = value.parse::<f64>() {
+        return (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs));
+    }
+
+    let when = httpdate::parse_http_date(value).ok()?;
+    Some(
+        when.duration_since(std::time::SystemTime::now())
+            .unwrap_or(Duration::ZERO),
+    )
 }
 
 #[cfg(test)]
@@ -102,14 +118,42 @@ mod tests {
     }
 
     #[test]
-    fn ignores_absent_or_non_numeric_retry_after() {
+    fn ignores_absent_or_unparseable_retry_after() {
         assert_eq!(retry_after_from(&HeaderMap::new()), None);
         let mut h = HeaderMap::new();
-        // HTTP-date form is not honoured.
+        h.insert(reqwest::header::RETRY_AFTER, "soonish".parse().unwrap());
+        assert_eq!(retry_after_from(&h), None);
+    }
+
+    #[test]
+    fn parses_the_http_date_form_too() {
+        // RFC 9110 allows either form. Reading only the numeric one meant a
+        // date-valued header produced no floor at all, and the retry path
+        // substituted its own much shorter backoff -- going straight back at
+        // a limiter that had just said when to return.
+        let when = std::time::SystemTime::now() + Duration::from_secs(120);
+        let mut h = HeaderMap::new();
         h.insert(
             reqwest::header::RETRY_AFTER,
-            "Wed, 21 Oct 2026 07:28:00 GMT".parse().unwrap(),
+            httpdate::fmt_http_date(when).parse().unwrap(),
         );
-        assert_eq!(retry_after_from(&h), None);
+        let parsed = retry_after_from(&h).expect("date form should parse");
+        // Second-resolution formatting, and time passes between the two
+        // calls, so this is a window rather than an equality.
+        assert!(
+            parsed <= Duration::from_secs(120) && parsed >= Duration::from_secs(115),
+            "expected ~120s, got {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_retry_after_date_in_the_past_means_now() {
+        let when = std::time::SystemTime::now() - Duration::from_secs(600);
+        let mut h = HeaderMap::new();
+        h.insert(
+            reqwest::header::RETRY_AFTER,
+            httpdate::fmt_http_date(when).parse().unwrap(),
+        );
+        assert_eq!(retry_after_from(&h), Some(Duration::ZERO));
     }
 }

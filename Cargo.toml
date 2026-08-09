@@ -81,6 +81,11 @@ arrow = { version = "59", default-features = false, features = ["ipc"], optional
 # Streaming support (StreamExt)
 futures = "0.3"
 
+# `Retry-After` may carry an HTTP-date instead of delta-seconds, and RFC 9110
+# admits three date formats. Zero further dependencies, and the JS and Python
+# SDKs both understand the date form via their standard libraries.
+httpdate = "1.0.3"
+
 [dev-dependencies]
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 # In-memory span / log exporters for the in-crate tests. As a dev-dependency
