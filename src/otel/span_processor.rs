@@ -198,7 +198,6 @@ enum InnerProcessor {
 #[derive(Debug)]
 pub struct IntrospectionSpanProcessor {
     inner: InnerProcessor,
-    _exporter: Arc<SpanExporter>,
 }
 
 impl IntrospectionSpanProcessor {
@@ -216,20 +215,17 @@ impl IntrospectionSpanProcessor {
             .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
             .unwrap_or_else(|| crate::types::defaults::SERVICE_NAME.to_string());
 
-        // Note: BatchSpanProcessor::builder takes ownership of SpanExporter (not Arc)
-        // So we need to handle custom exporters differently - we can't extract from Arc
-        // For custom exporters, we'll create a dummy one for the processor since the real one
-        // is stored in _exporter for reference
-        let (exporter, exporter_for_processor): (Arc<SpanExporter>, SpanExporter) =
+        // The processor takes ownership of the exporter, so a caller-supplied
+        // one has to be unwrapped out of its Arc — same as IntrospectionLogs.
+        // Building a stand-in here instead would silently discard the caller's
+        // exporter and export to that stand-in's endpoint.
+        let exporter_for_processor: SpanExporter =
             if let Some(custom_exporter) = advanced.span_exporter {
-                let dummy_exporter = SpanExporter::builder()
-                    .with_http()
-                    .with_http_client(new_blocking_http_client(Duration::from_secs(30)))
-                    .with_endpoint("http://localhost/v1/traces")
-                    .with_timeout(Duration::from_secs(30))
-                    .build()
-                    .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?;
-                (custom_exporter.clone(), dummy_exporter)
+                Arc::try_unwrap(custom_exporter).map_err(|_| {
+                    SpanProcessorError::OpenTelemetry(
+                        "Custom span exporter has multiple references".to_string(),
+                    )
+                })?
             } else {
                 let base_url = advanced
                     .base_otel_url
@@ -261,31 +257,16 @@ impl IntrospectionSpanProcessor {
                     headers.extend(additional);
                 }
 
-                let headers_clone = headers.clone();
-
                 let http_client = new_blocking_http_client(Duration::from_secs(30));
 
-                let exporter_for_processor = SpanExporter::builder()
+                SpanExporter::builder()
                     .with_http()
                     .with_http_client(http_client)
                     .with_endpoint(&endpoint)
                     .with_headers(headers)
                     .with_timeout(Duration::from_secs(30))
                     .build()
-                    .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?;
-
-                let exporter = Arc::new(
-                    SpanExporter::builder()
-                        .with_http()
-                        .with_http_client(new_blocking_http_client(Duration::from_secs(30)))
-                        .with_endpoint(&endpoint)
-                        .with_headers(headers_clone)
-                        .with_timeout(Duration::from_secs(30))
-                        .build()
-                        .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?,
-                );
-
-                (exporter, exporter_for_processor)
+                    .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?
             };
 
         // Use SimpleSpanProcessor for sequential export when max_batch_size=1.
@@ -300,7 +281,11 @@ impl IntrospectionSpanProcessor {
                 None
             }
         });
-        let flush_interval = Duration::from_millis(advanced.flush_interval_ms.unwrap_or(5000));
+        let flush_interval = Duration::from_millis(
+            advanced
+                .flush_interval_ms
+                .unwrap_or(types::defaults::FLUSH_INTERVAL_MS),
+        );
         let inner = if max_batch_size == Some(1) {
             InnerProcessor::Simple(SimpleSpanProcessor::new(exporter_for_processor))
         } else {
@@ -316,10 +301,7 @@ impl IntrospectionSpanProcessor {
             )
         };
 
-        Ok(Self {
-            inner,
-            _exporter: exporter,
-        })
+        Ok(Self { inner })
     }
 }
 
@@ -430,6 +412,35 @@ mod tests {
         .unwrap();
 
         assert!(processor.force_flush().is_ok());
+    }
+
+    #[test]
+    fn test_custom_exporter_must_not_be_shared() {
+        // The processor takes ownership of the exporter. A caller holding a
+        // second reference gets a loud error rather than a processor that
+        // quietly exports somewhere else.
+        let exporter = Arc::new(
+            SpanExporter::builder()
+                .with_http()
+                .with_endpoint("http://localhost:9999/v1/traces")
+                .with_timeout(Duration::from_secs(1))
+                .build()
+                .unwrap(),
+        );
+        let _second_reference = Arc::clone(&exporter);
+
+        let err = IntrospectionSpanProcessor::new(
+            SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
+                span_exporter: Some(exporter),
+                ..Default::default()
+            }),
+        )
+        .expect_err("a shared exporter cannot be moved into the processor");
+
+        assert!(
+            matches!(err, SpanProcessorError::OpenTelemetry(ref m) if m.contains("multiple references")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

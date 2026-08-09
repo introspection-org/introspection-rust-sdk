@@ -26,10 +26,10 @@ use crate::types::{self, ClientConfig};
 /// SDK version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Errors that can occur in the Introspection client. The REST build
-/// only ever raises `NotInitialized` / `AlreadyShutdown` / `InvalidConfig`
-/// directly; HTTP failures bubble up as
-/// [`crate::IntrospectionAPIError`] from the underlying namespaces.
+/// Errors that can occur in the Introspection client. HTTP failures bubble up
+/// as [`crate::IntrospectionAPIError`] from the underlying namespaces, so the
+/// only variant this type constructs today is `OpenTelemetry`; the other two
+/// are part of the public contract for callers matching exhaustively.
 #[derive(Error, Debug)]
 pub enum IntrospectionError {
     #[error("OpenTelemetry error: {0}")]

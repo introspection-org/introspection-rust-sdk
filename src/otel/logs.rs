@@ -33,7 +33,6 @@ use opentelemetry::{baggage::BaggageExt, Context, Key, KeyValue};
 use opentelemetry_otlp::{LogExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{logs::SdkLoggerProvider, Resource};
 use thiserror::Error;
-use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use crate::otel::types::{
@@ -80,10 +79,6 @@ pub struct IntrospectionLogs {
     /// Service name (used in tests).
     #[allow(dead_code)]
     service_name: String,
-
-    /// User traits from identify calls (stored locally).
-    #[allow(dead_code)]
-    traits: Arc<RwLock<HashMap<String, PropertyValue>>>,
 }
 
 /// Builder-friendly config for [`IntrospectionLogs`]. Use
@@ -205,7 +200,6 @@ impl IntrospectionLogs {
             logger_provider,
             logger,
             service_name,
-            traits: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -370,11 +364,14 @@ impl IntrospectionLogs {
     pub fn identify(&self, user_id: &str, options: Option<IdentifyOptions>) {
         let opts = options.unwrap_or_default();
 
-        if !opts.traits.is_empty() {
-            if let Ok(mut traits) = self.traits.try_write() {
-                traits.extend(opts.traits.clone());
-            }
+        // The identity attributes are read off the context, so the ids this
+        // call is about have to be on it while the record is built. Without
+        // this the event carries neither the user id nor the anonymous id.
+        let mut values: Vec<(&str, &str)> = vec![(types::baggage::USER_ID, user_id)];
+        if let Some(anon) = opts.anonymous_id.as_deref() {
+            values.push((types::baggage::ANONYMOUS_ID, anon));
         }
+        let _guard = BaggageGuard::new_multi(&values);
 
         let attributes = self.build_attributes(
             types::event_name::IDENTIFY,
@@ -419,11 +416,15 @@ impl IntrospectionLogs {
     /// Set agent context in OpenTelemetry baggage.
     #[must_use = "the returned guard must be held to maintain the baggage context"]
     pub fn set_agent(&self, agent_name: &str, agent_id: Option<&str>) -> BaggageGuard {
-        let mut guard = BaggageGuard::new(types::baggage::AGENT_NAME, agent_name);
-        if let Some(id) = agent_id {
-            guard = guard.with_additional(types::baggage::AGENT_ID, id);
+        // One guard for both keys. Layering a second guard over the first
+        // would drop it, restoring the context that carried the name.
+        match agent_id {
+            Some(id) => BaggageGuard::new_multi(&[
+                (types::baggage::AGENT_NAME, agent_name),
+                (types::baggage::AGENT_ID, id),
+            ]),
+            None => BaggageGuard::new(types::baggage::AGENT_NAME, agent_name),
         }
-        guard
     }
 
     /// Set multiple baggage values at once.
@@ -512,13 +513,6 @@ impl BaggageGuard {
         Self {
             _context_guard: guard,
         }
-    }
-
-    /// Add additional baggage to this guard.
-    /// Merges with existing baggage instead of replacing it.
-    fn with_additional(self, key: &str, value: &str) -> Self {
-        drop(self);
-        Self::new(key, value)
     }
 }
 

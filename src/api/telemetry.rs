@@ -332,7 +332,10 @@ impl Events {
     pub async fn get(&self, event_id: &str) -> ApiResult<Event> {
         #[derive(serde::Serialize)]
         struct Q {}
-        let path = format!("/v1/events/{}", event_id);
+        let path = format!(
+            "/v1/events/{}",
+            utf8_percent_encode(event_id, PATH_SEGMENT_ENCODE_SET)
+        );
         self.http.get_json(&path, &Q {}).await
     }
 

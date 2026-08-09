@@ -94,7 +94,7 @@ jobs:
       - name: Check if VERSION changed
         id: check
         run: |
-          if git diff HEAD~1 --name-only | grep -q '^VERSION$'; then
+          if git diff HEAD~1 --name-only | grep -q '^version.txt$'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$(tr -d '[:space:]' < version.txt)" >> "$GITHUB_OUTPUT"
           else

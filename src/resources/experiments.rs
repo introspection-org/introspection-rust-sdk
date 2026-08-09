@@ -11,6 +11,8 @@ use std::sync::Arc;
 use serde::Serialize;
 use uuid::Uuid;
 
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
@@ -89,7 +91,8 @@ impl ExperimentHandle {
     pub async fn run(&self, ctx: RunRequest) -> ApiResult<Runner> {
         let path = format!(
             "/v1/experiments/{}/run?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         let spec: RunnerSpec = self.http.post_json(&path, &ctx).await?;
         let source = RunnerSource::Experiment {
@@ -104,7 +107,8 @@ impl ExperimentHandle {
     pub async fn start(&self) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/start?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
@@ -112,7 +116,8 @@ impl ExperimentHandle {
     pub async fn end(&self) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/end?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
@@ -120,8 +125,21 @@ impl ExperimentHandle {
     pub async fn cancel(&self) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/cancel?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
+}
+
+/// Everything outside RFC 3986's *unreserved* set, so a project slug carrying
+/// `&`, `#`, `+`, or a space cannot rewrite the query string it rides in.
+const QUERY_VALUE_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
+pub(crate) fn encode_project(project: &StringOrUuid) -> String {
+    utf8_percent_encode(&project.to_string(), QUERY_VALUE_ENCODE_SET).to_string()
 }

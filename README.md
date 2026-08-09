@@ -61,10 +61,11 @@ introspection-sdk = { version = "0.1", features = ["otel"] }
 
 ### Feature flags
 
-| Feature   | Description                                                        |
-| --------- | ------------------------------------------------------------------ |
-| `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
-| `testing` | In-memory span exporter and test helpers (implies `otel`)          |
+| Feature   | Description                                                          |
+| --------- | -------------------------------------------------------------------- |
+| `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`         |
+| `arrow`   | Arrow IPC decode for the telemetry reads (`list_arrow` / `export_arrow`) |
+| `testing` | In-memory span exporter and test helpers (implies `otel`)            |
 
 ## Three surfaces
 

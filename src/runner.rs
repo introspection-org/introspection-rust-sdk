@@ -61,7 +61,11 @@ impl RunnerSource {
                 project,
                 ctx,
             } => {
-                let path = format!("/v1/experiments/{}/run?project={}", experiment_id, project);
+                let path = format!(
+                    "/v1/experiments/{}/run?project={}",
+                    experiment_id,
+                    crate::resources::experiments::encode_project(project)
+                );
                 cp_http.post_json(&path, ctx).await
             }
         }
@@ -244,7 +248,10 @@ fn build_dp_http(dp_endpoint: &str, bearer: &str) -> ApiResult<HttpClient> {
     let cfg = HttpConfig {
         api_url: dp_endpoint.to_string(),
         token: bearer.to_string(),
-        additional_headers: HashMap::new(),
+        // INTROSPECTION_DEV_TARGET has to ride the DP calls too: `POST
+        // /v1/tasks` is the exact path dev_target exists for, and it is
+        // served by this client, not the CP one.
+        additional_headers: crate::dev_target::with_dev_target(HashMap::new()),
         timeout: Duration::from_secs(defaults::API_TIMEOUT_SECS),
         max_retries: defaults::API_MAX_RETRIES,
         retry_base: Duration::from_millis(defaults::API_RETRY_BASE_MS),

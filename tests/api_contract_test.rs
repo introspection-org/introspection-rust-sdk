@@ -33,7 +33,7 @@
 //! check meant to catch it.
 //!
 //! `#[ignore]`d, following this repository's convention for tests that reach the
-//! network (see `responses_api_test`). Run on a schedule, not on pull requests:
+//! network. Run on a schedule, not on pull requests:
 //! it goes red when the *API* changes, which is a fact about the world and not
 //! about the commit under review, and a gate people learn to ignore is how the
 //! last one survived.
