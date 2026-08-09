@@ -44,6 +44,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //    idempotent on `slug`, so re-running this returns the existing row
     //    rather than duplicating it. `client_secret` is write-only: it goes
     //    up here and is absent from every response.
+    //
+    //    This assumes the Slack app already exists. Registering a new one is a
+    //    second pass: its delivery URL contains the connector id
+    //    ({cp-host}/v1/webhooks/slack/{connector.id}), so the connector has to
+    //    exist first, and the credentials come back afterwards through
+    //    `connectors().update(...)` with `webhook_url` / `client_secret`.
     let params = ConnectorCreateParams {
         slug: Some("slack-support".into()),
         scopes: Some(vec![
