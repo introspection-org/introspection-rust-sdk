@@ -2,8 +2,9 @@
 //!
 //! [`parse_sse_response`] is the low-level parser: it yields raw [`SseEvent`]
 //! frames (the `event` / `data` / `id` wire shape) verbatim.
-//! [`decode_agui_event`] lifts one `ag_ui` frame's `data` into a typed
-//! [`crate::agui::Event`]. The resumable stream (`crate::api::resumable`)
+//! `decode_agui_event` (crate-internal) lifts one `ag_ui` frame's `data`
+//! into a typed [`crate::agui::Event`]. The resumable stream
+//! (`crate::api::resumable`)
 //! composes the two, skipping transport frames (`heartbeat`, `done`,
 //! `result`) as it tracks frame ids for resumption.
 

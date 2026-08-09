@@ -10,10 +10,15 @@
 //! The feature-gated part hosts two independent surfaces that customers can
 //! mix-and-match:
 //!
-//! * [`IntrospectionLogs`] — owns an [`opentelemetry_sdk::logs::SdkLoggerProvider`]
+//! * `IntrospectionLogs` — owns an `opentelemetry_sdk::logs::SdkLoggerProvider`
 //!   and exports `track` / `feedback` / `identify` events over OTLP HTTP.
-//! * [`IntrospectionSpanProcessor`] — a [`opentelemetry_sdk::trace::SpanProcessor`]
+//! * `IntrospectionSpanProcessor` — an `opentelemetry_sdk::trace::SpanProcessor`
 //!   you attach to your own `SdkTracerProvider` to forward spans over OTLP HTTP.
+//!
+//! Named rather than linked: this module doc is compiled even without the
+//! `otel` feature (because [`messages`] is), and a link to an item the
+//! feature gates away is a `cargo doc` warning for every REST-only user.
+//! Both names resolve on docs.rs, which builds with all features.
 //!
 //! These two surfaces share no state. They are also fully independent
 //! from [`crate::IntrospectionClient`] (the always-on REST surface).

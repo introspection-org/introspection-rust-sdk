@@ -22,8 +22,10 @@
 //! With the `arrow` Cargo feature, `list_arrow` requests the
 //! `application/vnd.apache.arrow.stream` response and decodes the Arrow IPC
 //! stream, reading pagination metadata from response headers into an
-//! [`crate::api::arrow::ArrowPage`]. The DP answers `406` when the
-//! Arrow format is unsupported.
+//! `ArrowPage`. The DP answers `406` when the Arrow format is unsupported.
+//!
+//! Not a doc link: `api::arrow` exists only under that feature, so linking
+//! it breaks the build of these docs for everyone who does not enable it.
 
 use std::sync::Arc;
 
