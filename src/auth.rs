@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::encoding::encode;
+use crate::api::encoding::encode_form_component;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::types::defaults;
 
@@ -170,13 +170,12 @@ pub(crate) fn resolve_base_api_url(base_api_url: Option<&str>) -> String {
 
 /// Encode the grant parameters as `application/x-www-form-urlencoded`.
 ///
-/// Hand-rolled on the crate's existing RFC 3986 encoder rather than through
+/// Hand-rolled on the crate's existing percent encoder rather than through
 /// reqwest's `.form()`, which needs a `serde_urlencoded` feature this crate
-/// does not enable. A space lands as `%20` rather than `+`; both decode to a
-/// space, and the unreserved set is the stricter of the two.
+/// does not enable.
 fn urlencode_form(form: &[(&str, &str)]) -> String {
     form.iter()
-        .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
+        .map(|(k, v)| format!("{}={}", encode_form_component(k), encode_form_component(v)))
         .collect::<Vec<_>>()
         .join("&")
 }
