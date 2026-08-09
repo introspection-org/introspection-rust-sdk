@@ -54,7 +54,12 @@ pub(crate) fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
         .trim();
 
     if let Ok(secs) = value.parse::<f64>() {
-        return (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs));
+        // Clamped rather than rejected, matching the date branch below and
+        // the other SDKs: a negative delay is not a thing to wait for, and
+        // "the server sent a nonsense value" still means retry now.
+        return secs
+            .is_finite()
+            .then(|| Duration::from_secs_f64(secs.max(0.0)));
     }
 
     let when = httpdate::parse_http_date(value).ok()?;
@@ -123,6 +128,15 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert(reqwest::header::RETRY_AFTER, "soonish".parse().unwrap());
         assert_eq!(retry_after_from(&h), None);
+    }
+
+    #[test]
+    fn a_negative_delta_means_now_rather_than_a_negative_delay() {
+        // All three SDKs clamp: an unclamped negative became a negative
+        // floor in the backoff below.
+        let mut h = HeaderMap::new();
+        h.insert(reqwest::header::RETRY_AFTER, "-5".parse().unwrap());
+        assert_eq!(retry_after_from(&h), Some(Duration::ZERO));
     }
 
     #[test]
