@@ -27,6 +27,8 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 
 const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
@@ -36,8 +38,8 @@ const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~');
 
 use crate::api::conversation_items::ConversationItems;
-use crate::api::error::ApiResult;
-use crate::api::genai_span::GenAiSpan;
+use crate::api::error::{ApiResult, IntrospectionAPIError};
+use crate::api::genai_span::{GenAiSpan, GenAiSpanList};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
@@ -52,6 +54,24 @@ pub const TRAJECTORY_MEDIA_TYPE: &str = "application/vnd.letta.trajectory+json";
 
 /// Accept header selecting the pinned trajectory-v1 export representation.
 pub const TRAJECTORY_V1_ACCEPT: &str = "application/vnd.letta.trajectory+json;version=1";
+
+/// Wire representation selected for a complete conversation export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationExportFormat {
+    Json,
+    Trajectory,
+    Arrow,
+}
+
+impl ConversationExportFormat {
+    fn accept(self) -> &'static str {
+        match self {
+            Self::Json => "application/json",
+            Self::Trajectory => TRAJECTORY_V1_ACCEPT,
+            Self::Arrow => "application/vnd.apache.arrow.stream",
+        }
+    }
+}
 
 #[cfg(feature = "arrow")]
 use crate::api::arrow::{decode_arrow_response, ArrowPage, ARROW_STREAM_ACCEPT};
@@ -101,6 +121,53 @@ impl Conversations {
             .await
     }
 
+    fn export_path(conversation_id: &str) -> String {
+        format!(
+            "/v1/conversations/{}/export",
+            utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
+        )
+    }
+
+    /// `GET /v1/conversations/{id}/export` — one complete conversation as
+    /// the standard GenAI-span list.
+    pub async fn export_json(
+        &self,
+        conversation_id: &str,
+        params: &ConversationExportParams,
+    ) -> ApiResult<GenAiSpanList> {
+        let response = self
+            .http
+            .get_raw(
+                &Self::export_path(conversation_id),
+                params,
+                Some("application/json"),
+            )
+            .await?;
+        crate::api::http::decode_json(response).await
+    }
+
+    /// Stream a complete export's response bytes without buffering them in
+    /// the SDK. The server walks storage in bounded pages; this stream passes
+    /// each response chunk through as it arrives.
+    pub async fn export_stream(
+        &self,
+        conversation_id: &str,
+        format: ConversationExportFormat,
+        params: &ConversationExportParams,
+    ) -> ApiResult<impl Stream<Item = ApiResult<Bytes>>> {
+        let response = self
+            .http
+            .get_raw(
+                &Self::export_path(conversation_id),
+                params,
+                Some(format.accept()),
+            )
+            .await?;
+        Ok(response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(IntrospectionAPIError::from)))
+    }
+
     /// `GET /v1/conversations` with `Accept: application/vnd.apache.arrow.stream`
     /// — one Arrow page. Pagination metadata comes from response headers
     /// (`X-Next-Cursor` is load-bearing for the next page). Requires the
@@ -130,13 +197,13 @@ impl Conversations {
         conversation_id: &str,
         params: &ConversationExportParams,
     ) -> ApiResult<Trajectory> {
-        let path = format!(
-            "/v1/conversations/{}/export",
-            utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
-        );
         let res = self
             .http
-            .get_raw(&path, params, Some(TRAJECTORY_V1_ACCEPT))
+            .get_raw(
+                &Self::export_path(conversation_id),
+                params,
+                Some(TRAJECTORY_V1_ACCEPT),
+            )
             .await?;
         crate::api::http::decode_json(res).await
     }
@@ -209,13 +276,13 @@ impl Conversations {
         conversation_id: &str,
         params: &ConversationExportParams,
     ) -> ApiResult<ArrowPage> {
-        let path = format!(
-            "/v1/conversations/{}/export",
-            utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
-        );
         let res = self
             .http
-            .get_raw(&path, params, Some(ARROW_STREAM_ACCEPT))
+            .get_raw(
+                &Self::export_path(conversation_id),
+                params,
+                Some(ARROW_STREAM_ACCEPT),
+            )
             .await?;
         decode_arrow_response(res).await
     }

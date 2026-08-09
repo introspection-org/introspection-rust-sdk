@@ -207,6 +207,30 @@ history** for that span — unconditionally, with no `include` to remember. That
 is the read to fork or resume a conversation from. The only remaining `include`
 values are `events` and `resource_attributes`.
 
+#### Complete conversation exports
+
+The Data Plane walks complete exports in 1,000-row storage pages. Typed helpers
+parse JSON, trajectory, and (with the `arrow` feature) Arrow responses;
+`export_stream` forwards raw chunks without retaining the full response in SDK
+memory:
+
+```rust
+use futures::TryStreamExt;
+use introspection_sdk::{ConversationExportFormat, ConversationExportParams};
+
+let conversations = runner.conversations();
+let params = ConversationExportParams::default();
+let mut bytes = conversations
+    .export_stream("conversation-id", ConversationExportFormat::Trajectory, &params)
+    .await?;
+while let Some(chunk) = bytes.try_next().await? {
+    destination.write_all(&chunk).await?;
+}
+
+let spans = conversations.export_json("conversation-id", &params).await?;
+let trajectory = conversations.export_trajectory("conversation-id", &params).await?;
+```
+
 #### Resilient streaming
 
 `stream()` resumes **transparently** across a mid-turn disconnect — gateway
