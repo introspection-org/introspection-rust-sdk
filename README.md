@@ -49,14 +49,14 @@ Default install — `IntrospectionClient` only (no OpenTelemetry pulled in):
 
 ```toml
 [dependencies]
-introspection-sdk = "0.1"
+introspection-sdk = "0.13"
 ```
 
 With logs/traces export:
 
 ```toml
 [dependencies]
-introspection-sdk = { version = "0.1", features = ["otel"] }
+introspection-sdk = { version = "0.13", features = ["otel"] }
 ```
 
 ### Feature flags

@@ -35,11 +35,12 @@ pub enum IntrospectionError {
     #[error("A token is required: set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`")]
     TokenRequired,
 
-    #[error("Client not initialized")]
-    NotInitialized,
-
-    #[error("Client already shut down")]
-    AlreadyShutdown,
+    /// The REST client could not be built (a bad header value, a token that
+    /// is not valid ASCII). Distinct from [`Self::OpenTelemetry`], which is
+    /// where this used to be reported -- confusingly, since a REST-only
+    /// build has no OpenTelemetry in it at all.
+    #[error("Invalid client configuration: {0}")]
+    InvalidConfig(String),
 }
 
 /// Result type for Introspection operations.
@@ -111,7 +112,7 @@ impl IntrospectionClient {
             retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
         };
         let http = HttpClient::new(http_cfg)
-            .map_err(|e| IntrospectionError::OpenTelemetry(e.to_string()))?;
+            .map_err(|e| IntrospectionError::InvalidConfig(e.to_string()))?;
         let cp_http = Arc::new(http);
 
         Ok(Self {

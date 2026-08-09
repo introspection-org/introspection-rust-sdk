@@ -197,13 +197,20 @@ impl IntrospectionLogs {
             .with_service_name(service_name.clone())
             .build();
 
-        let mut batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default();
-        if let Some(interval) = config.flush_interval_ms {
-            batch_config = batch_config.with_scheduled_delay(Duration::from_millis(interval));
-        }
-        if let Some(batch_size) = config.max_batch_size {
-            batch_config = batch_config.with_max_export_batch_size(batch_size);
-        }
+        // Defaulted rather than left to the OTel defaults (1000ms / 512), so
+        // analytics events leave a Rust process on the same cadence as every
+        // other SDK and as this crate's own span processor.
+        let batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default()
+            .with_scheduled_delay(Duration::from_millis(
+                config
+                    .flush_interval_ms
+                    .unwrap_or(types::defaults::FLUSH_INTERVAL_MS),
+            ))
+            .with_max_export_batch_size(
+                config
+                    .max_batch_size
+                    .unwrap_or(types::defaults::MAX_BATCH_SIZE),
+            );
         let processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(exporter)
             .with_batch_config(batch_config.build())
             .build();
@@ -288,27 +295,31 @@ impl IntrospectionLogs {
         conversation_id: Option<&str>,
         previous_response_id: Option<&str>,
         event_id: Option<&str>,
-    ) -> Vec<(Key, String)> {
+    ) -> Vec<(Key, opentelemetry::logs::AnyValue)> {
         let cx = Context::current();
         let (user_id, anonymous_id) = Self::get_identity_from_context(&cx);
         let (ctx_conversation_id, ctx_previous_response_id, agent_name, agent_id) =
             Self::get_gen_ai_from_context(&cx);
 
-        let mut attributes: Vec<(Key, String)> = vec![
-            (Key::new(types::attr::EVENT_NAME), event_name.to_string()),
+        let mut attributes: Vec<(Key, opentelemetry::logs::AnyValue)> = vec![
+            (
+                Key::new(types::attr::EVENT_NAME),
+                event_name.to_string().into(),
+            ),
             (
                 Key::new(types::attr::EVENT_ID),
                 event_id
                     .map(|s| s.to_string())
-                    .unwrap_or_else(generate_event_id),
+                    .unwrap_or_else(generate_event_id)
+                    .into(),
             ),
         ];
 
         if let Some(uid) = user_id {
-            attributes.push((Key::new(types::attr::USER_ID), uid));
+            attributes.push((Key::new(types::attr::USER_ID), uid.into()));
         }
         if let Some(aid) = anonymous_id {
-            attributes.push((Key::new(types::attr::ANONYMOUS_ID), aid));
+            attributes.push((Key::new(types::attr::ANONYMOUS_ID), aid.into()));
         }
 
         let final_conversation_id = conversation_id
@@ -319,23 +330,23 @@ impl IntrospectionLogs {
             .or(ctx_previous_response_id);
 
         if let Some(conv_id) = final_conversation_id {
-            attributes.push((Key::new(types::attr::CONVERSATION_ID), conv_id));
+            attributes.push((Key::new(types::attr::CONVERSATION_ID), conv_id.into()));
         }
         if let Some(resp_id) = final_previous_response_id {
-            attributes.push((Key::new(types::attr::PREVIOUS_RESPONSE_ID), resp_id));
+            attributes.push((Key::new(types::attr::PREVIOUS_RESPONSE_ID), resp_id.into()));
         }
         if let Some(name) = agent_name {
-            attributes.push((Key::new(types::attr::AGENT_NAME), name));
+            attributes.push((Key::new(types::attr::AGENT_NAME), name.into()));
         }
         if let Some(id) = agent_id {
-            attributes.push((Key::new(types::attr::AGENT_ID), id));
+            attributes.push((Key::new(types::attr::AGENT_ID), id.into()));
         }
 
         if let Some(props) = properties {
             for (key, value) in props {
                 attributes.push((
                     Key::new(format!("{}{}", types::attr::PROPERTIES_PREFIX, key)),
-                    value.to_otel_string(),
+                    value.to_otel_value(),
                 ));
             }
         }
@@ -344,7 +355,7 @@ impl IntrospectionLogs {
             for (key, value) in t {
                 attributes.push((
                     Key::new(format!("{}{}", types::attr::TRAITS_PREFIX, key)),
-                    value.to_otel_string(),
+                    value.to_otel_value(),
                 ));
             }
         }
@@ -353,7 +364,7 @@ impl IntrospectionLogs {
     }
 
     /// Emit a log record via OpenTelemetry.
-    fn emit(&self, attributes: Vec<(Key, String)>) {
+    fn emit(&self, attributes: Vec<(Key, opentelemetry::logs::AnyValue)>) {
         let mut record = self.logger.create_log_record();
         record.set_timestamp(SystemTime::now());
         record.set_severity_number(Severity::Info);
@@ -587,6 +598,40 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    #[test]
+    fn test_numeric_and_bool_properties_keep_their_type_on_the_wire() {
+        use opentelemetry::logs::AnyValue;
+
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.track(
+            "Rated",
+            Some(
+                TrackOptions::new()
+                    .with_property("rating", 5)
+                    .with_property("ratio", 0.5)
+                    .with_property("ok", true)
+                    .with_property("label", "good"),
+            ),
+        );
+        let _ = logs.flush();
+
+        let logs_out = exporter.get_emitted_logs().unwrap();
+        let record = &logs_out[0].record;
+        let attrs: std::collections::HashMap<String, AnyValue> = record
+            .attributes_iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+
+        // Stringifying these shipped AnyValue::String where the JS SDK ships
+        // an int/double/bool for the same key.
+        assert!(matches!(attrs["properties.rating"], AnyValue::Int(5)));
+        assert!(matches!(attrs["properties.ratio"], AnyValue::Double(_)));
+        assert!(matches!(attrs["properties.ok"], AnyValue::Boolean(true)));
+        assert!(matches!(attrs["properties.label"], AnyValue::String(_)));
     }
 
     #[test]

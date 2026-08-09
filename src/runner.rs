@@ -116,64 +116,68 @@ impl Runner {
         })
     }
 
-    fn dp_http(&self) -> ApiResult<Arc<HttpClient>> {
-        let state = self
-            .state
+    /// The DP client, whatever state the runner is in.
+    ///
+    /// Infallible on purpose. This used to return a `Result` that six public
+    /// accessors then `panic!`d on, so `runner.tasks()` after
+    /// `runner.close()` -- or any poisoned lock -- aborted the caller's
+    /// process. Closure is enforced on the *request* path instead
+    /// (`HttpClient::close`), which also covers a namespace handle taken
+    /// before the close.
+    fn dp_http(&self) -> Arc<HttpClient> {
+        self.read_state().dp_http.clone()
+    }
+
+    /// Read the state, recovering from a poisoned lock.
+    ///
+    /// A panic in another thread must not turn every later accessor on this
+    /// runner into a panic of its own; the data behind the lock is plain
+    /// cloned values with no invariant to violate.
+    fn read_state(&self) -> std::sync::RwLockReadGuard<'_, RunnerState> {
+        self.state
             .read()
-            .map_err(|_| IntrospectionAPIError::InvalidConfig("runner lock poisoned".into()))?;
-        if state.closed {
-            return Err(IntrospectionAPIError::InvalidConfig(
-                "runner has been closed".to_string(),
-            ));
-        }
-        Ok(state.dp_http.clone())
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// `runner.tasks.*` — runner-bound task operations. Cheap clone.
     pub fn tasks(&self) -> Tasks {
-        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
-        Tasks::new(http)
+        Tasks::new(self.dp_http())
     }
 
     /// `runner.files.*` — runner-bound file operations. Cheap clone.
     pub fn files(&self) -> Files {
-        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
-        Files::new(http)
+        Files::new(self.dp_http())
     }
 
     /// Runner-bound read-sharing grants for files and conversations.
     pub fn shares(&self) -> Shares {
-        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
-        Shares::new(http)
+        Shares::new(self.dp_http())
     }
 
     /// `runner.conversations.*` — Data-Plane telemetry reads over
     /// `GET /v1/conversations` (append-only `otel_traces`). Runner-scoped (DP
     /// bearer + `events:read`). Cheap clone.
     pub fn conversations(&self) -> Conversations {
-        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
-        Conversations::new(http)
+        Conversations::new(self.dp_http())
     }
 
     /// `runner.events.*` — Data-Plane telemetry reads over `GET /v1/events`
     /// (append-only `otel_logs`; typed six-family read, `event_name`
     /// required). Runner-scoped (DP bearer + `events:read`). Cheap clone.
     pub fn events(&self) -> Events {
-        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
-        Events::new(http)
+        Events::new(self.dp_http())
     }
 
     /// `runner.metrics.*` — the bounded `POST /v1/metrics` analytics surface.
     /// Runner-scoped (DP bearer + `events:read`). Cheap clone.
     pub fn metrics(&self) -> Metrics {
-        let http = self.dp_http().unwrap_or_else(|e| panic!("{e}"));
-        Metrics::new(http)
+        Metrics::new(self.dp_http())
     }
 
     /// Resolved runtime context (runtime / arm / recipe pin / identity
     /// / caller).
     pub fn context(&self) -> RunnerContext {
-        self.state.read().expect("runner lock").context.clone()
+        self.read_state().context.clone()
     }
 
     /// DP base URL the runner is currently talking to.
@@ -182,27 +186,22 @@ impl Runner {
     /// `runner.deployment().endpoint`. Use [`Self::deployment`] when
     /// you also need the slug / region.
     pub fn dp_endpoint(&self) -> String {
-        self.state
-            .read()
-            .expect("runner lock")
-            .deployment
-            .endpoint
-            .clone()
+        self.read_state().deployment.endpoint.clone()
     }
 
     /// Resolved DP deployment (endpoint / slug / region).
     pub fn deployment(&self) -> RunnerDeployment {
-        self.state.read().expect("runner lock").deployment.clone()
+        self.read_state().deployment.clone()
     }
 
     /// Session ID assigned by CP.
     pub fn session_id(&self) -> String {
-        self.state.read().expect("runner lock").session_id.clone()
+        self.read_state().session_id.clone()
     }
 
     /// Session expiry (ISO-8601 string).
     pub fn expires_at(&self) -> String {
-        self.state.read().expect("runner lock").expires_at.clone()
+        self.read_state().expires_at.clone()
     }
 
     /// Manual escape hatch — re-call the CP `/run` route with the
@@ -227,20 +226,26 @@ impl Runner {
         Ok(())
     }
 
-    /// Mark the runner closed locally. Future `tasks()` / `files()`
-    /// accessors panic; advanced callers can check [`Self::is_closed`]
-    /// first.
+    /// Mark the runner closed locally. The accessors keep working; the
+    /// requests they make return
+    /// [`IntrospectionAPIError::InvalidConfig`] instead. Callers who want
+    /// to branch before that can check [`Self::is_closed`].
     ///
     /// v1: no server-side revoke (RS256 isn't natively revocable; the
     /// locator-based session-row revoke path is a follow-up).
     pub fn close(&self) {
-        if let Ok(mut state) = self.state.write() {
-            state.closed = true;
-        }
+        let mut state = self
+            .state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.closed = true;
+        // Closes every namespace handle taken before now, too: they hold a
+        // clone of this client, and the flag is shared across clones.
+        state.dp_http.close();
     }
 
     pub fn is_closed(&self) -> bool {
-        self.state.read().map(|s| s.closed).unwrap_or(true)
+        self.read_state().closed
     }
 }
 
@@ -257,4 +262,38 @@ fn build_dp_http(dp_endpoint: &str, bearer: &str) -> ApiResult<HttpClient> {
         retry_base: Duration::from_millis(defaults::API_RETRY_BASE_MS),
     };
     HttpClient::new(cfg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn closed_client() -> HttpClient {
+        let client = HttpClient::new(HttpConfig {
+            api_url: "https://dp.example.com".to_string(),
+            token: "t".to_string(),
+            additional_headers: HashMap::new(),
+            timeout: Duration::from_secs(5),
+            max_retries: 0,
+            retry_base: Duration::from_millis(1),
+        })
+        .unwrap();
+        client.close();
+        client
+    }
+
+    #[tokio::test]
+    async fn a_closed_client_refuses_requests_instead_of_panicking() {
+        // `runner.tasks()` used to `panic!` on the Result this replaces, so
+        // using a runner after `close()` aborted the caller's process.
+        let tasks = Tasks::new(Arc::new(closed_client()));
+        let err = match tasks.get("task-1").await {
+            Ok(_) => panic!("expected the closed client to refuse"),
+            Err(e) => e,
+        };
+        let IntrospectionAPIError::InvalidConfig(message) = err else {
+            panic!("expected InvalidConfig");
+        };
+        assert!(message.contains("closed"), "got {message}");
+    }
 }

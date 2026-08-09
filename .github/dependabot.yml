@@ -61,7 +61,7 @@ updates:
           - "opentelemetry_sdk"
           - "reqwest"
 
-  # ── GitHub Actions (used by ci.yml / publish.yml / tag.yml) ──
+  # ── GitHub Actions (used by ci.yml / publish.yml / release-please.yml) ──
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

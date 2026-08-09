@@ -244,6 +244,24 @@ impl PropertyValue {
             PropertyValue::Json(v) => v.to_string(),
         }
     }
+
+    /// Convert to the OTLP value the other SDKs put on the wire.
+    ///
+    /// Stringifying everything meant `with_property("rating", 5)` shipped
+    /// `AnyValue::string("5")` where the JS SDK ships `AnyValue::int(5)`:
+    /// same key, same prefix, different value kind on a contract that is
+    /// supposed to be identical across SDKs. Only JSON stays a string,
+    /// which is what JS's `JSON.stringify` produces for it too.
+    pub fn to_otel_value(&self) -> opentelemetry::logs::AnyValue {
+        use opentelemetry::logs::AnyValue;
+        match self {
+            PropertyValue::String(s) => AnyValue::String(s.clone().into()),
+            PropertyValue::Int(n) => AnyValue::Int(*n),
+            PropertyValue::Float(n) => AnyValue::Double(*n),
+            PropertyValue::Bool(b) => AnyValue::Boolean(*b),
+            PropertyValue::Json(v) => AnyValue::String(v.to_string().into()),
+        }
+    }
 }
 
 /// Generate a unique event ID.
@@ -329,6 +347,10 @@ pub mod defaults {
     /// Default OTLP collector base URL.
     pub const BASE_OTEL_URL: &str = "https://otel.introspection.dev";
     pub const FLUSH_INTERVAL_MS: u64 = 5000;
+    /// Default export batch size. Matches the JS SDK; the OTel default of
+    /// 512 would send analytics events from a Rust process in batches five
+    /// times the size, five times less often, than from a Node one.
+    pub const MAX_BATCH_SIZE: usize = 100;
 }
 
 /// Log severity text constants.

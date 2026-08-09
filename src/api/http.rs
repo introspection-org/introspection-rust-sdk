@@ -5,6 +5,7 @@
 //! string encoding, multipart uploads, and DP error translation.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -76,6 +77,11 @@ impl HttpConfig {
 pub struct HttpClient {
     inner: reqwest::Client,
     cfg: Arc<HttpConfig>,
+    /// Flipped by [`crate::Runner::close`]. Shared with every clone, so a
+    /// namespace handle a caller kept hold of stops working the moment the
+    /// runner that produced it is closed -- which is why the runner's
+    /// accessors can be infallible instead of panicking.
+    closed: Arc<AtomicBool>,
 }
 
 impl HttpClient {
@@ -101,6 +107,7 @@ impl HttpClient {
         Ok(Self {
             inner,
             cfg: Arc::new(cfg),
+            closed: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -112,7 +119,23 @@ impl HttpClient {
         Self {
             inner,
             cfg: Arc::new(cfg),
+            closed: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Refuse all further requests through this client and its clones.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// `Err` once [`close`](Self::close) has been called.
+    fn check_open(&self) -> ApiResult<()> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "runner has been closed".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn url(&self, path: &str) -> String {
@@ -144,6 +167,7 @@ impl HttpClient {
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
+        self.check_open()?;
         let mut attempt: u32 = 0;
         loop {
             let res = build().timeout(self.cfg.timeout).send().await?;
@@ -222,6 +246,7 @@ impl HttpClient {
         path: &str,
         form: reqwest::multipart::Form,
     ) -> ApiResult<R> {
+        self.check_open()?;
         let res = self
             .inner
             .post(self.url(path))
@@ -267,6 +292,7 @@ impl HttpClient {
     /// GET returning the raw streaming [`Response`]. Used by SSE streaming
     /// and chunked binary downloads.
     pub async fn get_stream(&self, path: &str, accept: Option<&str>) -> ApiResult<Response> {
+        self.check_open()?;
         let mut req = self.inner.get(self.url(path));
         if let Some(a) = accept {
             req = req.header(reqwest::header::ACCEPT, a);
@@ -288,6 +314,7 @@ impl HttpClient {
         accept: Option<&str>,
         last_event_id: Option<&str>,
     ) -> ApiResult<Response> {
+        self.check_open()?;
         let mut req = self.inner.get(self.url(path));
         if let Some(a) = accept {
             req = req.header(reqwest::header::ACCEPT, a);
