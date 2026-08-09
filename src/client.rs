@@ -53,7 +53,6 @@ pub type Result<T> = std::result::Result<T, IntrospectionError>;
 /// OpenTelemetry-based `track` / `feedback` / `identify` flow, enable
 /// the `otel` Cargo feature.
 pub struct IntrospectionClient {
-    project_id: Option<uuid::Uuid>,
     runtimes: Runtimes,
     experiments: Experiments,
     recipes: Recipes,
@@ -69,8 +68,6 @@ impl IntrospectionClient {
             .clone()
             .or_else(|| env::var("INTROSPECTION_TOKEN").ok())
             .unwrap_or_default();
-
-        let project_id = config.project_id;
 
         let advanced = config.advanced.unwrap_or_default();
 
@@ -106,16 +103,10 @@ impl IntrospectionClient {
         let cp_http = Arc::new(http);
 
         Ok(Self {
-            project_id,
             runtimes: Runtimes::new(cp_http.clone()),
             experiments: Experiments::new(cp_http.clone()),
             recipes: Recipes::new(cp_http),
         })
-    }
-
-    /// The resolved project ID from [`ClientConfig::project_id`], if supplied.
-    pub fn project_id(&self) -> Option<uuid::Uuid> {
-        self.project_id
     }
 
     pub fn runtimes(&self) -> &Runtimes {

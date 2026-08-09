@@ -67,12 +67,6 @@ pub struct ClientConfig {
     #[builder(setter(into))]
     pub token: Option<String>,
 
-    /// Resolved project ID for callers that need to carry an internal project
-    /// UUID. User-facing project selectors are passed as `project` on the
-    /// resource methods.
-    #[builder(setter(into, strip_option), default)]
-    pub project_id: Option<uuid::Uuid>,
-
     /// Advanced REST options.
     #[builder(setter(into, strip_option), default)]
     pub advanced: Option<AdvancedOptions>,
