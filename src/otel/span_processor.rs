@@ -296,8 +296,7 @@ impl IntrospectionSpanProcessor {
 
         // A caller-supplied exporter never reaches the Introspection endpoint,
         // so there is nothing to authenticate; requiring a token there would
-        // make the in-memory testing path need a dummy one. Matches the JS
-        // SDK, which documents the same exemption.
+        // make the in-memory testing path need a dummy one.
         let has_custom_exporter = advanced.span_exporter.is_some();
         let token = match config
             .token

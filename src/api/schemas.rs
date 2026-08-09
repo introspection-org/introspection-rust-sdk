@@ -1,7 +1,6 @@
 //! Wire types for the DP `/v1/tasks` and `/v1/files` surface.
 //!
-//! Kept in lockstep with the Pydantic/TS implementations in
-//! `introspection-python-sdk` / `introspection-js-sdk`.
+//! Kept in lockstep with the published Data Plane OpenAPI schema.
 //!
 //! Field names are kept on-the-wire (`snake_case`) so the JSON round-trips
 //! verbatim — no camelCase translation layer.
