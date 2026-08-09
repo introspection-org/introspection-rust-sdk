@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use opentelemetry::logs::{LogRecord as _, Logger, LoggerProvider, Severity};
-use opentelemetry::{baggage::BaggageExt, Context, Key, KeyValue};
+use opentelemetry::{baggage::BaggageExt, Context, InstrumentationScope, Key, KeyValue};
 use opentelemetry_otlp::{LogExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{logs::SdkLoggerProvider, Resource};
 use thiserror::Error;
@@ -63,6 +63,18 @@ impl From<derive_builder::UninitializedFieldError> for IntrospectionLogsError {
 
 /// Result type for [`IntrospectionLogs`] operations.
 pub type Result<T> = std::result::Result<T, IntrospectionLogsError>;
+
+/// The instrumentation scope stamped on every emitted record.
+///
+/// The version matters as much as the name: it is how a record is traced back
+/// to the release that produced it. `logger(name)` leaves it unset, so every
+/// event this crate sent was unattributable to a version -- the other SDKs all
+/// carry one.
+fn sdk_scope() -> InstrumentationScope {
+    InstrumentationScope::builder(types::logger_name::RUST_SDK)
+        .with_version(crate::VERSION)
+        .build()
+}
 
 /// Independent OTLP Logs exporter — owns its own [`SdkLoggerProvider`]
 /// and emits `track` / `feedback` / `identify` events with
@@ -220,7 +232,7 @@ impl IntrospectionLogs {
             .with_log_processor(processor)
             .build();
 
-        let logger = logger_provider.logger(types::logger_name::RUST_SDK);
+        let logger = logger_provider.logger_with_scope(sdk_scope());
 
         Ok(Self {
             logger_provider,
@@ -246,7 +258,7 @@ impl IntrospectionLogs {
             )
             .with_simple_exporter(exporter)
             .build();
-        let logger = logger_provider.logger(types::logger_name::RUST_SDK);
+        let logger = logger_provider.logger_with_scope(sdk_scope());
         Self {
             logger_provider,
             logger,
@@ -629,6 +641,22 @@ mod tests {
             "got {}",
             attrs["properties.comments"]
         );
+    }
+
+    #[test]
+    fn every_record_carries_the_sdk_name_and_version_as_its_scope() {
+        // The scope rides every log record and is how ingest attributes an
+        // event to a client and a release. `logger(name)` left the version
+        // unset, so nothing this crate emitted could be tied to a version.
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+        logs.track("E", None);
+        let _ = logs.flush();
+
+        let emitted = exporter.get_emitted_logs().unwrap();
+        let scope = &emitted[0].instrumentation;
+        assert_eq!(scope.name(), "introspection-sdk-rust");
+        assert_eq!(scope.version(), Some(crate::VERSION));
     }
 
     #[test]
