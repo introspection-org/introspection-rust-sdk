@@ -392,7 +392,11 @@ impl IntrospectionLogs {
 
     /// Track feedback on a message or response.
     pub fn feedback(&self, name: &str, options: FeedbackOptions) {
-        let mut properties: HashMap<String, PropertyValue> = HashMap::new();
+        // The caller's extras go in first: `name` and `comments` are named
+        // arguments, so a `with_property("name", ...)` must not silently
+        // replace the feedback name this call is about. Matches the Node and
+        // browser SDKs, where the same ordering bug shipped.
+        let mut properties: HashMap<String, PropertyValue> = options.extra.clone();
         properties.insert("name".to_string(), PropertyValue::String(name.to_string()));
         if let Some(comments) = &options.comments {
             properties.insert(
@@ -400,7 +404,6 @@ impl IntrospectionLogs {
                 PropertyValue::String(comments.clone()),
             );
         }
-        properties.extend(options.extra.clone());
 
         let attributes = self.build_attributes(
             types::event_name::FEEDBACK,
@@ -598,6 +601,34 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    #[test]
+    fn the_positional_feedback_name_survives_an_extra_property_of_the_same_name() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.feedback(
+            "thumbs_up",
+            FeedbackOptions::new()
+                .with_comments("great")
+                .with_extra("name", "not the feedback name")
+                .with_extra("comments", "not the comments"),
+        );
+        let _ = logs.flush();
+
+        let records = emitted(&exporter);
+        let attrs = &records[0];
+        assert!(
+            attrs["properties.name"].contains("thumbs_up"),
+            "got {}",
+            attrs["properties.name"]
+        );
+        assert!(
+            attrs["properties.comments"].contains("great"),
+            "got {}",
+            attrs["properties.comments"]
+        );
     }
 
     #[test]
