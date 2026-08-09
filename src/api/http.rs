@@ -57,14 +57,16 @@ impl HttpConfig {
             })?;
             h.insert(name, value);
         }
-        h.insert(
-            reqwest::header::USER_AGENT,
+        // `entry`, not `insert`: additional_headers is applied above, and an
+        // unconditional insert silently discarded a caller-supplied
+        // User-Agent.
+        h.entry(reqwest::header::USER_AGENT).or_insert_with(|| {
             HeaderValue::from_str(&format!(
                 "introspection-sdk-rust/{}",
                 env!("CARGO_PKG_VERSION")
             ))
-            .expect("static user agent is valid"),
-        );
+            .expect("static user agent is valid")
+        });
         Ok(h)
     }
 }

@@ -14,7 +14,7 @@
 //! [`MetricsQuery`] take ergonomic `order` / `start` / `end` / `lookback`
 //! inputs. `lookback` (relative, e.g. `"24h"`) is **mutually exclusive** with
 //! `start`/`end`; the conflict is rejected client-side (a typed
-//! [`IntrospectionAPIError::InvalidConfig`]) *before* any request is sent. See
+//! [`crate::IntrospectionAPIError::InvalidConfig`]) *before* any request is sent. See
 //! [`crate::api::schemas`].
 //!
 //! # Optional Arrow
@@ -22,7 +22,7 @@
 //! With the `arrow` Cargo feature, `list_arrow` requests the
 //! `application/vnd.apache.arrow.stream` response and decodes the Arrow IPC
 //! stream, reading pagination metadata from response headers into an
-//! [`ArrowPage`](crate::api::arrow::ArrowPage). The DP answers `406` when the
+//! [`crate::api::arrow::ArrowPage`]. The DP answers `406` when the
 //! Arrow format is unsupported.
 
 use std::sync::Arc;
@@ -86,6 +86,10 @@ pub struct Conversations {
 }
 
 impl Conversations {
+    /// How many pages [`Self::retrieve`] walks looking for the latest turn
+    /// when the caller did not name one.
+    pub const TURN_SCAN_MAX_PAGES: usize = 2;
+
     #[doc(hidden)]
     pub fn new(http: Arc<HttpClient>) -> Self {
         Self {
@@ -114,7 +118,7 @@ impl Conversations {
             .get_json(
                 &format!(
                     "/v1/conversations/{}",
-                    utf8_percent_encode(conversation_id, PATH_SEGMENT_ENCODE_SET)
+                    crate::api::encoding::encode(conversation_id)
                 ),
                 &(),
             )
@@ -246,11 +250,17 @@ impl Conversations {
 
     /// Scan items for the most recent LLM turn. The route sorts descending
     /// and rejects a cursor that disagrees, so the first match is the latest.
+    ///
+    /// Bounded to [`Self::TURN_SCAN_MAX_PAGES`] pages: the latest turn is at
+    /// the head of a descending sort, so walking further only refines a
+    /// fallback. Without the bound a conversation whose items are all
+    /// non-`chat` paged to exhaustion on every convenience read.
     async fn find_latest_turn_id(&self, conversation_id: &str) -> ApiResult<Option<String>> {
         let mut pages = self
             .items
             .list(conversation_id, &ConversationItemListParams::default())?;
         let mut fallback: Option<String> = None;
+        let mut scanned = 0usize;
         while let Some(page) = pages.next_page().await? {
             for item in page.data {
                 if item.operation_name() == Some("chat") {
@@ -259,6 +269,10 @@ impl Conversations {
                 if fallback.is_none() && !item.output_messages().is_empty() {
                     fallback = item.span_id.clone();
                 }
+            }
+            scanned += 1;
+            if scanned >= Self::TURN_SCAN_MAX_PAGES {
+                break;
             }
         }
         Ok(fallback)
@@ -332,10 +346,7 @@ impl Events {
     pub async fn get(&self, event_id: &str) -> ApiResult<Event> {
         #[derive(serde::Serialize)]
         struct Q {}
-        let path = format!(
-            "/v1/events/{}",
-            utf8_percent_encode(event_id, PATH_SEGMENT_ENCODE_SET)
-        );
+        let path = format!("/v1/events/{}", crate::api::encoding::encode(event_id));
         self.http.get_json(&path, &Q {}).await
     }
 

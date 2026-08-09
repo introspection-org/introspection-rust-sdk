@@ -1410,7 +1410,7 @@ pub struct Conversation {
 
 /// Ergonomic params for `GET /v1/conversations`. `order`/`start`/`end`/
 /// `lookback` map to the wire `direction`/`start_date`/`end_date` window (see
-/// [`Window`]); `filters` is a passthrough for resource filters that avoids
+/// a relative window); `filters` is a passthrough for resource filters that avoids
 /// baking the open attribute vocabulary into the SDK.
 #[derive(Debug, Clone, Default)]
 pub struct ConversationListParams {

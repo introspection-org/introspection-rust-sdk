@@ -37,7 +37,7 @@ fn test_gen_ai_span_attributes_snapshot() {
         .with_kind(SpanKind::Client)
         .start(&tracer);
 
-    span.set_attribute(KeyValue::new("gen_ai.system", "openai"));
+    span.set_attribute(KeyValue::new("gen_ai.provider.name", "openai"));
     span.set_attribute(KeyValue::new("gen_ai.request.model", "gpt-4o-mini"));
     span.set_attribute(KeyValue::new("gen_ai.operation.name", "chat"));
     span.set_attribute(KeyValue::new("gen_ai.response.model", "gpt-4o-mini"));
@@ -66,42 +66,6 @@ fn test_gen_ai_span_attributes_snapshot() {
         ".**.end_time" => "[timestamp]",
     });
 
-    provider.shutdown().unwrap();
-}
-
-// ---------------------------------------------------------------------------
-// Test 3: gen_ai attributes with wiremock (async, end-to-end)
-
-// ---------------------------------------------------------------------------
-#[test]
-fn test_introspection_span_processor_with_provider() {
-    use introspection_sdk::otel::{
-        IntrospectionSpanProcessor, SpanProcessorAdvancedOptions, SpanProcessorConfig,
-    };
-    use opentelemetry_sdk::trace::SdkTracerProvider;
-
-    let processor = IntrospectionSpanProcessor::new(
-        SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
-            base_otel_url: Some("http://localhost:19876".to_string()),
-            ..Default::default()
-        }),
-    )
-    .unwrap();
-
-    let provider = SdkTracerProvider::builder()
-        .with_span_processor(processor)
-        .build();
-
-    let tracer = provider.tracer("test");
-    let mut span = tracer
-        .span_builder("smoke-test")
-        .with_kind(SpanKind::Internal)
-        .start(&tracer);
-    span.set_attribute(KeyValue::new("gen_ai.system", "openai"));
-    span.end();
-
-    // Force flush — may fail (no server) but should not panic
-    let _ = provider.force_flush();
     provider.shutdown().unwrap();
 }
 
@@ -151,7 +115,7 @@ fn test_gen_ai_attributes_complete_check() {
         .with_kind(SpanKind::Client)
         .start(&tracer);
 
-    span.set_attribute(KeyValue::new("gen_ai.system", "openai"));
+    span.set_attribute(KeyValue::new("gen_ai.provider.name", "openai"));
     span.set_attribute(KeyValue::new("gen_ai.request.model", "gpt-4o-mini"));
     span.set_attribute(KeyValue::new("gen_ai.operation.name", "chat"));
     span.set_attribute(KeyValue::new("gen_ai.response.model", "gpt-4o-mini"));
@@ -168,7 +132,7 @@ fn test_gen_ai_attributes_complete_check() {
     let attrs = json["attributes"].as_object().unwrap();
 
     let expected_keys = [
-        "gen_ai.system",
+        "gen_ai.provider.name",
         "gen_ai.request.model",
         "gen_ai.operation.name",
         "gen_ai.response.model",

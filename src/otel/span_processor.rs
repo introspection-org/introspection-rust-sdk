@@ -72,8 +72,16 @@ pub struct SpanProcessorAdvancedOptions {
     /// Additional HTTP headers attached to the OTLP export.
     pub additional_headers: Option<HashMap<String, String>>,
 
-    /// Custom span exporter (bypasses default OTLP exporter) — primarily
-    /// for tests.
+    /// Custom span exporter, bypassing the default OTLP one.
+    ///
+    /// Concrete rather than a trait object because `SpanExporter` is not
+    /// dyn-compatible in opentelemetry_sdk 0.32 (it has an async method), so
+    /// this cannot accept an in-memory exporter: use it to redirect export to
+    /// a different OTLP collector, not to capture spans in a test. Supplying
+    /// one waives the token requirement, since nothing then reaches the
+    /// Introspection endpoint.
+    ///
+    /// The processor takes ownership, so the `Arc` must be unshared.
     pub span_exporter: Option<Arc<SpanExporter>>,
 
     /// Flush interval in milliseconds for the batch processor.
@@ -198,6 +206,43 @@ enum InnerProcessor {
 #[derive(Debug)]
 pub struct IntrospectionSpanProcessor {
     inner: InnerProcessor,
+    service_name: String,
+}
+
+/// A span carrying any of these is LLM-relevant and gets exported. Everything
+/// else on the provider (HTTP clients, framework spans, database drivers)
+/// reaches this processor too and must not be shipped to Introspection.
+const GEN_AI_MARKERS: [&str; 5] = [
+    types::attr::GEN_AI_PROVIDER_NAME,
+    types::attr::GEN_AI_OPERATION_NAME,
+    types::attr::GEN_AI_REQUEST_MODEL,
+    types::attr::GEN_AI_INPUT_MESSAGES,
+    types::attr::GEN_AI_OUTPUT_MESSAGES,
+];
+
+/// Baggage key -> the span attribute it becomes. The baggage keys use the
+/// `identify()` underscore form; the span attributes use the dotted semconv
+/// form. The gen_ai keys are identical on both sides but are listed here so
+/// the projection stays in one table.
+const BAGGAGE_TO_ATTRIBUTE: [(&str, &str); 5] = [
+    (
+        types::baggage::CONVERSATION_ID,
+        types::attr::CONVERSATION_ID,
+    ),
+    (types::baggage::AGENT_NAME, types::attr::AGENT_NAME),
+    (types::baggage::AGENT_ID, types::attr::AGENT_ID),
+    (types::baggage::USER_ID, types::attr::USER_ID),
+    (types::baggage::ANONYMOUS_ID, types::attr::ANONYMOUS_ID),
+];
+
+/// Deprecated pre-1.27 provider key, superseded by `gen_ai.provider.name`.
+const DEPRECATED_SYSTEM_KEY: &str = "gen_ai.system";
+
+/// Whether a span carries enough LLM data to be worth exporting.
+fn should_export(span: &SpanData) -> bool {
+    span.attributes
+        .iter()
+        .any(|kv| GEN_AI_MARKERS.contains(&kv.key.as_str()))
 }
 
 impl IntrospectionSpanProcessor {
@@ -205,20 +250,27 @@ impl IntrospectionSpanProcessor {
     pub fn new(config: SpanProcessorConfig) -> SpanProcessorResult<Self> {
         let advanced = config.advanced.unwrap_or_default();
 
-        let token = config
+        // A caller-supplied exporter never reaches the Introspection endpoint,
+        // so there is nothing to authenticate; requiring a token there would
+        // make the in-memory testing path need a dummy one. Matches the JS
+        // SDK, which documents the same exemption.
+        let has_custom_exporter = advanced.span_exporter.is_some();
+        let token = match config
             .token
             .or_else(|| env::var("INTROSPECTION_TOKEN").ok())
-            .ok_or(SpanProcessorError::TokenRequired)?;
+        {
+            Some(token) => token,
+            None if has_custom_exporter => String::new(),
+            None => return Err(SpanProcessorError::TokenRequired),
+        };
 
         let service_name = config
             .service_name
             .or_else(|| env::var("INTROSPECTION_SERVICE_NAME").ok())
             .unwrap_or_else(|| crate::types::defaults::SERVICE_NAME.to_string());
 
-        // The processor takes ownership of the exporter, so a caller-supplied
-        // one has to be unwrapped out of its Arc — same as IntrospectionLogs.
-        // Building a stand-in here instead would silently discard the caller's
-        // exporter and export to that stand-in's endpoint.
+        // Building a stand-in here instead of using the caller's exporter
+        // would silently discard it and export to the stand-in's endpoint.
         let exporter_for_processor: SpanExporter =
             if let Some(custom_exporter) = advanced.span_exporter {
                 Arc::try_unwrap(custom_exporter).map_err(|_| {
@@ -269,18 +321,16 @@ impl IntrospectionSpanProcessor {
                     .map_err(|e| SpanProcessorError::OpenTelemetry(e.to_string()))?
             };
 
-        // Use SimpleSpanProcessor for sequential export when max_batch_size=1.
-        // This ensures each span is exported immediately on end(), which is
-        // required for multi-turn conversations where each turn must be
-        // ingested before the next arrives.
-        // Default to sequential export for dev/staging tokens.
-        let max_batch_size = advanced.max_batch_size.or_else(|| {
-            if token.starts_with("intro_dev") || token.starts_with("intro_staging") {
-                Some(1)
-            } else {
-                None
-            }
-        });
+        // `max_batch_size = 1` selects SimpleSpanProcessor, which exports each
+        // span immediately on end() -- useful for multi-turn conversations
+        // where each turn must be ingested before the next arrives.
+        //
+        // It is opt-in only. `SimpleSpanProcessor::on_end` blocks the calling
+        // thread on an HTTPS POST behind a mutex, so inferring it from a
+        // token prefix silently turned every `span.end()` on a dev or staging
+        // token -- including ones on a tokio worker -- into blocking I/O the
+        // caller never asked for.
+        let max_batch_size = advanced.max_batch_size;
         let flush_interval = Duration::from_millis(
             advanced
                 .flush_interval_ms
@@ -301,15 +351,79 @@ impl IntrospectionSpanProcessor {
             )
         };
 
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            service_name,
+        })
+    }
+
+    /// Stamp baggage-derived attributes onto a span and drop the deprecated
+    /// provider key.
+    ///
+    /// Baggage wins over a pre-stamped attribute so per-call identity set with
+    /// [`crate::otel::IntrospectionLogs`]'s guards overrides whatever the
+    /// emitter defaulted to. Without this the guards scope the emitted events
+    /// and leave the spans anonymous.
+    fn enrich(&self, span: &mut SpanData) {
+        use opentelemetry::baggage::BaggageExt;
+
+        let cx = opentelemetry::Context::current();
+        let baggage = cx.baggage();
+
+        span.attributes
+            .retain(|kv| kv.key.as_str() != DEPRECATED_SYSTEM_KEY);
+
+        for (baggage_key, attribute_key) in BAGGAGE_TO_ATTRIBUTE {
+            let Some(value) = baggage.get(baggage_key) else {
+                continue;
+            };
+            let value = value.to_string();
+            span.attributes
+                .retain(|kv| kv.key.as_str() != attribute_key);
+            span.attributes
+                .push(opentelemetry::KeyValue::new(attribute_key, value));
+        }
+
+        // An emitter that recorded messages without naming the operation is
+        // doing a chat completion.
+        let has_operation = span
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == types::attr::GEN_AI_OPERATION_NAME);
+        let has_messages = span.attributes.iter().any(|kv| {
+            kv.key.as_str() == types::attr::GEN_AI_INPUT_MESSAGES
+                || kv.key.as_str() == types::attr::GEN_AI_OUTPUT_MESSAGES
+        });
+        if !has_operation && has_messages {
+            span.attributes.push(opentelemetry::KeyValue::new(
+                types::attr::GEN_AI_OPERATION_NAME,
+                "chat",
+            ));
+        }
     }
 }
 
 impl OtelSpanProcessor for IntrospectionSpanProcessor {
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        // `service_name` is a documented constructor argument. The provider's
+        // resource is the only place it can land -- SpanData carries no
+        // resource of its own -- and without this the option was inert.
+        let resource = if self.service_name.is_empty() {
+            resource.clone()
+        } else {
+            let mut builder =
+                opentelemetry_sdk::Resource::builder().with_service_name(self.service_name.clone());
+            for kv in resource.iter() {
+                if kv.0.as_str() != "service.name" {
+                    builder = builder
+                        .with_attribute(opentelemetry::KeyValue::new(kv.0.clone(), kv.1.clone()));
+                }
+            }
+            builder.build()
+        };
         match &mut self.inner {
-            InnerProcessor::Batch(p) => p.set_resource(resource),
-            InnerProcessor::Simple(p) => p.set_resource(resource),
+            InnerProcessor::Batch(p) => p.set_resource(&resource),
+            InnerProcessor::Simple(p) => p.set_resource(&resource),
         }
     }
 
@@ -321,8 +435,17 @@ impl OtelSpanProcessor for IntrospectionSpanProcessor {
         }
     }
 
-    fn on_end(&self, span: SpanData) {
+    fn on_end(&self, mut span: SpanData) {
         debug!("Ending introspection span");
+
+        if !should_export(&span) {
+            // An infrastructure span: HTTP, routing, database. Exporting it
+            // would ship unrelated traffic to Introspection.
+            return;
+        }
+
+        self.enrich(&mut span);
+
         match &self.inner {
             InnerProcessor::Batch(p) => p.on_end(span),
             InnerProcessor::Simple(p) => p.on_end(span),
@@ -403,13 +526,15 @@ mod tests {
                 .unwrap(),
         );
 
-        let processor = IntrospectionSpanProcessor::new(
-            SpanProcessorConfig::with_token("test-token").advanced(SpanProcessorAdvancedOptions {
+        // No token: a caller-supplied exporter never reaches the
+        // Introspection endpoint, so there is nothing to authenticate.
+        let processor = IntrospectionSpanProcessor::new(SpanProcessorConfig::default().advanced(
+            SpanProcessorAdvancedOptions {
                 span_exporter: Some(test_exporter),
                 ..Default::default()
-            }),
-        )
-        .unwrap();
+            },
+        ))
+        .expect("a custom exporter waives the token requirement");
 
         assert!(processor.force_flush().is_ok());
     }
@@ -545,5 +670,121 @@ mod tests {
         } else {
             std::env::remove_var("INTROSPECTION_TOKEN");
         }
+    }
+
+    /// Build a minimal `SpanData` carrying `attrs`.
+    fn span_with(attrs: Vec<KeyValue>) -> SpanData {
+        let (provider, _exporter) = crate::otel::testing::setup_test_provider();
+        let tracer = provider.tracer("test");
+        let mut span = tracer.span_builder("s").start(&tracer);
+        for kv in attrs {
+            span.set_attribute(kv);
+        }
+        span.end();
+        let (_p, exporter) = (provider, _exporter);
+        exporter.get_finished_spans().unwrap().pop().unwrap()
+    }
+
+    fn attr<'a>(span: &'a SpanData, key: &str) -> Option<&'a opentelemetry::Value> {
+        span.attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| &kv.value)
+    }
+
+    #[test]
+    fn test_infrastructure_spans_are_not_exported() {
+        // The processor sits on the global provider, where every HTTP,
+        // routing, and database span in the process also arrives.
+        let infra = span_with(vec![
+            KeyValue::new("http.request.method", "GET"),
+            KeyValue::new("http.response.status_code", 200i64),
+        ]);
+        assert!(!should_export(&infra));
+
+        for marker in GEN_AI_MARKERS {
+            let llm = span_with(vec![KeyValue::new(marker, "x")]);
+            assert!(
+                should_export(&llm),
+                "{marker} should mark a span for export"
+            );
+        }
+    }
+
+    #[test]
+    fn test_enrich_projects_baggage_and_strips_the_deprecated_key() {
+        use opentelemetry::baggage::BaggageExt;
+
+        let processor = IntrospectionSpanProcessor::new(
+            SpanProcessorConfig::builder()
+                .service_name("enrich-test")
+                .advanced(SpanProcessorAdvancedOptions {
+                    span_exporter: Some(Arc::new(
+                        SpanExporter::builder()
+                            .with_http()
+                            .with_endpoint("http://localhost:19876/v1/traces")
+                            .build()
+                            .unwrap(),
+                    )),
+                    ..Default::default()
+                })
+                .build(),
+        )
+        .unwrap();
+
+        let mut span = span_with(vec![
+            KeyValue::new(types::attr::GEN_AI_PROVIDER_NAME, "anthropic"),
+            KeyValue::new(DEPRECATED_SYSTEM_KEY, "anthropic"),
+            KeyValue::new(types::attr::GEN_AI_INPUT_MESSAGES, "[]"),
+            // A default the emitter stamped; per-call baggage must win.
+            KeyValue::new(types::attr::AGENT_NAME, "on-span"),
+        ]);
+
+        let cx = opentelemetry::Context::current().with_baggage(vec![
+            KeyValue::new(types::baggage::CONVERSATION_ID, "conv_1"),
+            KeyValue::new(types::baggage::AGENT_NAME, "from-baggage"),
+            KeyValue::new(types::baggage::AGENT_ID, "agent_9"),
+            KeyValue::new(types::baggage::USER_ID, "user_42"),
+            KeyValue::new(types::baggage::ANONYMOUS_ID, "anon_7"),
+        ]);
+        let _guard = cx.attach();
+
+        processor.enrich(&mut span);
+
+        assert!(attr(&span, DEPRECATED_SYSTEM_KEY).is_none());
+        assert_eq!(
+            attr(&span, types::attr::CONVERSATION_ID).map(|v| v.to_string()),
+            Some("conv_1".to_string())
+        );
+        assert_eq!(
+            attr(&span, types::attr::AGENT_NAME).map(|v| v.to_string()),
+            Some("from-baggage".to_string())
+        );
+        assert_eq!(
+            attr(&span, types::attr::AGENT_ID).map(|v| v.to_string()),
+            Some("agent_9".to_string())
+        );
+        // identify() has to reach the trace, not just the events.
+        assert_eq!(
+            attr(&span, types::attr::USER_ID).map(|v| v.to_string()),
+            Some("user_42".to_string())
+        );
+        assert_eq!(
+            attr(&span, types::attr::ANONYMOUS_ID).map(|v| v.to_string()),
+            Some("anon_7".to_string())
+        );
+        // Messages present, operation unnamed: it is a chat completion.
+        assert_eq!(
+            attr(&span, types::attr::GEN_AI_OPERATION_NAME).map(|v| v.to_string()),
+            Some("chat".to_string())
+        );
+        // Exactly one agent.name survived the override.
+        assert_eq!(
+            span.attributes
+                .iter()
+                .filter(|kv| kv.key.as_str() == types::attr::AGENT_NAME)
+                .count(),
+            1
+        );
     }
 }

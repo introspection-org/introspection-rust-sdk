@@ -75,10 +75,6 @@ pub struct IntrospectionLogs {
 
     /// OpenTelemetry logger
     logger: opentelemetry_sdk::logs::SdkLogger,
-
-    /// Service name (used in tests).
-    #[allow(dead_code)]
-    service_name: String,
 }
 
 /// Builder-friendly config for [`IntrospectionLogs`]. Use
@@ -109,6 +105,13 @@ pub struct IntrospectionLogsConfig {
     /// Custom log exporter — bypasses the default OTLP HTTP exporter.
     /// Primarily used for testing.
     pub log_exporter: Option<Arc<LogExporter>>,
+
+    /// OTLP batch flush interval in milliseconds. `None` uses the
+    /// OpenTelemetry default.
+    pub flush_interval_ms: Option<u64>,
+
+    /// OTLP max export batch size. `None` uses the OpenTelemetry default.
+    pub max_batch_size: Option<usize>,
 }
 
 impl IntrospectionLogsConfigBuilder {
@@ -170,8 +173,13 @@ impl IntrospectionLogs {
                 )
             })?
         } else {
-            let mut headers =
-                HashMap::from([("Authorization".to_string(), format!("Bearer {}", token))]);
+            let mut headers = HashMap::from([
+                (
+                    "User-Agent".to_string(),
+                    format!("introspection-sdk/{}", crate::VERSION),
+                ),
+                ("Authorization".to_string(), format!("Bearer {}", token)),
+            ]);
             if let Some(additional_headers) = &config.additional_headers {
                 headers.extend(additional_headers.clone());
             }
@@ -189,9 +197,20 @@ impl IntrospectionLogs {
             .with_service_name(service_name.clone())
             .build();
 
+        let mut batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default();
+        if let Some(interval) = config.flush_interval_ms {
+            batch_config = batch_config.with_scheduled_delay(Duration::from_millis(interval));
+        }
+        if let Some(batch_size) = config.max_batch_size {
+            batch_config = batch_config.with_max_export_batch_size(batch_size);
+        }
+        let processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(exporter)
+            .with_batch_config(batch_config.build())
+            .build();
+
         let logger_provider = SdkLoggerProvider::builder()
             .with_resource(resource)
-            .with_batch_exporter(exporter)
+            .with_log_processor(processor)
             .build();
 
         let logger = logger_provider.logger(types::logger_name::RUST_SDK);
@@ -199,8 +218,32 @@ impl IntrospectionLogs {
         Ok(Self {
             logger_provider,
             logger,
-            service_name,
         })
+    }
+
+    /// Build an instance around an arbitrary exporter.
+    ///
+    /// The public `log_exporter` option is the concrete OTLP type, so an
+    /// in-memory exporter cannot be supplied through it; without this the
+    /// emitted records could not be asserted on at all.
+    #[cfg(test)]
+    fn with_exporter(
+        exporter: impl opentelemetry_sdk::logs::LogExporter + 'static,
+        service_name: &str,
+    ) -> Self {
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name(service_name.to_string())
+                    .build(),
+            )
+            .with_simple_exporter(exporter)
+            .build();
+        let logger = logger_provider.logger(types::logger_name::RUST_SDK);
+        Self {
+            logger_provider,
+            logger,
+        }
     }
 
     /// Get identity context from OpenTelemetry baggage.
@@ -522,13 +565,92 @@ mod tests {
 
     #[test]
     fn test_logs_creation() {
-        let logs = IntrospectionLogs::builder()
+        IntrospectionLogs::builder()
             .token("test-token")
             .service_name("test-service")
             .base_otel_url("http://localhost:4318")
             .build()
             .unwrap();
-        assert_eq!(logs.service_name, "test-service");
+    }
+
+    fn emitted(
+        exporter: &opentelemetry_sdk::logs::InMemoryLogExporter,
+    ) -> Vec<std::collections::HashMap<String, String>> {
+        exporter
+            .get_emitted_logs()
+            .unwrap()
+            .into_iter()
+            .map(|log| {
+                log.record
+                    .attributes_iter()
+                    .map(|(k, v)| (k.to_string(), format!("{v:?}")))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_track_emits_event_name_and_properties() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.track(
+            "Button Clicked",
+            Some(TrackOptions::new().with_property("button_id", "submit")),
+        );
+
+        let records = emitted(&exporter);
+        assert_eq!(records.len(), 1);
+        assert!(records[0][types::attr::EVENT_NAME].contains("Button Clicked"));
+        assert!(records[0].contains_key(types::attr::EVENT_ID));
+        assert!(
+            records[0][&format!("{}button_id", types::attr::PROPERTIES_PREFIX)].contains("submit")
+        );
+    }
+
+    #[test]
+    fn test_identify_puts_both_ids_on_the_record() {
+        // The identity attributes are read off the context, so identify() has
+        // to place its own ids there before building the record.
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.identify(
+            "user_42",
+            Some(
+                IdentifyOptions::new()
+                    .with_anonymous_id("anon_7")
+                    .with_trait("plan", "pro"),
+            ),
+        );
+
+        let records = emitted(&exporter);
+        assert_eq!(records.len(), 1);
+        assert!(records[0][types::attr::EVENT_NAME].contains(types::event_name::IDENTIFY));
+        assert!(records[0][types::attr::USER_ID].contains("user_42"));
+        assert!(records[0][types::attr::ANONYMOUS_ID].contains("anon_7"));
+        assert!(records[0][&format!("{}plan", types::attr::TRAITS_PREFIX)].contains("pro"));
+    }
+
+    #[test]
+    fn test_feedback_carries_the_conversation_and_agent_scope() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        {
+            let _agent = logs.set_agent("planner", Some("ag_1"));
+            logs.feedback(
+                "thumbs_up",
+                FeedbackOptions::new().with_conversation_id("conv_7"),
+            );
+        }
+
+        let records = emitted(&exporter);
+        assert_eq!(records.len(), 1);
+        assert!(records[0][types::attr::EVENT_NAME].contains(types::event_name::FEEDBACK));
+        assert!(records[0][types::attr::CONVERSATION_ID].contains("conv_7"));
+        assert!(records[0][types::attr::AGENT_NAME].contains("planner"));
+        assert!(records[0][types::attr::AGENT_ID].contains("ag_1"));
     }
 
     #[test]

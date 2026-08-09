@@ -250,9 +250,11 @@ impl PropertyValue {
 ///
 /// Format: `intro_event_<timestamp>-<random8>`
 pub fn generate_event_id() -> String {
+    // A clock behind the epoch is not worth a panic in an id generator; the
+    // rest of the crate uses the same fallback.
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis();
     let timestamp_hex = format!("{:x}", timestamp);
     let random_part = &Uuid::new_v4().to_string()[..8];
@@ -327,7 +329,6 @@ pub mod defaults {
     /// Default OTLP collector base URL.
     pub const BASE_OTEL_URL: &str = "https://otel.introspection.dev";
     pub const FLUSH_INTERVAL_MS: u64 = 5000;
-    pub const MAX_BATCH_SIZE: usize = 100;
 }
 
 /// Log severity text constants.

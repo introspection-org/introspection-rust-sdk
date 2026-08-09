@@ -52,7 +52,10 @@ impl ConversationItems {
                 ));
             }
         }
-        let path = format!("/v1/conversations/{}/items", urlencode(conversation_id));
+        let path = format!(
+            "/v1/conversations/{}/items",
+            crate::api::encoding::encode(conversation_id)
+        );
         Ok(ConversationItemPaginator::new(
             self.http.clone(),
             path,
@@ -75,8 +78,8 @@ impl ConversationItems {
     ) -> ApiResult<GenAiSpan> {
         let path = format!(
             "/v1/conversations/{}/items/{}",
-            urlencode(conversation_id),
-            urlencode(item_id)
+            crate::api::encoding::encode(conversation_id),
+            crate::api::encoding::encode(item_id)
         );
         self.http.get_json(&path, &get_query(params)).await
     }
@@ -271,17 +274,4 @@ fn push_opt_ref(query: &mut Vec<(String, String)>, key: &str, value: Option<&str
     if let Some(value) = value {
         query.push((key.into(), value.into()));
     }
-}
-
-fn urlencode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }

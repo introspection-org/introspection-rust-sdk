@@ -32,27 +32,20 @@ impl Shares {
     /// Read one grant by ID.
     pub async fn get(&self, share_id: &str) -> ApiResult<ResourceShare> {
         self.http
-            .get_json(&format!("/v1/shares/{}", urlencode(share_id)), &())
+            .get_json(
+                &format!("/v1/shares/{}", crate::api::encoding::encode(share_id)),
+                &(),
+            )
             .await
     }
 
     /// Revoke one grant by ID.
     pub async fn delete(&self, share_id: &str) -> ApiResult<()> {
         self.http
-            .delete_empty(&format!("/v1/shares/{}", urlencode(share_id)))
+            .delete_empty(&format!(
+                "/v1/shares/{}",
+                crate::api::encoding::encode(share_id)
+            ))
             .await
     }
-}
-
-fn urlencode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }

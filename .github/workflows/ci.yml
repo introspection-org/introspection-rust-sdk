@@ -56,6 +56,13 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Check rustdoc
+        # Broken intra-doc links are invisible without this: nothing else in
+        # CI runs rustdoc.
+        run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   test:
     name: Tests
     runs-on: ubuntu-latest
@@ -76,7 +83,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests (all features)
-        run: cargo test --features testing
+        # --all-features, not --features testing: the `arrow` tests only ran
+        # at publish time under the narrower flag.
+        run: cargo test --all-features
 
   # ── Create release tag (only on VERSION change) ────────────────────
   create-tag:

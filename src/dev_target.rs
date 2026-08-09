@@ -30,20 +30,6 @@
 //! Inert outside development: the Data Plane consults a target only on the
 //! development pin path, so a stray value in staging or production is ignored.
 
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
-
-/// Everything outside RFC 3986's *unreserved* set.
-///
-/// `NON_ALPHANUMERIC` alone would encode `-`, `.`, `_` and `~`, turning an
-/// everyday `my-laptop` into `my%2Dlaptop`. The Data Plane decodes before it
-/// normalizes, so that still routes — but it is not what the other SDKs send,
-/// not what `introspection dev` prints for you to copy, and not what anyone
-/// reading a header or a log expects to see.
-const TARGET_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
 use std::collections::HashMap;
 use std::env;
 
@@ -69,7 +55,7 @@ pub fn resolve_dev_target() -> Option<String> {
     if trimmed.is_empty() {
         None
     } else {
-        Some(utf8_percent_encode(trimmed, TARGET_ENCODE_SET).to_string())
+        Some(crate::api::encoding::encode(trimmed))
     }
 }
 

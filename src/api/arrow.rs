@@ -3,7 +3,7 @@
 //! Gated behind the `arrow` Cargo feature. When a caller requests the Arrow
 //! format ([`ARROW_STREAM_ACCEPT`]), the DP responds with an Arrow IPC
 //! *stream* of values only and moves the pagination metadata into response
-//! headers. [`decode_arrow_response`] reads those headers and decodes the
+//! headers. The crate-internal decoder reads those headers and decodes the
 //! stream into [`RecordBatch`]es, exposing the same
 //! `count` / `total_count` / `next` shape as the JSON [`Paginated`] envelope.
 //!

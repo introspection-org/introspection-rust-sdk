@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
-use tracing::warn;
 
 use crate::api::http::{HttpClient, HttpConfig};
 use crate::dev_target;
@@ -27,13 +26,14 @@ use crate::types::{self, ClientConfig};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Errors that can occur in the Introspection client. HTTP failures bubble up
-/// as [`crate::IntrospectionAPIError`] from the underlying namespaces, so the
-/// only variant this type constructs today is `OpenTelemetry`; the other two
-/// are part of the public contract for callers matching exhaustively.
+/// as [`crate::IntrospectionAPIError`] from the underlying namespaces.
 #[derive(Error, Debug)]
 pub enum IntrospectionError {
     #[error("OpenTelemetry error: {0}")]
     OpenTelemetry(String),
+
+    #[error("A token is required: set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`")]
+    TokenRequired,
 
     #[error("Client not initialized")]
     NotInitialized,
@@ -55,11 +55,11 @@ pub struct IntrospectionClient {
     #[allow(dead_code)]
     service_name: String,
     project_id: Option<uuid::Uuid>,
-    runtimes: Option<Runtimes>,
-    experiments: Option<Experiments>,
-    recipes: Option<Recipes>,
+    runtimes: Runtimes,
+    experiments: Experiments,
+    recipes: Recipes,
     #[allow(dead_code)]
-    cp_http: Option<Arc<HttpClient>>,
+    cp_http: Arc<HttpClient>,
 }
 
 impl IntrospectionClient {
@@ -89,45 +89,37 @@ impl IntrospectionClient {
             .or_else(|| env::var("INTROSPECTION_BASE_API_URL").ok())
             .unwrap_or_else(|| types::defaults::BASE_API_URL.to_string());
 
+        // Fail here rather than storing `None` and panicking on first use:
+        // every method on this client is a REST call, so a tokenless client
+        // has no usable surface at all.
         if token.is_empty() {
-            warn!("IntrospectionClient: No token provided. REST calls will fail.");
+            return Err(IntrospectionError::TokenRequired);
         }
 
-        let (runtimes, experiments, recipes, cp_http) = if token.is_empty() {
-            (None, None, None, None)
-        } else {
-            // INTROSPECTION_DEV_TARGET rides every request as a header so it
-            // reaches the paths a runner cannot: a bare `POST /v1/tasks` with a
-            // dev API key mints its JWT from the key row and has no per-request
-            // claim to carry a target.
-            let api_headers = dev_target::with_dev_target(
-                advanced.additional_headers.clone().unwrap_or_default(),
-            );
-            let http_cfg = HttpConfig {
-                api_url: base_api_url,
-                token: token.clone(),
-                additional_headers: api_headers,
-                timeout: Duration::from_secs(types::defaults::API_TIMEOUT_SECS),
-                max_retries: types::defaults::API_MAX_RETRIES,
-                retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
-            };
-            let http = HttpClient::new(http_cfg)
-                .map_err(|e| IntrospectionError::OpenTelemetry(e.to_string()))?;
-            let http_arc = Arc::new(http);
-            (
-                Some(Runtimes::new(http_arc.clone())),
-                Some(Experiments::new(http_arc.clone())),
-                Some(Recipes::new(http_arc.clone())),
-                Some(http_arc),
-            )
+        // INTROSPECTION_DEV_TARGET rides every request as a header so it
+        // reaches the paths a runner cannot: a bare `POST /v1/tasks` with a
+        // dev API key mints its JWT from the key row and has no per-request
+        // claim to carry a target.
+        let api_headers =
+            dev_target::with_dev_target(advanced.additional_headers.clone().unwrap_or_default());
+        let http_cfg = HttpConfig {
+            api_url: base_api_url,
+            token: token.clone(),
+            additional_headers: api_headers,
+            timeout: Duration::from_secs(types::defaults::API_TIMEOUT_SECS),
+            max_retries: types::defaults::API_MAX_RETRIES,
+            retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
         };
+        let http = HttpClient::new(http_cfg)
+            .map_err(|e| IntrospectionError::OpenTelemetry(e.to_string()))?;
+        let cp_http = Arc::new(http);
 
         Ok(Self {
             service_name,
             project_id,
-            runtimes,
-            experiments,
-            recipes,
+            runtimes: Runtimes::new(cp_http.clone()),
+            experiments: Experiments::new(cp_http.clone()),
+            recipes: Recipes::new(cp_http.clone()),
             cp_http,
         })
     }
@@ -138,21 +130,15 @@ impl IntrospectionClient {
     }
 
     pub fn runtimes(&self) -> &Runtimes {
-        self.runtimes.as_ref().expect(
-            "client.runtimes() requires a token; set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`",
-        )
+        &self.runtimes
     }
 
     pub fn experiments(&self) -> &Experiments {
-        self.experiments.as_ref().expect(
-            "client.experiments() requires a token; set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`",
-        )
+        &self.experiments
     }
 
     pub fn recipes(&self) -> &Recipes {
-        self.recipes.as_ref().expect(
-            "client.recipes() requires a token; set `INTROSPECTION_TOKEN` or `ClientConfig::with_token`",
-        )
+        &self.recipes
     }
 
     /// Look up an active runtime by runtime group slug or ID. The server infers the
@@ -173,21 +159,50 @@ impl IntrospectionClient {
         self.experiments().handle(experiment_id, project)
     }
 
-    pub fn try_runtimes(&self) -> Option<&Runtimes> {
-        self.runtimes.as_ref()
-    }
-
-    pub fn try_experiments(&self) -> Option<&Experiments> {
-        self.experiments.as_ref()
-    }
-
-    pub fn try_recipes(&self) -> Option<&Recipes> {
-        self.recipes.as_ref()
-    }
-
     /// Graceful shutdown. The REST build has nothing to flush, so this
     /// is a no-op — kept for API parity with the `otel` build.
     pub fn shutdown(self) -> Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serialises the tests that touch `INTROSPECTION_TOKEN`.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_new_requires_a_token() {
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = env::var("INTROSPECTION_TOKEN").ok();
+        unsafe { env::remove_var("INTROSPECTION_TOKEN") };
+
+        // Every method on this client is a REST call, so a tokenless client
+        // has no usable surface. It used to construct successfully and then
+        // panic on the first accessor.
+        match IntrospectionClient::new(ClientConfig::default()) {
+            Err(IntrospectionError::TokenRequired) => {}
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("a tokenless client must not construct"),
+        }
+
+        if let Some(token) = saved {
+            unsafe { env::set_var("INTROSPECTION_TOKEN", token) };
+        }
+    }
+
+    #[test]
+    fn test_new_accepts_an_explicit_token() {
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(client) = IntrospectionClient::new(ClientConfig::with_token("intro_test")) else {
+            panic!("an explicit token is enough");
+        };
+        // The accessors are infallible now that construction enforces the token.
+        let _ = client.runtimes();
+        let _ = client.experiments();
+        let _ = client.recipes();
     }
 }

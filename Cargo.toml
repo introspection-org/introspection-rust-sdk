@@ -19,8 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 # Default: REST-only client (runtimes / experiments / Runner / tasks / files).
 # Add the `otel` feature for the OTLP exporter, `track` / `feedback` /
-# `identify`, the span processor, observation helpers, and the LLM SDK
-# instrumentation (which all live behind `otel`).
+# `identify`, the span processor, and the observation helpers.
 default = []
 otel = [
     "dep:opentelemetry",
@@ -84,6 +83,10 @@ futures = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+# In-memory span / log exporters for the in-crate tests. As a dev-dependency
+# they are available under every feature set, so `cargo test --features otel`
+# builds the same tests as `--features testing`.
+opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["testing"] }
 insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
 flate2 = "1"
@@ -92,6 +95,20 @@ dotenvy = "0.15"
 [[example]]
 name = "runtimes"
 path = "examples/api/runtimes.rs"
+
+# These drive the OTel surface through the in-memory exporters, so they only
+# compile with `testing`. Cargo cannot feature-gate an integration test from
+# inside the file, so declare the requirement here: a plain `cargo test` skips
+# them instead of failing to build.
+[[test]]
+name = "observation_test"
+path = "tests/observation_test.rs"
+required-features = ["testing"]
+
+[[test]]
+name = "span_attributes_test"
+path = "tests/span_attributes_test.rs"
+required-features = ["testing"]
 
 # Linting configuration
 # Run: cargo clippy -- -W clippy::all -W clippy::pedantic

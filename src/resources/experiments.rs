@@ -11,8 +11,6 @@ use std::sync::Arc;
 use serde::Serialize;
 use uuid::Uuid;
 
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
-
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
@@ -132,14 +130,6 @@ impl ExperimentHandle {
     }
 }
 
-/// Everything outside RFC 3986's *unreserved* set, so a project slug carrying
-/// `&`, `#`, `+`, or a space cannot rewrite the query string it rides in.
-const QUERY_VALUE_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
-
 pub(crate) fn encode_project(project: &StringOrUuid) -> String {
-    utf8_percent_encode(&project.to_string(), QUERY_VALUE_ENCODE_SET).to_string()
+    crate::api::encoding::encode(&project.to_string())
 }

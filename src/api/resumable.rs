@@ -86,14 +86,19 @@ pub fn stream_resumable(
 ) -> impl Stream<Item = ApiResult<Event>> {
     let path = format!(
         "/v1/tasks/{}/runs/{}/stream",
-        urlencode(task_id),
-        urlencode(run_id),
+        crate::api::encoding::encode(task_id),
+        crate::api::encoding::encode(run_id),
     );
 
     stream! {
         let start = Instant::now();
         let mut last_event_id: Option<String> = None;
         let mut reconnects: u32 = 0;
+        // Readiness waits are counted separately from reconnects: they are
+        // not failed attempts, but the delay still has to grow or a DP that
+        // sends no Retry-After is polled at a flat ~250ms for the whole
+        // timeout window.
+        let mut readiness_waits: u32 = 0;
 
         loop {
             match http
@@ -121,9 +126,11 @@ pub fn stream_resumable(
                                 })));
                             }
                             tokio::time::sleep(
-                                backoff_delay(reconnects, opts.backoff, retry_after).min(rem),
+                                backoff_delay(readiness_waits, opts.backoff, retry_after)
+                                    .min(rem),
                             )
                             .await;
+                            readiness_waits = readiness_waits.saturating_add(1);
                             continue;
                         }
                     }
@@ -242,21 +249,7 @@ async fn readiness_phase(res: reqwest::Response) -> Option<String> {
 }
 
 fn timeout_error() -> IntrospectionAPIError {
-    IntrospectionAPIError::Decode(
+    IntrospectionAPIError::Timeout(
         "run stream did not become attachable before the timeout".to_string(),
     )
-}
-
-/// RFC 3986 path-segment percent encoding (mirrors `tasks::urlencode`).
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }

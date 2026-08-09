@@ -110,7 +110,10 @@ impl FileVersions {
     /// `GET /v1/files/{id}/versions` — paginator over the file's
     /// version chain (newest first).
     pub fn list(&self, file_id: &str, params: &PaginationParams) -> Paginator<File> {
-        let path = format!("/v1/files/{}/versions", urlencode(file_id));
+        let path = format!(
+            "/v1/files/{}/versions",
+            crate::api::encoding::encode(file_id)
+        );
         Paginator::new(self.http.clone(), path, params)
             .expect("PaginationParams must serialize to a JSON object")
     }
@@ -119,8 +122,8 @@ impl FileVersions {
     pub async fn get(&self, file_id: &str, version_id: &str) -> ApiResult<File> {
         let path = format!(
             "/v1/files/{}/versions/{}",
-            urlencode(file_id),
-            urlencode(version_id)
+            crate::api::encoding::encode(file_id),
+            crate::api::encoding::encode(version_id)
         );
         self.http.get_json(&path, &()).await
     }
@@ -129,7 +132,10 @@ impl FileVersions {
     /// version.
     pub async fn create(&self, file_id: &str, upload: FileUpload) -> ApiResult<File> {
         let form = build_upload_form(upload).await?;
-        let path = format!("/v1/files/{}/versions", urlencode(file_id));
+        let path = format!(
+            "/v1/files/{}/versions",
+            crate::api::encoding::encode(file_id)
+        );
         self.http.post_multipart(&path, form).await
     }
 }
@@ -185,25 +191,28 @@ impl Files {
 
     /// `GET /v1/files/{id}`.
     pub async fn get(&self, file_id: &str) -> ApiResult<File> {
-        let path = format!("/v1/files/{}", urlencode(file_id));
+        let path = format!("/v1/files/{}", crate::api::encoding::encode(file_id));
         self.http.get_json(&path, &()).await
     }
 
     /// `PATCH /v1/files/{id}`.
     pub async fn update(&self, file_id: &str, body: &FileUpdate) -> ApiResult<File> {
-        let path = format!("/v1/files/{}", urlencode(file_id));
+        let path = format!("/v1/files/{}", crate::api::encoding::encode(file_id));
         self.http.patch_json(&path, body).await
     }
 
     /// `DELETE /v1/files/{id}`.
     pub async fn delete(&self, file_id: &str) -> ApiResult<()> {
-        let path = format!("/v1/files/{}", urlencode(file_id));
+        let path = format!("/v1/files/{}", crate::api::encoding::encode(file_id));
         self.http.delete_empty(&path).await
     }
 
     /// `GET /v1/files/{id}/content` — read all bytes into memory.
     pub async fn download(&self, file_id: &str) -> ApiResult<Bytes> {
-        let path = format!("/v1/files/{}/content", urlencode(file_id));
+        let path = format!(
+            "/v1/files/{}/content",
+            crate::api::encoding::encode(file_id)
+        );
         self.http.get_bytes(&path).await
     }
 
@@ -215,7 +224,10 @@ impl Files {
         file_id: &str,
     ) -> ApiResult<impl Stream<Item = ApiResult<Bytes>>> {
         use futures::StreamExt;
-        let path = format!("/v1/files/{}/content", urlencode(file_id));
+        let path = format!(
+            "/v1/files/{}/content",
+            crate::api::encoding::encode(file_id)
+        );
         let res = self.http.get_stream(&path, None).await?;
         Ok(res
             .bytes_stream()
@@ -274,19 +286,6 @@ fn guess_mime(name: &str) -> String {
         .first_or_octet_stream()
         .essence_str()
         .to_string()
-}
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

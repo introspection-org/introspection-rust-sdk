@@ -31,6 +31,9 @@ pub mod span_processor;
 #[cfg(feature = "otel")]
 pub mod types;
 
+// `testing` for downstream consumers; `test` so the in-crate tests build
+// under any feature set (the in-memory exporters come from the
+// `opentelemetry_sdk` dev-dependency, which enables its `testing` feature).
 #[cfg(any(feature = "testing", all(test, feature = "otel")))]
 pub mod testing;
 

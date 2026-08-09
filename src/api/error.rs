@@ -42,6 +42,12 @@ pub enum IntrospectionAPIError {
     /// I/O error reading a local file for upload.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// An operation with a deadline ran out of time. Distinct from `Decode`
+    /// so a caller can retry a timeout without also retrying a malformed
+    /// payload.
+    #[error("timeout: {0}")]
+    Timeout(String),
 }
 
 impl IntrospectionAPIError {

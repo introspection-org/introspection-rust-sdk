@@ -101,7 +101,7 @@
 //! | `POST   /v1/tasks/{id}/unarchive` | [`Tasks::unarchive`] |
 //! | `POST   /v1/tasks/{id}/runs` | [`TaskRuns::create`] / [`TaskRuns::resume`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}` | [`TaskRuns::get`] |
-//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] / [`TaskRuns::abort`] / [`TaskRuns::drain`] |
+//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] / [`TaskRuns::cancel_with`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}/stream` | [`TaskRuns::stream`] |
 //! | `GET    /v1/files` | [`Files::list`] *(paginator: stream or `next_page`)* |
 //! | `POST   /v1/files` (multipart) | [`Files::upload`] |
@@ -164,6 +164,7 @@
 pub mod arrow;
 pub mod backoff;
 pub mod conversation_items;
+pub(crate) mod encoding;
 pub mod error;
 pub mod files;
 pub mod genai_span;
