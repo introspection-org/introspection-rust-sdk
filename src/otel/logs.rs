@@ -423,8 +423,7 @@ impl IntrospectionLogs {
     pub fn feedback(&self, name: &str, options: FeedbackOptions) {
         // The caller's extras go in first: `name` and `comments` are named
         // arguments, so a `with_property("name", ...)` must not silently
-        // replace the feedback name this call is about. Matches the Node and
-        // same ordering bug on the browser side.
+        // replace the feedback name this call is about.
         let mut properties: HashMap<String, PropertyValue> = options.extra.clone();
         properties.insert("name".to_string(), PropertyValue::String(name.to_string()));
         if let Some(comments) = &options.comments {

@@ -365,8 +365,8 @@ pub mod defaults {
 
 /// Log severity text constants.
 ///
-/// Crate-internal: the severity this SDK emits is not a knob, and neither the
-/// this is not a knob callers need.
+/// Crate-internal: the severity this SDK emits is fixed, not a knob callers
+/// need to reach.
 pub(crate) mod severity {
     pub const INFO: &str = "INFO";
 }

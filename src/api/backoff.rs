@@ -54,9 +54,9 @@ pub(crate) fn retry_after_from(headers: &HeaderMap) -> Option<Duration> {
         .trim();
 
     if let Ok(secs) = value.parse::<f64>() {
-        // Clamped rather than rejected, matching the date branch below and
-        // A negative delay is not a thing to wait for, and
-        // "the server sent a nonsense value" still means retry now.
+        // Clamped rather than rejected, matching the date branch below: a
+        // negative delay is not a thing to wait for, and "the server sent a
+        // nonsense value" still means retry now.
         return secs
             .is_finite()
             .then(|| Duration::from_secs_f64(secs.max(0.0)));
