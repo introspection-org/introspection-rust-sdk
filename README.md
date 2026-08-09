@@ -30,8 +30,7 @@ This is the native Rust client for driving Introspection runtimes and tasks,
 alongside optional analytics and OpenTelemetry surfaces. Use
 `IntrospectionClient` to open a runner against a deployed runtime, start a task,
 and stream its output. See the [platform SDK overview](https://docs.introspection.dev/sdk)
-for the wider product workflow and the JavaScript, Python, browser, and CLI
-clients.
+for the wider product workflow.
 
 The SDK exposes **three independent surfaces** — wire up only what you need:
 
