@@ -194,7 +194,8 @@ pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
     AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
     ConversationCost, ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,
-    ConversationItemListParams, ConversationListParams, ConversationMetrics, ConversationUsage,
+    ConversationItemListParams, ConversationListParams, ConversationMetrics,
+    ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
     Dimension, Event, EventListParams, Experiment, ExperimentGoal, ExperimentGoalComponent,
     ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
     FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate,

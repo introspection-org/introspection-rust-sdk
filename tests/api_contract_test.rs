@@ -48,10 +48,11 @@ use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
     AgentInfo, ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
-    ConversationListParams, Dimension, Event, EventListParams, ExperimentListParams,
-    ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate,
-    HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery,
-    OrderTerm, PaginationParams, RecipeListParams, ResourceShare, RuntimeListParams, ShareCreate,
+    ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
+    Dimension, Event, EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent,
+    FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
+    IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
+    PaginationParams, RecipeListParams, ResourceShare, RuntimeListParams, ShareCreate,
     ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions,
     TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate,
     TaskRunKind, TaskStatus, TimeDimension,
@@ -422,6 +423,9 @@ fn sdk_surface_matches_the_published_reference() {
         end_date: Some("2026-01-02T00:00:00Z".into()),
     };
 
+    // Every typed field is populated, so the assertion below is that all 22
+    // declared query params of `GET /v1/conversations` are reachable from the
+    // typed surface -- not just the handful a spot-check would set.
     let conversation_list = ConversationListParams {
         limit: Some(1),
         next: Some("cursor".into()),
@@ -431,6 +435,24 @@ fn sdk_surface_matches_the_published_reference() {
         end: Some("2026-01-02T00:00:00Z".into()),
         // Mutually exclusive with `start`/`end`, as on the event params.
         lookback: None,
+        conversation_id: Some("conv".into()),
+        conversation_ids: Some(vec!["conv".into()]),
+        share_id: Some(vec![Uuid::nil().to_string()]),
+        model: Some("claude-opus-5".into()),
+        agent_name: Some("agent".into()),
+        status: Some(ConversationStatus::Ok),
+        service_name: Some("svc".into()),
+        service_names: Some(vec!["svc".into()]),
+        environment: Some("prod".into()),
+        runtime_id: Some(Uuid::nil()),
+        runtime_group_id: Some(Uuid::nil()),
+        experiment_id: Some(Uuid::nil()),
+        recipe_git_commit_sha: Some("deadbeef".into()),
+        resolution: Some(ConversationResolution::Resolved),
+        sentiment: Some(ConversationSentiment::Positive),
+        owner_key: Some("owner".into()),
+        // A declared param through the escape hatch, so the verbatim merge is
+        // exercised rather than assumed.
         filters: Some(HashMap::from([(
             "environment".to_string(),
             Value::from("prod"),
@@ -438,7 +460,6 @@ fn sdk_surface_matches_the_published_reference() {
     };
 
     let event_list = EventListParams {
-        event_name: IntrospectionEventName::Feedback,
         limit: Some(1),
         next: Some("cursor".into()),
         sort: Some("timestamp".into()),
@@ -448,12 +469,28 @@ fn sdk_surface_matches_the_published_reference() {
         // Mutually exclusive with `start`/`end` — populating all three is
         // rejected client-side, and the window keys are already covered.
         lookback: None,
-        // One real declared parameter, so the verbatim merge is exercised
-        // rather than assumed.
+        conversation_id: Some("conv".into()),
+        conversation_ids: Some(vec!["conv".into()]),
+        event_id: Some(vec!["evt".into()]),
+        service_name: Some("svc".into()),
+        environment: Some("prod".into()),
+        runtime_group_id: Some(Uuid::nil()),
+        runtime_group_unattributed: Some(true),
+        lens: Some("lens".into()),
+        pattern_id: Some(Uuid::nil()),
+        status: Some("open".into()),
+        include_superseded: Some(true),
+        severities: Some(vec!["high".into()]),
+        trace_id: Some("trace".into()),
+        span_id: Some("span".into()),
+        owner_key: Some("owner".into()),
+        // A declared param through the escape hatch, so the verbatim merge is
+        // exercised rather than assumed.
         filters: Some(HashMap::from([(
             "environment".to_string(),
             Value::from("prod"),
         )])),
+        ..EventListParams::new(IntrospectionEventName::Feedback)
     };
 
     let metrics = MetricsQuery {
