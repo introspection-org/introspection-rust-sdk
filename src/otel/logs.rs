@@ -71,7 +71,7 @@ pub type Result<T> = std::result::Result<T, IntrospectionLogsError>;
 /// event this crate sent was unattributable to a version -- the other SDKs all
 /// carry one.
 fn sdk_scope() -> InstrumentationScope {
-    InstrumentationScope::builder(types::logger_name::RUST_SDK)
+    InstrumentationScope::builder(types::logger_name::SDK)
         .with_version(crate::VERSION)
         .build()
 }
@@ -655,8 +655,22 @@ mod tests {
 
         let emitted = exporter.get_emitted_logs().unwrap();
         let scope = &emitted[0].instrumentation;
-        assert_eq!(scope.name(), "introspection-sdk-rust");
+        assert_eq!(scope.name(), "introspection-sdk");
         assert_eq!(scope.version(), Some(crate::VERSION));
+
+        // The language is not in the scope name on purpose -- it rides the
+        // resource, which is where semconv puts it. Assert that, since the
+        // scope name's brevity depends on it.
+        let resource = &emitted[0].resource;
+        assert_eq!(
+            resource
+                .get(&opentelemetry::Key::from_static_str(
+                    "telemetry.sdk.language"
+                ))
+                .map(|v| v.to_string())
+                .as_deref(),
+            Some("rust")
+        );
     }
 
     #[test]

@@ -360,7 +360,15 @@ pub mod severity {
 
 /// Logger names for OpenTelemetry instrumentation scope.
 pub mod logger_name {
-    pub const RUST_SDK: &str = "introspection-sdk-rust";
+    /// Instrumentation scope name on every analytics record.
+    ///
+    /// The crate name, per the OTel convention that the scope names the
+    /// instrumentation library. Deliberately *not* language-tagged: the SDK
+    /// language already rides the resource as `telemetry.sdk.language`
+    /// (`"rust"` here), which is the semconv-designated place for it, so
+    /// encoding it again in the scope would duplicate a standard attribute in
+    /// a non-standard field. All four Introspection SDKs use this same name.
+    pub const SDK: &str = "introspection-sdk";
 }
 
 /// API endpoint paths.
