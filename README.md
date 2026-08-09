@@ -337,7 +337,7 @@ dropped.
 
 A standalone `SpanProcessor` you attach to your own
 `SdkTracerProvider`. Sends spans to the Introspection OTLP collector
-via HTTP. Composes with Logfire and any other span processors.
+via HTTP. Composes with any other span processors on the same provider.
 
 Requires the `otel` feature.
 

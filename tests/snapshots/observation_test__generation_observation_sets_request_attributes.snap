@@ -7,9 +7,7 @@ expression: json
     "gen_ai.input.messages": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"Say hello\"}]}]",
     "gen_ai.operation.name": "chat",
     "gen_ai.provider.name": "openai",
-    "gen_ai.request.model": "gpt-4o-mini",
-    "gen_ai.system": "openai",
-    "openinference.span.kind": "LLM"
+    "gen_ai.request.model": "gpt-4o-mini"
   },
   "end_time": "[timestamp]",
   "name": "chat",

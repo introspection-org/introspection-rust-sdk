@@ -277,7 +277,7 @@ pub mod attr {
     pub const AGENT_ID: &str = "gen_ai.agent.id";
 
     // Gen AI span attributes (OTel semantic conventions for LLM observability)
-    pub const GEN_AI_SYSTEM: &str = "gen_ai.system";
+    pub const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
     pub const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
     pub const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
     pub const GEN_AI_RESPONSE_MODEL: &str = "gen_ai.response.model";

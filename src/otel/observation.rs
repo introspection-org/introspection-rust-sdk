@@ -270,13 +270,15 @@ impl<S: Span> Observation<S> {
 
         // Set request-side attributes for generations
         if config.observation_type == ObservationType::Generation {
-            span.set_attribute(KeyValue::new("openinference.span.kind", "LLM"));
-            span.set_attribute(KeyValue::new("gen_ai.provider.name", "openai"));
             if let Some(ref model) = config.model {
                 span.set_attribute(KeyValue::new(attr::GEN_AI_REQUEST_MODEL, model.clone()));
             }
+            // The provider comes from the model, never a fixed default: a
+            // hardcoded value contradicts `system` for every non-OpenAI model.
+            // Only `gen_ai.provider.name` is emitted — `gen_ai.system` is the
+            // pre-1.30 spelling of the same thing.
             if let Some(ref system) = config.system {
-                span.set_attribute(KeyValue::new(attr::GEN_AI_SYSTEM, system.clone()));
+                span.set_attribute(KeyValue::new(attr::GEN_AI_PROVIDER_NAME, system.clone()));
             }
             if let Some(ref op) = config.operation_name {
                 span.set_attribute(KeyValue::new(attr::GEN_AI_OPERATION_NAME, op.clone()));
