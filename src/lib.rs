@@ -87,6 +87,7 @@
 //! | `INTROSPECTION_SERVICE_NAME`    | Service name (logs/traces)                  |
 //! | `INTROSPECTION_BASE_API_URL`    | REST API host (default `api.introspection.dev`) |
 //! | `INTROSPECTION_BASE_OTEL_URL`   | OTLP collector host (default `otel.introspection.dev`) |
+//! | `INTROSPECTION_DEV_TARGET`      | Development only: route this process's tasks to your own `introspection dev` server. Rides every request as a header. No default — see [`dev_target`] |
 
 pub mod agui;
 pub mod api;
