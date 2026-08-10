@@ -456,6 +456,11 @@ fn sdk_surface_matches_the_published_reference() {
         subject: Some(ConnectionSubjectType::App),
         return_url: Some("https://app.example/done".into()),
         expires_in: Some(3600),
+        identity: Some(RunnerIdentity {
+            user_id: Some("u_demo".into()),
+            anonymous_id: None,
+            conversation_id: None,
+        }),
     };
 
     let conversation_export = ConversationExportParams {

@@ -1262,6 +1262,12 @@ pub struct Connection {
     /// points at the workspace customer member.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member_id: Option<Uuid>,
+    /// The member who performed the grant, as distinct from `member_id`
+    /// (whose credential this is). For `app` and `workspace` subjects those
+    /// are never the same principal. `None` for grants made before the
+    /// column existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_member_id: Option<Uuid>,
     /// Runtime group answering this connection's channels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
@@ -1460,6 +1466,13 @@ pub struct ConnectorAuthorizeParams {
     /// Seconds the URL stays valid (60–86400, default 600).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<u32>,
+    /// The end customer this grant is being made for, asserted by the caller.
+    /// Its `user_id` resolves a `customer` member recorded as the connection's
+    /// `created_by_member_id`, so a partner can associate the connection with
+    /// their own caller rather than the agent member that made the API call.
+    /// `None` attributes the grant to the authenticated principal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<RunnerIdentity>,
 }
 
 /// Response of `POST /v1/oauth/connections/authorize` — a freshly minted

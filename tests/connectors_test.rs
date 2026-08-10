@@ -13,7 +13,7 @@ use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
 use introspection_sdk::{
     ConnectionCreateParams, ConnectionSubjectType, Connections, ConnectorAuthMode,
     ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams,
-    Connectors, PaginationParams,
+    Connectors, PaginationParams, RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -71,6 +71,7 @@ fn connection_json() -> serde_json::Value {
         "updated_at": "2026-08-08T00:00:00Z",
         "connector_id": CONNECTOR_ID,
         "member_id": "00000000-0000-0000-0000-0000000000cc",
+        "created_by_member_id": "00000000-0000-0000-0000-0000000000dd",
         "runtime_group_id": "33333333-3333-3333-3333-333333333333",
         "subject_type": "workspace",
         "scopes_granted": ["chat:write"],
@@ -216,6 +217,38 @@ async fn authorize_merges_the_connector_id_and_returns_both_expiry_forms() {
 }
 
 #[tokio::test]
+async fn authorize_carries_an_asserted_end_customer() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/authorize"))
+        .and(body_json(json!({
+            "connector_id": CONNECTOR_ID,
+            "runtime": "support-agent",
+            "identity": { "user_id": "u_demo" },
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorize_url": "https://slack.com/oauth/v2/authorize?state=single-use",
+            "expires_in": 600,
+            "expires_at": "2026-08-08T20:10:00Z",
+        })))
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let params = ConnectorAuthorizeParams {
+        runtime: Some("support-agent".into()),
+        // Only the asserted field rides along; the rest stay absent.
+        identity: Some(RunnerIdentity {
+            user_id: Some("u_demo".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    connectors.authorize(connector_id(), &params).await.unwrap();
+}
+
+#[tokio::test]
 async fn authorize_sends_only_the_connector_when_given_nothing_else() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -323,6 +356,10 @@ async fn connections_list_and_create_use_the_nested_path() {
     assert_eq!(listed.len(), 1);
     let connection = listed[0].as_ref().unwrap();
     assert_eq!(connection.subject_type, ConnectionSubjectType::Workspace);
+    // The installer is recorded apart from the subject: for a workspace
+    // install they are never the same principal.
+    assert!(connection.created_by_member_id.is_some());
+    assert_ne!(connection.created_by_member_id, connection.member_id);
 
     let create = ConnectionCreateParams {
         subject_type: Some(ConnectionSubjectType::App),
