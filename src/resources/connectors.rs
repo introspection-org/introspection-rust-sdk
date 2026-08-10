@@ -203,6 +203,10 @@ impl Connectors {
     /// A connector whose [`Connector::requires_runtime`] is true answers 422
     /// unless `runtime` names the agent that replies — read that field rather
     /// than hardcoding which providers are chat providers.
+    ///
+    /// Setting [`ConnectorAuthorizeParams::identity`] mints a `customer`
+    /// member for the asserted end user, so it can answer 409 when the org has
+    /// reached its member limit — a plan conflict, not back-pressure.
     pub async fn authorize(
         &self,
         connector_id: Uuid,
