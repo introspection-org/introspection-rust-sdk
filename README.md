@@ -17,7 +17,6 @@
   <a href="https://x.com/IntrospectionAI"><img src="https://img.shields.io/twitter/follow/IntrospectionAI" alt="Follow on X"></a>
 </div>
 
-<br>
 [Introspection](https://introspection.dev) is the infrastructure for
 long-horizon vertical agents, powered by Pi. Define an agent as a
 [Recipe](https://pi.recipes) — agents, skills, policies, and evals in plain
