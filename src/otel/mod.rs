@@ -10,31 +10,30 @@
 //! The feature-gated part hosts two independent surfaces that customers can
 //! mix-and-match:
 //!
-//! * [`IntrospectionLogs`] — owns an [`opentelemetry_sdk::logs::SdkLoggerProvider`]
+//! * `IntrospectionLogs` — owns an `opentelemetry_sdk::logs::SdkLoggerProvider`
 //!   and exports `track` / `feedback` / `identify` events over OTLP HTTP.
-//! * [`IntrospectionSpanProcessor`] — a [`opentelemetry_sdk::trace::SpanProcessor`]
+//! * `IntrospectionSpanProcessor` — an `opentelemetry_sdk::trace::SpanProcessor`
 //!   you attach to your own `SdkTracerProvider` to forward spans over OTLP HTTP.
+//!
+//! Named rather than linked: this module doc is compiled even without the
+//! `otel` feature (because [`messages`] is), and a link to an item the
+//! feature gates away is a `cargo doc` warning for every REST-only user.
+//! Both names resolve on docs.rs, which builds with all features.
 //!
 //! These two surfaces share no state. They are also fully independent
 //! from [`crate::IntrospectionClient`] (the always-on REST surface).
-//!
-//! Higher-level helpers — [`messages`], [`observation`], and the
-//! `async-openai` adapter at [`openai`] (gated on the `openai` feature) —
-//! also live under this module.
 
 #[cfg(feature = "otel")]
 pub mod logs;
 pub mod messages;
 #[cfg(feature = "otel")]
-pub mod observation;
-#[cfg(feature = "otel")]
 pub mod span_processor;
 #[cfg(feature = "otel")]
 pub mod types;
 
-#[cfg(feature = "openai")]
-pub mod openai;
-
+// `testing` for downstream consumers; `test` so the in-crate tests build
+// under any feature set (the in-memory exporters come from the
+// `opentelemetry_sdk` dev-dependency, which enables its `testing` feature).
 #[cfg(any(feature = "testing", all(test, feature = "otel")))]
 pub mod testing;
 
@@ -48,17 +47,12 @@ pub use messages::{
     ToolCallResponsePart,
 };
 #[cfg(feature = "otel")]
-pub use observation::{GenerationUpdate, Observation, ObservationConfig, ObservationType, Usage};
-#[cfg(feature = "otel")]
 pub use span_processor::{
     IntrospectionSpanProcessor, SpanProcessorAdvancedOptions, SpanProcessorConfig,
     SpanProcessorConfigBuilder, SpanProcessorError, SpanProcessorResult,
 };
 #[cfg(feature = "otel")]
 pub use types::{
-    api_path, attr, baggage, defaults, event_name, generate_event_id, logger_name, severity,
-    FeedbackOptions, IdentifyOptions, PropertyValue, TrackOptions,
+    attr, baggage, defaults, event_name, generate_event_id, new_conversation_id, FeedbackOptions,
+    IdentifyOptions, PropertyValue, TrackOptions,
 };
-
-#[cfg(feature = "openai")]
-pub use openai::TracedStream;

@@ -241,7 +241,6 @@ pub struct IntrospectionRecipe {
 }
 
 /// `introspection.conversation.*`.
-/// `introspection.conversation.*`.
 ///
 /// On an item these describe the turn's place in the conversation.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

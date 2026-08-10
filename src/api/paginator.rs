@@ -115,8 +115,12 @@ where
         self.started = true;
         let params = self.params_for_current_cursor();
         let page: Paginated<T> = self.http.get_json(&self.path, &params).await?;
-        self.next_cursor = page.next.clone();
-        if page.next.is_none() {
+        // Same non-advancing-cursor guard as the Stream path; an empty
+        // cursor is absence, not a value.
+        let next = page.next.clone().filter(|c| !c.is_empty());
+        let stalled = next.is_some() && next == self.next_cursor;
+        self.next_cursor = next.clone();
+        if next.is_none() || stalled {
             self.exhausted = true;
         }
         Ok(Some(page))
@@ -168,8 +172,15 @@ where
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(Ok(page)) => {
                         this.pending = None;
-                        this.next_cursor = page.next.clone();
-                        if page.next.is_none() {
+                        // A cursor that does not advance means the server
+                        // would hand back this same page forever;
+                        // `collect_all` is bounded by `max_pages` but the
+                        // Stream path had nothing to stop it. An empty
+                        // cursor is absence, not a value.
+                        let next = page.next.clone().filter(|c| !c.is_empty());
+                        let stalled = next.is_some() && next == this.next_cursor;
+                        this.next_cursor = next.clone();
+                        if next.is_none() || stalled {
                             this.exhausted = true;
                         }
                         for r in page.records {

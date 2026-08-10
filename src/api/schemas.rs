@@ -1,7 +1,6 @@
 //! Wire types for the DP `/v1/tasks` and `/v1/files` surface.
 //!
-//! Kept in lockstep with the Pydantic/TS implementations in
-//! `introspection-python-sdk` / `introspection-js-sdk`.
+//! Kept in lockstep with the published Data Plane OpenAPI schema.
 //!
 //! Field names are kept on-the-wire (`snake_case`) so the JSON round-trips
 //! verbatim — no camelCase translation layer.
@@ -1408,9 +1407,69 @@ pub struct Conversation {
     pub owner_key: Option<String>,
 }
 
+/// `resolution` filter on `GET /v1/conversations`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationResolution {
+    Resolved,
+    Blocked,
+    Unresolved,
+    Pending,
+}
+
+impl ConversationResolution {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::Blocked => "blocked",
+            Self::Unresolved => "unresolved",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+/// `sentiment` filter on `GET /v1/conversations`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationSentiment {
+    Positive,
+    Negative,
+    Mixed,
+    Neutral,
+}
+
+impl ConversationSentiment {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Positive => "positive",
+            Self::Negative => "negative",
+            Self::Mixed => "mixed",
+            Self::Neutral => "neutral",
+        }
+    }
+}
+
+/// `status` filter on `GET /v1/conversations` — the span status a
+/// conversation ended on. Distinct from [`crate::api::genai_span::SpanStatus`],
+/// which is the status object carried *on* a span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationStatus {
+    Ok,
+    Error,
+    Unset,
+}
+
+impl ConversationStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ok => "Ok",
+            Self::Error => "Error",
+            Self::Unset => "Unset",
+        }
+    }
+}
+
 /// Ergonomic params for `GET /v1/conversations`. `order`/`start`/`end`/
 /// `lookback` map to the wire `direction`/`start_date`/`end_date` window (see
-/// [`Window`]); `filters` is a passthrough for resource filters that avoids
+/// a relative window); `filters` is a passthrough for resource filters that avoids
 /// baking the open attribute vocabulary into the SDK.
 #[derive(Debug, Clone, Default)]
 pub struct ConversationListParams {
@@ -1421,7 +1480,27 @@ pub struct ConversationListParams {
     pub start: Option<String>,
     pub end: Option<String>,
     pub lookback: Option<String>,
-    /// Arbitrary resource filters merged verbatim onto the query string.
+    /// Restrict to one conversation.
+    pub conversation_id: Option<String>,
+    /// Restrict to several conversations.
+    pub conversation_ids: Option<Vec<String>>,
+    /// Read through one or more share grants.
+    pub share_id: Option<Vec<String>>,
+    pub model: Option<String>,
+    pub agent_name: Option<String>,
+    pub status: Option<ConversationStatus>,
+    pub service_name: Option<String>,
+    pub service_names: Option<Vec<String>>,
+    pub environment: Option<String>,
+    pub runtime_id: Option<Uuid>,
+    pub runtime_group_id: Option<Uuid>,
+    pub experiment_id: Option<Uuid>,
+    pub recipe_git_commit_sha: Option<String>,
+    pub resolution: Option<ConversationResolution>,
+    pub sentiment: Option<ConversationSentiment>,
+    pub owner_key: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: merged verbatim
+    /// onto the query string, after the typed fields above.
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
@@ -1512,6 +1591,32 @@ impl ConversationListParams {
             include_total: None,
         }
         .apply(&mut obj)?;
+        put_str(&mut obj, "conversation_id", self.conversation_id.as_ref());
+        put_list(&mut obj, "conversation_ids", self.conversation_ids.as_ref());
+        put_list(&mut obj, "share_id", self.share_id.as_ref());
+        put_str(&mut obj, "model", self.model.as_ref());
+        put_str(&mut obj, "agent_name", self.agent_name.as_ref());
+        if let Some(status) = self.status {
+            obj.insert("status".to_string(), status.as_str().into());
+        }
+        put_str(&mut obj, "service_name", self.service_name.as_ref());
+        put_list(&mut obj, "service_names", self.service_names.as_ref());
+        put_str(&mut obj, "environment", self.environment.as_ref());
+        put_uuid(&mut obj, "runtime_id", self.runtime_id);
+        put_uuid(&mut obj, "runtime_group_id", self.runtime_group_id);
+        put_uuid(&mut obj, "experiment_id", self.experiment_id);
+        put_str(
+            &mut obj,
+            "recipe_git_commit_sha",
+            self.recipe_git_commit_sha.as_ref(),
+        );
+        if let Some(resolution) = self.resolution {
+            obj.insert("resolution".to_string(), resolution.as_str().into());
+        }
+        if let Some(sentiment) = self.sentiment {
+            obj.insert("sentiment".to_string(), sentiment.as_str().into());
+        }
+        put_str(&mut obj, "owner_key", self.owner_key.as_ref());
         merge_filters(&mut obj, self.filters.as_ref());
         Ok(serde_json::Value::Object(obj))
     }
@@ -1860,7 +1965,23 @@ pub struct EventListParams {
     pub start: Option<String>,
     pub end: Option<String>,
     pub lookback: Option<String>,
-    /// Envelope + family-scoped filters merged verbatim onto the query
+    pub conversation_id: Option<String>,
+    pub conversation_ids: Option<Vec<String>>,
+    pub event_id: Option<Vec<String>>,
+    pub service_name: Option<String>,
+    pub environment: Option<String>,
+    pub runtime_group_id: Option<Uuid>,
+    pub runtime_group_unattributed: Option<bool>,
+    pub lens: Option<String>,
+    pub pattern_id: Option<Uuid>,
+    pub status: Option<String>,
+    pub include_superseded: Option<bool>,
+    pub severities: Option<Vec<String>>,
+    pub trace_id: Option<String>,
+    pub span_id: Option<String>,
+    pub owner_key: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: merged verbatim
+    /// onto the query
     /// string. A filter outside the requested family's allow-map is a 422.
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
@@ -1879,6 +2000,21 @@ impl EventListParams {
             start: None,
             end: None,
             lookback: None,
+            conversation_id: None,
+            conversation_ids: None,
+            event_id: None,
+            service_name: None,
+            environment: None,
+            runtime_group_id: None,
+            runtime_group_unattributed: None,
+            lens: None,
+            pattern_id: None,
+            status: None,
+            include_superseded: None,
+            severities: None,
+            trace_id: None,
+            span_id: None,
+            owner_key: None,
             filters: None,
         }
     }
@@ -1901,6 +2037,25 @@ impl EventListParams {
             include_total: None,
         }
         .apply(&mut obj)?;
+        put_str(&mut obj, "conversation_id", self.conversation_id.as_ref());
+        put_list(&mut obj, "conversation_ids", self.conversation_ids.as_ref());
+        put_list(&mut obj, "event_id", self.event_id.as_ref());
+        put_str(&mut obj, "service_name", self.service_name.as_ref());
+        put_str(&mut obj, "environment", self.environment.as_ref());
+        put_uuid(&mut obj, "runtime_group_id", self.runtime_group_id);
+        put_bool(
+            &mut obj,
+            "runtime_group_unattributed",
+            self.runtime_group_unattributed,
+        );
+        put_str(&mut obj, "lens", self.lens.as_ref());
+        put_uuid(&mut obj, "pattern_id", self.pattern_id);
+        put_str(&mut obj, "status", self.status.as_ref());
+        put_bool(&mut obj, "include_superseded", self.include_superseded);
+        put_list(&mut obj, "severities", self.severities.as_ref());
+        put_str(&mut obj, "trace_id", self.trace_id.as_ref());
+        put_str(&mut obj, "span_id", self.span_id.as_ref());
+        put_str(&mut obj, "owner_key", self.owner_key.as_ref());
         if self
             .filters
             .as_ref()
@@ -1912,6 +2067,49 @@ impl EventListParams {
         }
         merge_filters(&mut obj, self.filters.as_ref());
         Ok(serde_json::Value::Object(obj))
+    }
+}
+
+/// Insert an optional scalar filter under `key` when it is set.
+fn put_str(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<&String>,
+) {
+    if let Some(v) = value {
+        obj.insert(key.to_string(), v.as_str().into());
+    }
+}
+
+/// Insert an optional `Uuid` filter under `key` when it is set.
+fn put_uuid(obj: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: Option<Uuid>) {
+    if let Some(v) = value {
+        obj.insert(key.to_string(), v.to_string().into());
+    }
+}
+
+/// Insert an optional `bool` filter under `key` when it is set.
+fn put_bool(obj: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: Option<bool>) {
+    if let Some(v) = value {
+        obj.insert(key.to_string(), v.into());
+    }
+}
+
+/// Insert a repeated filter under `key` when it is set and non-empty. An
+/// empty vec is "no filter", not "match nothing": sending `?key=` would be a
+/// filter on the empty string.
+fn put_list(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<&Vec<String>>,
+) {
+    if let Some(values) = value {
+        if !values.is_empty() {
+            obj.insert(
+                key.to_string(),
+                serde_json::Value::Array(values.iter().map(|v| v.as_str().into()).collect()),
+            );
+        }
     }
 }
 
@@ -2367,6 +2565,119 @@ mod tests {
         assert!(wire.get("order").is_none());
         assert!(wire.get("start").is_none());
         assert!(wire.get("end").is_none());
+    }
+
+    #[test]
+    fn typed_conversation_filters_reach_the_wire() {
+        // These were a `HashMap<String, Value>` the caller had to spell by
+        // hand: a typo produced no compile error and, per the DP's own
+        // warning, an unrecognised filter can come back as an *unfiltered*
+        // list rather than a 422. Typed fields, lowered here.
+        let wire = ConversationListParams {
+            conversation_id: Some("conv".into()),
+            conversation_ids: Some(vec!["a".into(), "b".into()]),
+            share_id: Some(vec!["s".into()]),
+            model: Some("claude-opus-5".into()),
+            agent_name: Some("agent".into()),
+            status: Some(ConversationStatus::Error),
+            service_name: Some("svc".into()),
+            service_names: Some(vec!["svc".into()]),
+            environment: Some("prod".into()),
+            runtime_id: Some(Uuid::nil()),
+            runtime_group_id: Some(Uuid::nil()),
+            experiment_id: Some(Uuid::nil()),
+            recipe_git_commit_sha: Some("deadbeef".into()),
+            resolution: Some(ConversationResolution::Blocked),
+            sentiment: Some(ConversationSentiment::Negative),
+            owner_key: Some("owner".into()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+
+        assert_eq!(wire["conversation_id"], "conv");
+        assert_eq!(wire["conversation_ids"], serde_json::json!(["a", "b"]));
+        assert_eq!(wire["share_id"], serde_json::json!(["s"]));
+        assert_eq!(wire["model"], "claude-opus-5");
+        assert_eq!(wire["agent_name"], "agent");
+        assert_eq!(wire["status"], "Error");
+        assert_eq!(wire["service_name"], "svc");
+        assert_eq!(wire["service_names"], serde_json::json!(["svc"]));
+        assert_eq!(wire["environment"], "prod");
+        assert_eq!(wire["runtime_id"], Uuid::nil().to_string());
+        assert_eq!(wire["runtime_group_id"], Uuid::nil().to_string());
+        assert_eq!(wire["experiment_id"], Uuid::nil().to_string());
+        assert_eq!(wire["recipe_git_commit_sha"], "deadbeef");
+        assert_eq!(wire["resolution"], "blocked");
+        assert_eq!(wire["sentiment"], "negative");
+        assert_eq!(wire["owner_key"], "owner");
+    }
+
+    #[test]
+    fn typed_event_filters_reach_the_wire() {
+        let wire = EventListParams {
+            conversation_id: Some("conv".into()),
+            conversation_ids: Some(vec!["a".into()]),
+            event_id: Some(vec!["e".into()]),
+            service_name: Some("svc".into()),
+            environment: Some("prod".into()),
+            runtime_group_id: Some(Uuid::nil()),
+            runtime_group_unattributed: Some(true),
+            lens: Some("lens".into()),
+            pattern_id: Some(Uuid::nil()),
+            status: Some("open".into()),
+            include_superseded: Some(false),
+            severities: Some(vec!["high".into()]),
+            trace_id: Some("trace".into()),
+            span_id: Some("span".into()),
+            owner_key: Some("owner".into()),
+            ..EventListParams::new(IntrospectionEventName::Observation)
+        }
+        .to_wire()
+        .unwrap();
+
+        assert_eq!(wire["event_name"], "introspection.observation");
+        assert_eq!(wire["conversation_id"], "conv");
+        assert_eq!(wire["conversation_ids"], serde_json::json!(["a"]));
+        assert_eq!(wire["event_id"], serde_json::json!(["e"]));
+        assert_eq!(wire["runtime_group_unattributed"], true);
+        assert_eq!(wire["lens"], "lens");
+        assert_eq!(wire["pattern_id"], Uuid::nil().to_string());
+        assert_eq!(wire["include_superseded"], false);
+        assert_eq!(wire["severities"], serde_json::json!(["high"]));
+        assert_eq!(wire["trace_id"], "trace");
+        assert_eq!(wire["span_id"], "span");
+        assert_eq!(wire["owner_key"], "owner");
+    }
+
+    #[test]
+    fn an_empty_repeated_filter_is_omitted_not_sent_empty() {
+        // An empty vec is "no filter", not "match nothing" -- sending
+        // `?conversation_ids=` would be a filter on the empty string.
+        let wire = ConversationListParams {
+            conversation_ids: Some(Vec::new()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+        assert!(wire.get("conversation_ids").is_none());
+    }
+
+    #[test]
+    fn the_filters_escape_hatch_still_wins_over_a_typed_field() {
+        // `filters` is merged last, so a caller working around a stale SDK
+        // build can still override what the typed field lowered.
+        let wire = ConversationListParams {
+            environment: Some("prod".into()),
+            filters: Some(HashMap::from([(
+                "environment".to_string(),
+                serde_json::Value::from("staging"),
+            )])),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["environment"], "staging");
     }
 
     #[test]

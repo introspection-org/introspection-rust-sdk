@@ -8,7 +8,7 @@
   </a>
 </div>
 
-<h4 align="center">Deploy vertical agents that improve in production.</h4>
+<h4 align="center">The infrastructure for long-horizon vertical agents.</h4>
 
 <div align="center">
   <a href="https://introspection.dev"><img src="https://img.shields.io/badge/website-introspection.dev-blue" alt="Website"></a>
@@ -19,17 +19,18 @@
 
 <br>
 
-[Introspection](https://introspection.dev) is the managed cloud for vertical
-agents, powered by Pi. Define an agent as a recipe, deploy it to a
-commit-pinned runtime, and improve it in production with conversations,
-patterns, judges, and experiments.
+[Introspection](https://introspection.dev) is the infrastructure for
+long-horizon vertical agents, powered by Pi. Define an agent as a
+[Recipe](https://pi.recipes) — agents, skills, policies, and evals in plain
+source you own in Git — deploy it to a governed per-customer Runtime, and
+improve it in production with conversations, observations, judges, and
+experiments.
 
 This is the native Rust client for driving Introspection runtimes and tasks,
 alongside optional analytics and OpenTelemetry surfaces. Use
 `IntrospectionClient` to open a runner against a deployed runtime, start a task,
 and stream its output. See the [platform SDK overview](https://docs.introspection.dev/sdk)
-for the wider product workflow and the JavaScript, Python, browser, and CLI
-clients.
+for the wider product workflow.
 
 The SDK exposes **three independent surfaces** — wire up only what you need:
 
@@ -37,7 +38,7 @@ The SDK exposes **three independent surfaces** — wire up only what you need:
 | --- | --- | --- |
 | [`IntrospectionClient`](#1-introspectionclient--introspection-api-runtimes-tasks-files) | Introspection API: runtimes, experiments, runner, tasks, files | _none_ (default) |
 | [`IntrospectionLogs`](#2-introspectionlogs--analytics-events-track-feedback-identify) | Analytics events: `track` / `feedback` / `identify` (OTLP logs) | `otel` |
-| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces-span-processors--instrumentors) | Traces: span processors + LLM SDK instrumentors (OTLP traces) | `otel` |
+| [`IntrospectionSpanProcessor`](#3-introspectionspanprocessor--traces) | Traces: span processor (OTLP traces) | `otel` |
 
 They share no state. Construct the ones you want, configure independently, mix and match.
 
@@ -47,30 +48,23 @@ Default install — `IntrospectionClient` only (no OpenTelemetry pulled in):
 
 ```toml
 [dependencies]
-introspection-sdk = "0.1"
+introspection-sdk = "0.13"
 ```
 
 With logs/traces export:
 
 ```toml
 [dependencies]
-introspection-sdk = { version = "0.1", features = ["otel"] }
-```
-
-The `async-openai` adapter is experimental:
-
-```toml
-[dependencies]
-introspection-sdk = { version = "0.1", features = ["openai"] }
+introspection-sdk = { version = "0.13", features = ["otel"] }
 ```
 
 ### Feature flags
 
-| Feature   | Description                                                        |
-| --------- | ------------------------------------------------------------------ |
-| `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`       |
-| `openai`  | Experimental `async-openai` support (implies `otel`)            |
-| `testing` | In-memory span exporter and test helpers (implies `otel`)          |
+| Feature   | Description                                                          |
+| --------- | -------------------------------------------------------------------- |
+| `otel`    | Enables `IntrospectionLogs` and `IntrospectionSpanProcessor`         |
+| `arrow`   | Arrow IPC decode for the telemetry reads (`list_arrow` / `export_arrow`) |
+| `testing` | In-memory span exporter and test helpers (implies `otel`)            |
 
 ## Three surfaces
 
@@ -98,7 +92,7 @@ let mut events = runner.tasks()
     .into_stream().await?;
 
 // `stream()` yields typed AG-UI protocol events (see `introspection_sdk::agui`),
-// matching the JS (`@ag-ui/core`) and Python SDKs. Transport frames
+// matching the AG-UI protocol's own taxonomy. Transport frames
 // (heartbeats) are handled internally; an unknown future event type surfaces
 // as `AgUiEvent::Unknown` rather than failing the stream.
 while let Some(event) = events.next().await {
@@ -123,26 +117,52 @@ for file and conversation sharing grants.
 See [`examples/api/runtimes.rs`](examples/api/runtimes.rs) for a longer
 end-to-end walkthrough.
 
-#### Conversations are GenAI spans
+#### Authenticating without an API key
 
-Every conversation read — the summary list and the item list/detail — returns
-the same object: `GenAiSpan`, an OpenTelemetry span with identity and timing at
-the top level and everything else under `attributes`, keyed by its
-[GenAI semantic-convention][semconv] name. `gen_ai.request.model` is reached as
-`gen_ai.request.model` because that is what the SDK wrote when it created the
-span — there is no private dialect of renamed columns to learn.
+`introspection_sdk::auth` wraps the Control Plane's `POST /v1/oauth/token`
+grants, so server code (CI jobs, hosted-login backends, federation brokers)
+does not hand-roll a form-encoded token POST. All three return the same
+`OAuthToken`, which carries the `dp_url` the CP resolved for the token's
+project — hand that to a browser client so it needs no separate Data Plane
+configuration.
 
-Two properties are worth knowing before you write against it:
+```rust
+use introspection_sdk::{auth::ServiceAccountTokenParams, IntrospectionClient};
+
+// client_credentials — the headless counterpart to a long-lived API key.
+let client = IntrospectionClient::from_service_account(
+    ServiceAccountTokenParams::builder()
+        .client_id(std::env::var("INTRO_SA_CLIENT_ID")?)
+        .client_secret(std::env::var("INTRO_SA_CLIENT_SECRET")?)
+        .project(std::env::var("INTRO_PROJECT")?)
+        .build()?,
+    None,
+).await?;
+```
+
+`auth::token_exchange` (RFC 8693) trades an end user's partner-IdP token for a
+project-scoped token for a federated `customer` member, and
+`auth::authorization_code_token` (RFC 6749 / PKCE) completes a hosted-login
+callback. No refresh token is issued: re-mint once `expires_in` lapses.
+
+#### Conversation items are GenAI spans
+
+A conversation read comes in two shapes. The **summary** list returns
+`Conversation`: an envelope with the id, timings, and the conversation-level
+`usage`, `cost`, and `metrics` rollups. Every **item** read — the item list and
+the single-item detail — returns `GenAiSpan`, an OpenTelemetry span with
+identity and timing at the top level and everything else under `attributes`,
+keyed by its [GenAI semantic-convention][semconv] name. `gen_ai.request.model`
+is reached as `gen_ai.request.model` because that is what the SDK wrote when it
+created the span — there is no private dialect of renamed columns to learn.
+
+Two properties of the span tree are worth knowing before you write against it:
 
 - **The tree is open.** Every attribute node carries an `extra` map, so an
   attribute this SDK release never heard of still arrives and still round-trips.
   The server returns the tree as stored, not as an allow-list.
 - **Absent means absent.** Nothing serializes as `null` — a value that is not
   present is a key that is not there. A real `0` is still a `0`.
-
-A summary is the same envelope carrying the latest turn only, with conversation
-rollups under `gen_ai.usage.*` (token totals) and `introspection.conversation.*`
-(counts with no semantic-convention name). One parser for both reads.
 
 ```rust
 use introspection_sdk::ConversationListParams;
@@ -151,7 +171,7 @@ let conversations = runner.conversations();
 let mut pages = conversations.list(&ConversationListParams::default())?;
 let page = pages.next_page().await?.unwrap();
 for summary in &page.records {
-    println!("{:?} {:?}", summary.conversation_id(), summary.request_model());
+    println!("{} {} tokens", summary.id, summary.usage.total_tokens);
 }
 ```
 
@@ -274,8 +294,8 @@ while let Some(event) = stream.next().await {
 }
 ```
 
-The same `introspection.reconnect` marker rides the `CUSTOM` channel in the JS
-and Python SDKs, so it is expressible identically across all three.
+The `introspection.reconnect` marker rides the protocol's `CUSTOM` channel, so
+it needs no transport-specific handling.
 
 #### Retries (429 / 5xx)
 
@@ -289,10 +309,17 @@ it's pure exponential — the retry happens either way):
 - **`502` / `503` / `504`** — retried for **GET only** (idempotent reads), since
   re-sending a non-idempotent write on a transient gateway error isn't safe.
 
+`Retry-After` is understood in both RFC 9110 forms — delta-seconds and an
+HTTP-date.
+
 Retries are bounded (`HttpConfig::max_retries`, default 2); once the budget is
 spent the status surfaces as a normal `IntrospectionAPIError::Http { status, .. }`
-so the caller can inspect it and back off further. Streaming has its own resume
-budget (above); multipart uploads are not auto-retried.
+so the caller can inspect it and back off further. The error carries what the
+response said: `status()`, `code()` (the DP's machine-readable code — a `401`
+with `runner_expired` means refresh the runner, not rotate the key),
+`request_id()`, `body()`, and `retry_after()` for scheduling your own retry
+with the server's number. Streaming has its own resume budget (above);
+multipart uploads are not auto-retried.
 
 ### 2. `IntrospectionLogs` — Analytics events (track, feedback, identify)
 
@@ -339,11 +366,21 @@ Available baggage guards: `set_user_id`, `set_anonymous_id`,
 `set_baggage`. Each returns an RAII guard that clears the value when
 dropped.
 
-### 3. `IntrospectionSpanProcessor` — Traces (span processors + instrumentors)
+When you are starting a conversation rather than continuing one, take
+the id from `conversation`, which mints one in the same
+`intro_conv_<hex>` shape the rest of the platform uses:
+
+```rust,no_run
+let (conversation_id, _scope) = logs.conversation(None);
+logs.track("Turn Completed", None);
+// `conversation_id` is what to record feedback against later.
+```
+
+### 3. `IntrospectionSpanProcessor` — Traces
 
 A standalone `SpanProcessor` you attach to your own
 `SdkTracerProvider`. Sends spans to the Introspection OTLP collector
-via HTTP. Composes with Logfire and any other span processors.
+via HTTP. Composes with any other span processors on the same provider.
 
 Requires the `otel` feature.
 
@@ -366,64 +403,6 @@ let provider = SdkTracerProvider::builder()
 `SpanProcessorAdvancedOptions` lets you override the OTLP collector URL
 (`base_otel_url`), add HTTP headers, or inject a custom `SpanExporter`
 for tests.
-
-## Higher-level helpers (otel feature)
-
-### Observation API
-
-Instruments LLM calls and pipeline steps as OpenTelemetry spans with
-[gen_ai semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/).
-
-```rust
-use introspection_sdk::otel::{GenerationUpdate, Observation, ObservationConfig};
-use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
-
-let provider = SdkTracerProvider::builder().build();
-let tracer = provider.tracer("my-app");
-
-let mut obs = Observation::start(
-    &tracer,
-    ObservationConfig::generation("chat", "gpt-4o-mini"),
-);
-// ... make the API call ...
-obs.update_generation(
-    GenerationUpdate::new()
-        .with_response_model("gpt-4o-mini")
-        .with_response_id("chatcmpl-abc123")
-        .with_usage(12, 8),
-);
-obs.set_ok();
-// span ends when `obs` is dropped
-```
-
-Observations nest automatically via OpenTelemetry context propagation.
-
-### `async-openai` integration
-
-> **Experimental integration.**
-
-Requires the `openai` feature. Wraps `async-openai` calls with span
-instrumentation.
-
-```rust
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::*;
-use introspection_sdk::otel::openai::traced_chat_completion;
-
-let client = Client::with_config(OpenAIConfig::default());
-let request = CreateChatCompletionRequest {
-    model: "gpt-4o-mini".to_string(),
-    messages: vec![/* … */],
-    ..Default::default()
-};
-
-let response = traced_chat_completion(&tracer, &client, request).await?;
-```
-
-Streaming variant `traced_chat_completion_stream` and the
-`tracing`-based `tracing_traced_chat_completion` are also available.
 
 ## Environment variables
 

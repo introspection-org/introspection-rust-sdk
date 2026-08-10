@@ -21,10 +21,10 @@ updates:
     groups:
       # Cargo's compatibility rule keys off the leftmost NONZERO component, but
       # Dependabot labels by numeric position. For a pre-1.0 crate the two
-      # disagree: async-openai 0.40 -> 0.41 and reqwest 0.12 -> 0.13 both report
-      # as "minor" while Cargo treats them as breaking. This repo's own history
-      # is the proof — #6, #7, #8, #9, #10 and #19 were every one of them a
-      # breaking bump that Dependabot labelled minor.
+      # disagree: reqwest 0.12 -> 0.13 and opentelemetry 0.30 -> 0.32 both
+      # report as "minor" while Cargo treats them as breaking. This repo's own
+      # history is the proof — #6, #7, #8, #9, #10 and #19 were every one of
+      # them a breaking bump that Dependabot labelled minor.
       #
       # So auto-merge keys off membership of this group, never the update type.
       # Only crates already at >=1.0 belong here, where a minor/patch bump is
@@ -61,7 +61,7 @@ updates:
           - "opentelemetry_sdk"
           - "reqwest"
 
-  # ── GitHub Actions (used by ci.yml / publish.yml / release-tag.yml) ──
+  # ── GitHub Actions (used by ci.yml / publish.yml / release-please.yml) ──
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

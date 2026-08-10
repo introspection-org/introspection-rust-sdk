@@ -56,6 +56,26 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # Both jobs above and below run --all-features only, so a lint or a doc
+      # link that is fine there and broken on a REST-only install lands green.
+      # That is not hypothetical: three intra-doc links pointed at items the
+      # `otel` and `arrow` features gate away, and `cargo doc` on the default
+      # install emitted five warnings that nothing here ever saw.
+      - name: Run clippy (default features, REST only)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check rustdoc
+        # Broken intra-doc links are invisible without this: nothing else in
+        # CI runs rustdoc.
+        run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Check rustdoc (default features, REST only)
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   test:
     name: Tests
     runs-on: ubuntu-latest
@@ -76,121 +96,14 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests (all features)
-        run: cargo test --features testing,openai
+        # --all-features, not --features testing: the `arrow` tests only ran
+        # at publish time under the narrower flag.
+        run: cargo test --all-features
 
-  integration:
-    name: Integration Tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
-    runs-on: ubuntu-latest
-    environment: build
-    steps:
-      - uses: actions/checkout@v7
+      # The two combinations users actually install. Only --all-features was
+      # ever built here, so a #[cfg] slip in either would land green.
+      - name: Build (default features, REST only)
+        run: cargo build --locked
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run integration tests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          INTROSPECTION_TOKEN: ${{ secrets.INTROSPECTION_TOKEN }}
-          INTROSPECTION_BASE_URL: ${{ vars.INTROSPECTION_BASE_URL }}
-        run: cargo test --features testing,openai --test responses_api_test -- --ignored
-
-  # examples:
-  #   name: Run Examples
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  #   needs: integration
-  #   runs-on: ubuntu-latest
-  #   environment: build
-  #   steps:
-  #     - uses: actions/checkout@v7
-  #
-  #     - name: Install Rust stable
-  #       uses: dtolnay/rust-toolchain@stable
-  #
-  #     - name: Cache cargo
-  #       uses: actions/cache@v6
-  #       with:
-  #         path: |
-  #           ~/.cargo/registry
-  #           ~/.cargo/git
-  #           target
-  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-  #
-  #     - name: Run examples
-  #       env:
-  #         INTROSPECTION_TOKEN: ${{ secrets.INTROSPECTION_TOKEN }}
-  #         INTROSPECTION_BASE_URL: ${{ vars.INTROSPECTION_BASE_URL }}
-  #         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  #       run: |
-  #         echo "==> Running openai_tool_call"
-  #         cargo run --example openai_tool_call --features openai
-  #         echo "==> Running openai_streaming"
-  #         cargo run --example openai_streaming --features openai
-  #         echo "==> Running responses_api_features"
-  #         cargo run --example responses_api_features --features openai
-
-  # ── Create release tag (only on VERSION change) ────────────────────
-  create-tag:
-    name: Create release tag
-    needs: [lint-actions, test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: build
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
-          persist-credentials: false
-
-      - name: Check if VERSION changed
-        id: check
-        run: |
-          if git diff HEAD~1 --name-only | grep -q '^VERSION$'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$(tr -d '[:space:]' < version.txt)" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Generate GitHub App token
-        if: steps.check.outputs.changed == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.GH_APP_ID || secrets.GH_APP_ID }}
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          owner: introspection-org
-          repositories: introspection-rust-sdk
-
-      - name: Configure git with App token
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
-
-      - name: Create and push tag
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          VERSION="${{ steps.check.outputs.version }}"
-          TAG="v${VERSION}"
-
-          if git tag -l "${TAG}" | grep -q .; then
-            echo "Tag ${TAG} already exists, skipping."
-            exit 0
-          fi
-
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-          git tag -a "${TAG}" -m "Release ${TAG}"
-          git push origin "${TAG}"
-          echo "Created and pushed tag ${TAG}"
+      - name: Build (otel only)
+        run: cargo build --locked --features otel

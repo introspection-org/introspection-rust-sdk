@@ -3,7 +3,7 @@
 //! - [`Runtimes`] — read and resolve `/v1/runtimes`; obtain a
 //!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()`.
 //! - [`Experiments`] — `GET /v1/experiments` lookup plus lifecycle
-//!   (`/start` / `/conclude` / `/cancel`); obtain an [`ExperimentHandle`]
+//!   (`/start` / `/end` / `/cancel`); obtain an [`ExperimentHandle`]
 //!   via `client.experiment(id, project)` for `.run()`.
 //! - [`Recipes`] — `GET /v1/recipes` lookup. Recipes describe a
 //!   (repo, git_ref, git_commit_sha) tuple used by platform-managed runtime

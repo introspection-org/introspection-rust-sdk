@@ -36,9 +36,9 @@ jobs:
       # rule is the leftmost NONZERO component while Dependabot labels by
       # numeric position, so a `!= semver-major` gate auto-merges breaking
       # bumps. That is not hypothetical here: of the 12 Dependabot PRs this
-      # repo has ever seen, #6/#7/#8/#9/#10/#19 (opentelemetry 0.30->0.32,
-      # reqwest 0.12->0.13, async-openai 0.33->0.40 and 0.40->0.41) all report
-      # as "minor" and all are breaking. Membership of cargo-semver-compatible
+      # repo has ever seen, #6/#7/#8/#9/#10/#19 (opentelemetry 0.30->0.32 and
+      # reqwest 0.12->0.13 among them) all report as "minor" and all are
+      # breaking. Membership of cargo-semver-compatible
       # — by construction the >=1.0 minor/patch allow-list — is the safe signal.
       #
       # github-actions follows normal semver, so majors are the only exclusion.

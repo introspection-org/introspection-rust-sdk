@@ -96,7 +96,9 @@ jobs:
         run: |
           VERSION="${{ needs.resolve-version.outputs.version }}"
           sed -i "0,/^version = .*/s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+          # Both README snippets: the bare one and the { version = "…", features = […] } one.
           sed -i "s/introspection-sdk = \"[^\"]*\"/introspection-sdk = \"${VERSION}\"/g" README.md
+          sed -i "s/introspection-sdk = { version = \"[^\"]*\"/introspection-sdk = { version = \"${VERSION}\"/g" README.md
           echo "Stamped Cargo.toml and README.md with version ${VERSION}"
 
       - name: Publish to crates.io

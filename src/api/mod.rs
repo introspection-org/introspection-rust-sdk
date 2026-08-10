@@ -1,7 +1,7 @@
 //! REST API surface for the Introspection Data Plane (`/v1/tasks`,
 //! `/v1/files`, `/v1/shares`).
 //!
-//! Runner-bound resource namespaces mirror the corresponding JS / Python SDKs:
+//! Runner-bound resource namespaces mirror the REST API's own grouping:
 //!
 //! - [`Tasks`] — task lifecycle (list / create / update / archive / delete)
 //!   with nested [`TaskRuns`] and a cursor-style [`Tasks::start_prompt`]
@@ -101,7 +101,7 @@
 //! | `POST   /v1/tasks/{id}/unarchive` | [`Tasks::unarchive`] |
 //! | `POST   /v1/tasks/{id}/runs` | [`TaskRuns::create`] / [`TaskRuns::resume`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}` | [`TaskRuns::get`] |
-//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] / [`TaskRuns::abort`] / [`TaskRuns::drain`] |
+//! | `POST   /v1/tasks/{id}/runs/{rid}/cancel` | [`TaskRuns::cancel`] / [`TaskRuns::cancel_with`] |
 //! | `GET    /v1/tasks/{id}/runs/{rid}/stream` | [`TaskRuns::stream`] |
 //! | `GET    /v1/files` | [`Files::list`] *(paginator: stream or `next_page`)* |
 //! | `POST   /v1/files` (multipart) | [`Files::upload`] |
@@ -140,9 +140,9 @@
 //! never surfaced. Use [`TaskRuns::stream_with`] to tune the recovery bounds or
 //! opt into an `introspection.reconnect` `CUSTOM` event on each reconnect.
 //!
-//! The raw frame layer ([`parse_sse_response`] /
-//! [`crate::SseEvent`]) remains available for advanced callers who want the
-//! untyped `event` / `data` / `id` wire shape.
+//! The raw frame layer ([`parse_sse_response`] / [`crate::SseEvent`]) remains
+//! available for advanced callers who want the untyped `event` / `data` / `id`
+//! wire shape.
 //!
 //! [`Event`]: crate::agui::Event
 //! [`Event::Unknown`]: crate::agui::Event::Unknown
@@ -164,6 +164,7 @@
 pub mod arrow;
 pub mod backoff;
 pub mod conversation_items;
+pub(crate) mod encoding;
 pub mod error;
 pub mod files;
 pub mod genai_span;
@@ -193,7 +194,8 @@ pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
     AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
     ConversationCost, ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,
-    ConversationItemListParams, ConversationListParams, ConversationMetrics, ConversationUsage,
+    ConversationItemListParams, ConversationListParams, ConversationMetrics,
+    ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
     Dimension, Event, EventListParams, Experiment, ExperimentGoal, ExperimentGoalComponent,
     ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
     FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate,
@@ -211,6 +213,6 @@ pub use schemas::{
     TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
 };
 pub use shares::Shares;
-pub use sse::{parse_agui_response, parse_sse_response};
+pub use sse::parse_sse_response;
 pub use tasks::{RunHandle, TaskRuns, Tasks};
 pub use telemetry::{ConversationExportFormat, Conversations, Events, Metrics};

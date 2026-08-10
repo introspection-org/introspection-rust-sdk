@@ -89,7 +89,8 @@ impl ExperimentHandle {
     pub async fn run(&self, ctx: RunRequest) -> ApiResult<Runner> {
         let path = format!(
             "/v1/experiments/{}/run?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         let spec: RunnerSpec = self.http.post_json(&path, &ctx).await?;
         let source = RunnerSource::Experiment {
@@ -104,7 +105,8 @@ impl ExperimentHandle {
     pub async fn start(&self) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/start?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
@@ -112,7 +114,8 @@ impl ExperimentHandle {
     pub async fn end(&self) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/end?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
@@ -120,8 +123,13 @@ impl ExperimentHandle {
     pub async fn cancel(&self) -> ApiResult<Experiment> {
         let path = format!(
             "/v1/experiments/{}/cancel?project={}",
-            self.experiment_id, self.project
+            self.experiment_id,
+            encode_project(&self.project)
         );
         self.http.post_json(&path, &serde_json::json!({})).await
     }
+}
+
+pub(crate) fn encode_project(project: &StringOrUuid) -> String {
+    crate::api::encoding::encode(&project.to_string())
 }

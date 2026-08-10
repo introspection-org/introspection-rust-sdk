@@ -5,6 +5,7 @@
 //! string encoding, multipart uploads, and DP error translation.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -57,14 +58,17 @@ impl HttpConfig {
             })?;
             h.insert(name, value);
         }
-        h.insert(
-            reqwest::header::USER_AGENT,
-            HeaderValue::from_str(&format!(
-                "introspection-sdk-rust/{}",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .expect("static user agent is valid"),
-        );
+        // `entry`, not `insert`: additional_headers is applied above, and an
+        // unconditional insert silently discarded a caller-supplied
+        // User-Agent.
+        // `introspection-sdk/<version>`, the same string the OTLP exporters
+        // in this crate send.
+        // It used to be language-tagged, which duplicated in a non-standard
+        // place what the crate name and version already say.
+        h.entry(reqwest::header::USER_AGENT).or_insert_with(|| {
+            HeaderValue::from_str(&format!("introspection-sdk/{}", crate::VERSION))
+                .expect("static user agent is valid")
+        });
         Ok(h)
     }
 }
@@ -74,6 +78,11 @@ impl HttpConfig {
 pub struct HttpClient {
     inner: reqwest::Client,
     cfg: Arc<HttpConfig>,
+    /// Flipped by [`crate::Runner::close`]. Shared with every clone, so a
+    /// namespace handle a caller kept hold of stops working the moment the
+    /// runner that produced it is closed -- which is why the runner's
+    /// accessors can be infallible instead of panicking.
+    closed: Arc<AtomicBool>,
 }
 
 impl HttpClient {
@@ -85,13 +94,21 @@ impl HttpClient {
             ));
         }
         let headers = cfg.build_default_headers()?;
+        // `read_timeout`, not `timeout`. The latter is a total deadline that
+        // runs "until the response body has finished", which for an SSE run
+        // or a chunked download means the connection is severed once the
+        // configured window elapses no matter how healthy the stream is. A
+        // read timeout resets on every successful read, so it still catches a
+        // stalled connection. Unary calls re-apply the total deadline
+        // per-request in `send_retrying` / `post_multipart`.
         let inner = reqwest::Client::builder()
             .default_headers(headers)
-            .timeout(cfg.timeout)
+            .read_timeout(cfg.timeout)
             .build()?;
         Ok(Self {
             inner,
             cfg: Arc::new(cfg),
+            closed: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -103,7 +120,23 @@ impl HttpClient {
         Self {
             inner,
             cfg: Arc::new(cfg),
+            closed: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Refuse all further requests through this client and its clones.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// `Err` once [`close`](Self::close) has been called.
+    fn check_open(&self) -> ApiResult<()> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "runner has been closed".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn url(&self, path: &str) -> String {
@@ -135,9 +168,10 @@ impl HttpClient {
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
+        self.check_open()?;
         let mut attempt: u32 = 0;
         loop {
-            let res = build().send().await?;
+            let res = build().timeout(self.cfg.timeout).send().await?;
             let retryable = is_retryable_status(res.status(), idempotent);
             if retryable && attempt < self.cfg.max_retries {
                 let delay = backoff_delay(
@@ -213,10 +247,12 @@ impl HttpClient {
         path: &str,
         form: reqwest::multipart::Form,
     ) -> ApiResult<R> {
+        self.check_open()?;
         let res = self
             .inner
             .post(self.url(path))
             .multipart(form)
+            .timeout(self.cfg.timeout)
             .send()
             .await?;
         decode_json(expect_ok(res).await?).await
@@ -257,6 +293,7 @@ impl HttpClient {
     /// GET returning the raw streaming [`Response`]. Used by SSE streaming
     /// and chunked binary downloads.
     pub async fn get_stream(&self, path: &str, accept: Option<&str>) -> ApiResult<Response> {
+        self.check_open()?;
         let mut req = self.inner.get(self.url(path));
         if let Some(a) = accept {
             req = req.header(reqwest::header::ACCEPT, a);
@@ -278,6 +315,7 @@ impl HttpClient {
         accept: Option<&str>,
         last_event_id: Option<&str>,
     ) -> ApiResult<Response> {
+        self.check_open()?;
         let mut req = self.inner.get(self.url(path));
         if let Some(a) = accept {
             req = req.header(reqwest::header::ACCEPT, a);
@@ -318,12 +356,16 @@ async fn expect_ok(res: Response) -> ApiResult<Response> {
     Err(to_api_error(res, status).await)
 }
 
-async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIError {
+pub(crate) async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIError {
     let request_id = res
         .headers()
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
+    // Read before the body is consumed. The transparent retry path already
+    // honours this; carrying it on the error is what lets a caller schedule
+    // its own retry with the server's number once the budget is spent.
+    let retry_after = retry_after_from(res.headers());
     let ct = res
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -347,7 +389,17 @@ async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIErro
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let message =
                 extract_message(&value).unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
-            return IntrospectionAPIError::http(status.as_u16(), message, request_id, Some(value));
+            return IntrospectionAPIError::Http {
+                status: status.as_u16(),
+                message,
+                // The envelope's `code` used to be dropped on the floor, so
+                // `runner_expired` on a 401 was indistinguishable from a bad
+                // API key.
+                code: extract_code(&value),
+                request_id,
+                body: Some(value),
+                retry_after,
+            };
         }
     }
     let text = String::from_utf8_lossy(&body_bytes).into_owned();
@@ -356,7 +408,19 @@ async fn to_api_error(res: Response, status: StatusCode) -> IntrospectionAPIErro
     } else {
         (Some(serde_json::Value::String(text.clone())), text)
     };
-    IntrospectionAPIError::http(status.as_u16(), message, request_id, body)
+    IntrospectionAPIError::Http {
+        status: status.as_u16(),
+        message,
+        code: None,
+        request_id,
+        body,
+        retry_after,
+    }
+}
+
+/// The DP's machine-readable error code, when the envelope carries one.
+fn extract_code(value: &serde_json::Value) -> Option<String> {
+    value.as_object()?.get("code")?.as_str().map(str::to_string)
 }
 
 fn extract_message(value: &serde_json::Value) -> Option<String> {

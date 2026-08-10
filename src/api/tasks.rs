@@ -109,14 +109,14 @@ impl TaskRuns {
 
     /// `POST /v1/tasks/{id}/runs` — create a new run on an existing task.
     pub async fn create(&self, task_id: &str, body: &TaskRunCreate) -> ApiResult<RunHandle> {
-        let path = format!("/v1/tasks/{}/runs", urlencode(task_id));
+        let path = format!("/v1/tasks/{}/runs", crate::api::encoding::encode(task_id));
         let res: TaskRunResponse = self.http.post_json(&path, body).await?;
         Ok(RunHandle::new(None, res.run, self.clone()))
     }
 
     /// Resume an AG-UI interrupt by posting its typed resume entries.
     pub async fn resume(&self, task_id: &str, body: &TaskRunResume) -> ApiResult<RunHandle> {
-        let path = format!("/v1/tasks/{}/runs", urlencode(task_id));
+        let path = format!("/v1/tasks/{}/runs", crate::api::encoding::encode(task_id));
         let res: TaskRunResponse = self.http.post_json(&path, body).await?;
         Ok(RunHandle::new(None, res.run, self.clone()))
     }
@@ -125,8 +125,8 @@ impl TaskRuns {
     pub async fn get(&self, task_id: &str, run_id: &str) -> ApiResult<TaskRun> {
         let path = format!(
             "/v1/tasks/{}/runs/{}",
-            urlencode(task_id),
-            urlencode(run_id)
+            crate::api::encoding::encode(task_id),
+            crate::api::encoding::encode(run_id)
         );
         self.http.get_json(&path, &()).await
     }
@@ -135,8 +135,8 @@ impl TaskRuns {
     pub async fn cancel(&self, task_id: &str, run_id: &str) -> ApiResult<TaskCancelResponse> {
         let path = format!(
             "/v1/tasks/{}/runs/{}/cancel",
-            urlencode(task_id),
-            urlencode(run_id)
+            crate::api::encoding::encode(task_id),
+            crate::api::encoding::encode(run_id)
         );
         // POST with no body, JSON response — use the same multipart-less JSON
         // surface by sending an empty `()` body.
@@ -152,8 +152,8 @@ impl TaskRuns {
     ) -> ApiResult<TaskCancelResponse> {
         let path = format!(
             "/v1/tasks/{}/runs/{}/cancel",
-            urlencode(task_id),
-            urlencode(run_id)
+            crate::api::encoding::encode(task_id),
+            crate::api::encoding::encode(run_id)
         );
         self.http.post_json(&path, options).await
     }
@@ -221,13 +221,13 @@ impl Tasks {
 
     /// `GET /v1/tasks/{id}`.
     pub async fn get(&self, task_id: &str) -> ApiResult<Task> {
-        let path = format!("/v1/tasks/{}", urlencode(task_id));
+        let path = format!("/v1/tasks/{}", crate::api::encoding::encode(task_id));
         self.http.get_json(&path, &()).await
     }
 
     /// `PATCH /v1/tasks/{id}`.
     pub async fn update(&self, task_id: &str, body: &TaskUpdate) -> ApiResult<Task> {
-        let path = format!("/v1/tasks/{}", urlencode(task_id));
+        let path = format!("/v1/tasks/{}", crate::api::encoding::encode(task_id));
         self.http.patch_json(&path, body).await
     }
 
@@ -239,19 +239,25 @@ impl Tasks {
     /// [`crate::IntrospectionAPIError::Http`] with `status == 403` unless
     /// the caller holds a wildcard or explicitly elevated key.
     pub async fn delete(&self, task_id: &str) -> ApiResult<()> {
-        let path = format!("/v1/tasks/{}", urlencode(task_id));
+        let path = format!("/v1/tasks/{}", crate::api::encoding::encode(task_id));
         self.http.delete_empty(&path).await
     }
 
     /// `POST /v1/tasks/{id}/archive`.
     pub async fn archive(&self, task_id: &str) -> ApiResult<()> {
-        let path = format!("/v1/tasks/{}/archive", urlencode(task_id));
+        let path = format!(
+            "/v1/tasks/{}/archive",
+            crate::api::encoding::encode(task_id)
+        );
         self.http.post_empty(&path).await
     }
 
     /// `POST /v1/tasks/{id}/unarchive`.
     pub async fn unarchive(&self, task_id: &str) -> ApiResult<()> {
-        let path = format!("/v1/tasks/{}/unarchive", urlencode(task_id));
+        let path = format!(
+            "/v1/tasks/{}/unarchive",
+            crate::api::encoding::encode(task_id)
+        );
         self.http.post_empty(&path).await
     }
 
@@ -281,35 +287,5 @@ impl Tasks {
     pub async fn start(&self, body: &TaskCreate) -> ApiResult<RunHandle> {
         let res = self.create(body).await?;
         Ok(RunHandle::new(Some(res.task), res.run, self.runs.clone()))
-    }
-}
-
-/// RFC 3986 path-segment percent encoding. We avoid pulling in
-/// `percent-encoding` for one call site and inline a minimal helper here.
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn urlencode_passes_safe_chars() {
-        assert_eq!(urlencode("abc-123_.~"), "abc-123_.~");
-    }
-
-    #[test]
-    fn urlencode_escapes_slash_and_space() {
-        assert_eq!(urlencode("a b/c"), "a%20b%2Fc");
     }
 }

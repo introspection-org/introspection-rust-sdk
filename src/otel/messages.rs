@@ -1,7 +1,7 @@
 //! Strongly typed message types for gen_ai semantic conventions.
 //!
 //! These types mirror the gen_ai semantic convention schema and match
-//! the Python and JS SDK message representations.
+//! the message representation the backend stores and returns.
 
 use serde::{Deserialize, Serialize};
 

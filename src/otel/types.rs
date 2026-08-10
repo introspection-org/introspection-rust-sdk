@@ -244,19 +244,59 @@ impl PropertyValue {
             PropertyValue::Json(v) => v.to_string(),
         }
     }
+
+    /// Whether this value carries nothing.
+    ///
+    /// Only `Json(Null)` can: the other variants always hold a value. A null
+    /// property is dropped rather than emitted, so a key the caller left
+    /// empty is absent on the wire instead of arriving as the string
+    /// `"null"`.
+    pub fn is_null(&self) -> bool {
+        matches!(self, PropertyValue::Json(serde_json::Value::Null))
+    }
+
+    /// Convert to the OTLP value the backend expects on the wire.
+    ///
+    /// Stringifying everything meant `with_property("rating", 5)` shipped
+    /// `AnyValue::string("5")` where the backend expects `AnyValue::int(5)`:
+    /// same key, same prefix, wrong value kind, so a numeric property
+    /// arrived unaggregatable. Only JSON stays a string.
+    pub fn to_otel_value(&self) -> opentelemetry::logs::AnyValue {
+        use opentelemetry::logs::AnyValue;
+        match self {
+            PropertyValue::String(s) => AnyValue::String(s.clone().into()),
+            PropertyValue::Int(n) => AnyValue::Int(*n),
+            PropertyValue::Float(n) => AnyValue::Double(*n),
+            PropertyValue::Bool(b) => AnyValue::Boolean(*b),
+            PropertyValue::Json(v) => AnyValue::String(v.to_string().into()),
+        }
+    }
 }
 
 /// Generate a unique event ID.
 ///
 /// Format: `intro_event_<timestamp>-<random8>`
 pub fn generate_event_id() -> String {
+    // A clock behind the epoch is not worth a panic in an id generator; the
+    // rest of the crate uses the same fallback.
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis();
     let timestamp_hex = format!("{:x}", timestamp);
     let random_part = &Uuid::new_v4().to_string()[..8];
     format!("intro_event_{}-{}", timestamp_hex, random_part)
+}
+
+/// Mint a conversation id.
+///
+/// Format: `intro_conv_<32 hex>`, the shape the backend expects, so a
+/// conversation started here is indistinguishable from one started
+/// anywhere else. Also what [`crate::otel::IntrospectionSpanProcessor`] falls back
+/// to for a trace that arrives without one — one minter, so the two cannot
+/// drift apart.
+pub fn new_conversation_id() -> String {
+    format!("intro_conv_{}", Uuid::new_v4().simple())
 }
 
 /// Standard log attribute keys used by the Introspection SDK.
@@ -277,7 +317,7 @@ pub mod attr {
     pub const AGENT_ID: &str = "gen_ai.agent.id";
 
     // Gen AI span attributes (OTel semantic conventions for LLM observability)
-    pub const GEN_AI_SYSTEM: &str = "gen_ai.system";
+    pub const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
     pub const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
     pub const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
     pub const GEN_AI_RESPONSE_MODEL: &str = "gen_ai.response.model";
@@ -327,21 +367,47 @@ pub mod defaults {
     /// Default OTLP collector base URL.
     pub const BASE_OTEL_URL: &str = "https://otel.introspection.dev";
     pub const FLUSH_INTERVAL_MS: u64 = 5000;
+    /// Default deadline for one OTLP export, in milliseconds.
+    ///
+    /// Matches the OpenTelemetry default. This bounds the HTTP request the
+    /// exporter makes, which is the only place a per-export deadline takes
+    /// effect here: `BatchConfig::max_export_timeout` is `#[allow(dead_code)]`
+    /// in `opentelemetry_sdk` 0.32 unless the experimental async-runtime
+    /// processor is enabled, so setting it — or `OTEL_BSP_EXPORT_TIMEOUT` —
+    /// changes nothing.
+    pub const EXPORT_TIMEOUT_MS: u64 = 30_000;
+    /// Default export batch size. The OTel default of 512 would hold
+    /// analytics events five times longer before sending them, in batches
+    /// five times the size.
     pub const MAX_BATCH_SIZE: usize = 100;
 }
 
 /// Log severity text constants.
-pub mod severity {
+///
+/// Crate-internal: the severity this SDK emits is fixed, not a knob callers
+/// need to reach.
+pub(crate) mod severity {
     pub const INFO: &str = "INFO";
 }
 
 /// Logger names for OpenTelemetry instrumentation scope.
-pub mod logger_name {
-    pub const RUST_SDK: &str = "introspection-sdk-rust";
+///
+/// Crate-internal: a consumer telling the surfaces apart reads the scope off
+/// the record it received, not off a constant compiled into their binary.
+pub(crate) mod logger_name {
+    /// Instrumentation scope name on every analytics record.
+    ///
+    /// The crate name, per the OTel convention that the scope names the
+    /// instrumentation library. Deliberately *not* language-tagged: the SDK
+    /// language already rides the resource as `telemetry.sdk.language`
+    /// (`"rust"` here), which is the semconv-designated place for it, so
+    /// encoding it again in the scope would duplicate a standard attribute in
+    /// a non-standard field.
+    pub const SDK: &str = "introspection-sdk";
 }
 
 /// API endpoint paths.
-pub mod api_path {
+pub(crate) mod api_path {
     pub const LOGS: &str = "/v1/logs";
     pub const TRACES: &str = "/v1/traces";
 }

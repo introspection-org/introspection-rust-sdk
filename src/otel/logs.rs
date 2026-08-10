@@ -29,11 +29,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use opentelemetry::logs::{LogRecord as _, Logger, LoggerProvider, Severity};
-use opentelemetry::{baggage::BaggageExt, Context, Key, KeyValue};
+use opentelemetry::{baggage::BaggageExt, Context, InstrumentationScope, Key, KeyValue};
 use opentelemetry_otlp::{LogExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{logs::SdkLoggerProvider, Resource};
 use thiserror::Error;
-use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use crate::otel::types::{
@@ -65,6 +64,17 @@ impl From<derive_builder::UninitializedFieldError> for IntrospectionLogsError {
 /// Result type for [`IntrospectionLogs`] operations.
 pub type Result<T> = std::result::Result<T, IntrospectionLogsError>;
 
+/// The instrumentation scope stamped on every emitted record.
+///
+/// The version matters as much as the name: it is how a record is traced back
+/// to the release that produced it. `logger(name)` leaves it unset, so every
+/// event this crate sent was unattributable to a version.
+fn sdk_scope() -> InstrumentationScope {
+    InstrumentationScope::builder(types::logger_name::SDK)
+        .with_version(crate::VERSION)
+        .build()
+}
+
 /// Independent OTLP Logs exporter — owns its own [`SdkLoggerProvider`]
 /// and emits `track` / `feedback` / `identify` events with
 /// OpenTelemetry baggage-managed context.
@@ -76,14 +86,6 @@ pub struct IntrospectionLogs {
 
     /// OpenTelemetry logger
     logger: opentelemetry_sdk::logs::SdkLogger,
-
-    /// Service name (used in tests).
-    #[allow(dead_code)]
-    service_name: String,
-
-    /// User traits from identify calls (stored locally).
-    #[allow(dead_code)]
-    traits: Arc<RwLock<HashMap<String, PropertyValue>>>,
 }
 
 /// Builder-friendly config for [`IntrospectionLogs`]. Use
@@ -114,6 +116,32 @@ pub struct IntrospectionLogsConfig {
     /// Custom log exporter — bypasses the default OTLP HTTP exporter.
     /// Primarily used for testing.
     pub log_exporter: Option<Arc<LogExporter>>,
+
+    /// OTLP batch flush interval in milliseconds. `None` uses the
+    /// OpenTelemetry default.
+    pub flush_interval_ms: Option<u64>,
+
+    /// OTLP max export batch size. `None` uses the OpenTelemetry default.
+    pub max_batch_size: Option<usize>,
+
+    /// Maximum records buffered before new ones are dropped. `None` uses the
+    /// OpenTelemetry default (2048). Bounds the queue, not one export — see
+    /// [`crate::otel::SpanProcessorAdvancedOptions::max_queue_size`].
+    ///
+    pub max_queue_size: Option<usize>,
+
+    /// Deadline for one OTLP export, in milliseconds. `None` uses
+    /// [`crate::otel::types::defaults::EXPORT_TIMEOUT_MS`] (30000).
+    ///
+    /// Applied to the exporter's HTTP request, which is the only place a
+    /// per-export deadline takes effect. `BatchConfig::max_export_timeout` is
+    /// dead code in `opentelemetry_sdk` 0.32 unless the experimental
+    /// async-runtime processor is enabled — it is populated from
+    /// `OTEL_BLRP_EXPORT_TIMEOUT` and then never read — so this option, not
+    /// that env var, is what bounds an export.
+    ///
+    /// Ignored when a caller supplies their own `log_exporter`.
+    pub export_timeout_ms: Option<u64>,
 }
 
 impl IntrospectionLogsConfigBuilder {
@@ -175,8 +203,13 @@ impl IntrospectionLogs {
                 )
             })?
         } else {
-            let mut headers =
-                HashMap::from([("Authorization".to_string(), format!("Bearer {}", token))]);
+            let mut headers = HashMap::from([
+                (
+                    "User-Agent".to_string(),
+                    format!("introspection-sdk/{}", crate::VERSION),
+                ),
+                ("Authorization".to_string(), format!("Bearer {}", token)),
+            ]);
             if let Some(additional_headers) = &config.additional_headers {
                 headers.extend(additional_headers.clone());
             }
@@ -185,7 +218,11 @@ impl IntrospectionLogs {
                 .with_http()
                 .with_endpoint(&endpoint)
                 .with_headers(headers)
-                .with_timeout(Duration::from_secs(30))
+                .with_timeout(Duration::from_millis(
+                    config
+                        .export_timeout_ms
+                        .unwrap_or(types::defaults::EXPORT_TIMEOUT_MS),
+                ))
                 .build()
                 .map_err(|e| IntrospectionLogsError::OpenTelemetry(e.to_string()))?
         };
@@ -194,19 +231,67 @@ impl IntrospectionLogs {
             .with_service_name(service_name.clone())
             .build();
 
-        let logger_provider = SdkLoggerProvider::builder()
-            .with_resource(resource)
-            .with_batch_exporter(exporter)
+        // Defaulted rather than left to the OTel defaults (1000ms / 512), so
+        // analytics events leave a Rust process on the same cadence as every
+        // other SDK and as this crate's own span processor.
+        let mut batch_config = opentelemetry_sdk::logs::BatchConfigBuilder::default()
+            .with_scheduled_delay(Duration::from_millis(
+                config
+                    .flush_interval_ms
+                    .unwrap_or(types::defaults::FLUSH_INTERVAL_MS),
+            ))
+            .with_max_export_batch_size(
+                config
+                    .max_batch_size
+                    .unwrap_or(types::defaults::MAX_BATCH_SIZE),
+            );
+        // Applied only when set, so an unset option leaves the OpenTelemetry
+        // default in charge. The batch size and flush interval above are
+        // defaulted deliberately; this one has no Introspection-specific
+        // value to prefer, so the OpenTelemetry default is the right one.
+        if let Some(queue_size) = config.max_queue_size {
+            batch_config = batch_config.with_max_queue_size(queue_size);
+        }
+        let processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(exporter)
+            .with_batch_config(batch_config.build())
             .build();
 
-        let logger = logger_provider.logger(types::logger_name::RUST_SDK);
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(resource)
+            .with_log_processor(processor)
+            .build();
+
+        let logger = logger_provider.logger_with_scope(sdk_scope());
 
         Ok(Self {
             logger_provider,
             logger,
-            service_name,
-            traits: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Build an instance around an arbitrary exporter.
+    ///
+    /// The public `log_exporter` option is the concrete OTLP type, so an
+    /// in-memory exporter cannot be supplied through it; without this the
+    /// emitted records could not be asserted on at all.
+    #[cfg(test)]
+    fn with_exporter(
+        exporter: impl opentelemetry_sdk::logs::LogExporter + 'static,
+        service_name: &str,
+    ) -> Self {
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name(service_name.to_string())
+                    .build(),
+            )
+            .with_simple_exporter(exporter)
+            .build();
+        let logger = logger_provider.logger_with_scope(sdk_scope());
+        Self {
+            logger_provider,
+            logger,
+        }
     }
 
     /// Get identity context from OpenTelemetry baggage.
@@ -251,27 +336,31 @@ impl IntrospectionLogs {
         conversation_id: Option<&str>,
         previous_response_id: Option<&str>,
         event_id: Option<&str>,
-    ) -> Vec<(Key, String)> {
+    ) -> Vec<(Key, opentelemetry::logs::AnyValue)> {
         let cx = Context::current();
         let (user_id, anonymous_id) = Self::get_identity_from_context(&cx);
         let (ctx_conversation_id, ctx_previous_response_id, agent_name, agent_id) =
             Self::get_gen_ai_from_context(&cx);
 
-        let mut attributes: Vec<(Key, String)> = vec![
-            (Key::new(types::attr::EVENT_NAME), event_name.to_string()),
+        let mut attributes: Vec<(Key, opentelemetry::logs::AnyValue)> = vec![
+            (
+                Key::new(types::attr::EVENT_NAME),
+                event_name.to_string().into(),
+            ),
             (
                 Key::new(types::attr::EVENT_ID),
                 event_id
                     .map(|s| s.to_string())
-                    .unwrap_or_else(generate_event_id),
+                    .unwrap_or_else(generate_event_id)
+                    .into(),
             ),
         ];
 
         if let Some(uid) = user_id {
-            attributes.push((Key::new(types::attr::USER_ID), uid));
+            attributes.push((Key::new(types::attr::USER_ID), uid.into()));
         }
         if let Some(aid) = anonymous_id {
-            attributes.push((Key::new(types::attr::ANONYMOUS_ID), aid));
+            attributes.push((Key::new(types::attr::ANONYMOUS_ID), aid.into()));
         }
 
         let final_conversation_id = conversation_id
@@ -282,33 +371,33 @@ impl IntrospectionLogs {
             .or(ctx_previous_response_id);
 
         if let Some(conv_id) = final_conversation_id {
-            attributes.push((Key::new(types::attr::CONVERSATION_ID), conv_id));
+            attributes.push((Key::new(types::attr::CONVERSATION_ID), conv_id.into()));
         }
         if let Some(resp_id) = final_previous_response_id {
-            attributes.push((Key::new(types::attr::PREVIOUS_RESPONSE_ID), resp_id));
+            attributes.push((Key::new(types::attr::PREVIOUS_RESPONSE_ID), resp_id.into()));
         }
         if let Some(name) = agent_name {
-            attributes.push((Key::new(types::attr::AGENT_NAME), name));
+            attributes.push((Key::new(types::attr::AGENT_NAME), name.into()));
         }
         if let Some(id) = agent_id {
-            attributes.push((Key::new(types::attr::AGENT_ID), id));
+            attributes.push((Key::new(types::attr::AGENT_ID), id.into()));
         }
 
-        if let Some(props) = properties {
-            for (key, value) in props {
-                attributes.push((
-                    Key::new(format!("{}{}", types::attr::PROPERTIES_PREFIX, key)),
-                    value.to_otel_string(),
-                ));
-            }
-        }
-
-        if let Some(t) = traits {
-            for (key, value) in t {
-                attributes.push((
-                    Key::new(format!("{}{}", types::attr::TRAITS_PREFIX, key)),
-                    value.to_otel_string(),
-                ));
+        // A null value is an absent value: the key is omitted rather than
+        // shipped as the string "null". `PropertyValue::Json` is reachable
+        // with `serde_json::Value::Null` inside it, and stringifying that
+        // produced a `properties.x = "null"` attribute that reads as the
+        // four-character string on the way back out.
+        for (prefix, source) in [
+            (types::attr::PROPERTIES_PREFIX, properties),
+            (types::attr::TRAITS_PREFIX, traits),
+        ] {
+            let Some(map) = source else { continue };
+            for (key, value) in map {
+                if value.is_null() {
+                    continue;
+                }
+                attributes.push((Key::new(format!("{prefix}{key}")), value.to_otel_value()));
             }
         }
 
@@ -316,7 +405,7 @@ impl IntrospectionLogs {
     }
 
     /// Emit a log record via OpenTelemetry.
-    fn emit(&self, attributes: Vec<(Key, String)>) {
+    fn emit(&self, attributes: Vec<(Key, opentelemetry::logs::AnyValue)>) {
         let mut record = self.logger.create_log_record();
         record.set_timestamp(SystemTime::now());
         record.set_severity_number(Severity::Info);
@@ -344,7 +433,10 @@ impl IntrospectionLogs {
 
     /// Track feedback on a message or response.
     pub fn feedback(&self, name: &str, options: FeedbackOptions) {
-        let mut properties: HashMap<String, PropertyValue> = HashMap::new();
+        // The caller's extras go in first: `name` and `comments` are named
+        // arguments, so a `with_property("name", ...)` must not silently
+        // replace the feedback name this call is about.
+        let mut properties: HashMap<String, PropertyValue> = options.extra.clone();
         properties.insert("name".to_string(), PropertyValue::String(name.to_string()));
         if let Some(comments) = &options.comments {
             properties.insert(
@@ -352,7 +444,6 @@ impl IntrospectionLogs {
                 PropertyValue::String(comments.clone()),
             );
         }
-        properties.extend(options.extra.clone());
 
         let attributes = self.build_attributes(
             types::event_name::FEEDBACK,
@@ -370,11 +461,14 @@ impl IntrospectionLogs {
     pub fn identify(&self, user_id: &str, options: Option<IdentifyOptions>) {
         let opts = options.unwrap_or_default();
 
-        if !opts.traits.is_empty() {
-            if let Ok(mut traits) = self.traits.try_write() {
-                traits.extend(opts.traits.clone());
-            }
+        // The identity attributes are read off the context, so the ids this
+        // call is about have to be on it while the record is built. Without
+        // this the event carries neither the user id nor the anonymous id.
+        let mut values: Vec<(&str, &str)> = vec![(types::baggage::USER_ID, user_id)];
+        if let Some(anon) = opts.anonymous_id.as_deref() {
+            values.push((types::baggage::ANONYMOUS_ID, anon));
         }
+        let _guard = BaggageGuard::new_multi(&values);
 
         let attributes = self.build_attributes(
             types::event_name::IDENTIFY,
@@ -410,6 +504,32 @@ impl IntrospectionLogs {
         BaggageGuard::new(types::baggage::CONVERSATION_ID, conversation_id)
     }
 
+    /// Scope a conversation, minting an id when the caller has none.
+    ///
+    /// Without it a caller starting a fresh conversation had to invent an
+    /// id, and an invented one does not
+    /// match the `intro_conv_<hex>` shape the rest of the platform mints.
+    ///
+    /// Returns the id alongside the guard, since a caller that did not
+    /// supply one still needs to know what it got — to correlate feedback
+    /// against, or to hand to another process.
+    ///
+    /// ```rust,no_run
+    /// # use introspection_sdk::otel::IntrospectionLogs;
+    /// # let logs = IntrospectionLogs::builder().token("t").build().unwrap();
+    /// let (conversation_id, _scope) = logs.conversation(None);
+    /// logs.track("Turn Completed", None);
+    /// # let _ = conversation_id;
+    /// ```
+    #[must_use = "the returned guard must be held to maintain the baggage context"]
+    pub fn conversation(&self, conversation_id: Option<&str>) -> (String, BaggageGuard) {
+        let id = conversation_id
+            .map(str::to_string)
+            .unwrap_or_else(types::new_conversation_id);
+        let guard = BaggageGuard::new(types::baggage::CONVERSATION_ID, &id);
+        (id, guard)
+    }
+
     /// Set previous response ID in OpenTelemetry baggage.
     #[must_use = "the returned guard must be held to maintain the baggage context"]
     pub fn set_previous_response_id(&self, previous_response_id: &str) -> BaggageGuard {
@@ -419,11 +539,15 @@ impl IntrospectionLogs {
     /// Set agent context in OpenTelemetry baggage.
     #[must_use = "the returned guard must be held to maintain the baggage context"]
     pub fn set_agent(&self, agent_name: &str, agent_id: Option<&str>) -> BaggageGuard {
-        let mut guard = BaggageGuard::new(types::baggage::AGENT_NAME, agent_name);
-        if let Some(id) = agent_id {
-            guard = guard.with_additional(types::baggage::AGENT_ID, id);
+        // One guard for both keys. Layering a second guard over the first
+        // would drop it, restoring the context that carried the name.
+        match agent_id {
+            Some(id) => BaggageGuard::new_multi(&[
+                (types::baggage::AGENT_NAME, agent_name),
+                (types::baggage::AGENT_ID, id),
+            ]),
+            None => BaggageGuard::new(types::baggage::AGENT_NAME, agent_name),
         }
-        guard
     }
 
     /// Set multiple baggage values at once.
@@ -513,13 +637,6 @@ impl BaggageGuard {
             _context_guard: guard,
         }
     }
-
-    /// Add additional baggage to this guard.
-    /// Merges with existing baggage instead of replacing it.
-    fn with_additional(self, key: &str, value: &str) -> Self {
-        drop(self);
-        Self::new(key, value)
-    }
 }
 
 #[cfg(test)]
@@ -528,13 +645,230 @@ mod tests {
 
     #[test]
     fn test_logs_creation() {
-        let logs = IntrospectionLogs::builder()
+        IntrospectionLogs::builder()
             .token("test-token")
             .service_name("test-service")
             .base_otel_url("http://localhost:4318")
             .build()
             .unwrap();
-        assert_eq!(logs.service_name, "test-service");
+    }
+
+    fn emitted(
+        exporter: &opentelemetry_sdk::logs::InMemoryLogExporter,
+    ) -> Vec<std::collections::HashMap<String, String>> {
+        exporter
+            .get_emitted_logs()
+            .unwrap()
+            .into_iter()
+            .map(|log| {
+                log.record
+                    .attributes_iter()
+                    .map(|(k, v)| (k.to_string(), format!("{v:?}")))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_positional_feedback_name_survives_an_extra_property_of_the_same_name() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.feedback(
+            "thumbs_up",
+            FeedbackOptions::new()
+                .with_comments("great")
+                .with_extra("name", "not the feedback name")
+                .with_extra("comments", "not the comments"),
+        );
+        let _ = logs.flush();
+
+        let records = emitted(&exporter);
+        let attrs = &records[0];
+        assert!(
+            attrs["properties.name"].contains("thumbs_up"),
+            "got {}",
+            attrs["properties.name"]
+        );
+        assert!(
+            attrs["properties.comments"].contains("great"),
+            "got {}",
+            attrs["properties.comments"]
+        );
+    }
+
+    #[test]
+    fn every_record_carries_the_sdk_name_and_version_as_its_scope() {
+        // The scope rides every log record and is how ingest attributes an
+        // event to a client and a release. `logger(name)` left the version
+        // unset, so nothing this crate emitted could be tied to a version.
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+        logs.track("E", None);
+        let _ = logs.flush();
+
+        let emitted = exporter.get_emitted_logs().unwrap();
+        let scope = &emitted[0].instrumentation;
+        assert_eq!(scope.name(), "introspection-sdk");
+        assert_eq!(scope.version(), Some(crate::VERSION));
+
+        // The language is not in the scope name on purpose -- it rides the
+        // resource, which is where semconv puts it. Assert that, since the
+        // scope name's brevity depends on it.
+        let resource = &emitted[0].resource;
+        assert_eq!(
+            resource
+                .get(&opentelemetry::Key::from_static_str(
+                    "telemetry.sdk.language"
+                ))
+                .map(|v| v.to_string())
+                .as_deref(),
+            Some("rust")
+        );
+    }
+
+    #[test]
+    fn test_numeric_and_bool_properties_keep_their_type_on_the_wire() {
+        use opentelemetry::logs::AnyValue;
+
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.track(
+            "Rated",
+            Some(
+                TrackOptions::new()
+                    .with_property("rating", 5)
+                    .with_property("ratio", 0.5)
+                    .with_property("ok", true)
+                    .with_property("label", "good"),
+            ),
+        );
+        let _ = logs.flush();
+
+        let logs_out = exporter.get_emitted_logs().unwrap();
+        let record = &logs_out[0].record;
+        let attrs: std::collections::HashMap<String, AnyValue> = record
+            .attributes_iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+
+        // Stringifying these shipped AnyValue::String where the backend expects
+        // an int/double/bool for the same key.
+        assert!(matches!(attrs["properties.rating"], AnyValue::Int(5)));
+        assert!(matches!(attrs["properties.ratio"], AnyValue::Double(_)));
+        assert!(matches!(attrs["properties.ok"], AnyValue::Boolean(true)));
+        assert!(matches!(attrs["properties.label"], AnyValue::String(_)));
+    }
+
+    #[test]
+    fn test_track_emits_event_name_and_properties() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.track(
+            "Button Clicked",
+            Some(TrackOptions::new().with_property("button_id", "submit")),
+        );
+
+        let records = emitted(&exporter);
+        assert_eq!(records.len(), 1);
+        assert!(records[0][types::attr::EVENT_NAME].contains("Button Clicked"));
+        assert!(records[0].contains_key(types::attr::EVENT_ID));
+        assert!(
+            records[0][&format!("{}button_id", types::attr::PROPERTIES_PREFIX)].contains("submit")
+        );
+    }
+
+    /// A null property is absent, not the four-character string `"null"`.
+    ///
+    /// `PropertyValue::Json` accepts `serde_json::Value::Null`, and
+    /// stringifying it put `properties.note = "null"` on the wire — a value a
+    /// consumer reads back as text, indistinguishable from a caller who meant
+    /// the word. Null traits are dropped the same way.
+    #[test]
+    fn a_null_property_is_omitted_rather_than_stringified() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.track(
+            "Button Clicked",
+            Some(
+                TrackOptions::new()
+                    .with_property("note", serde_json::Value::Null)
+                    .with_property("kept", "yes"),
+            ),
+        );
+        logs.identify(
+            "user_42",
+            Some(
+                IdentifyOptions::new()
+                    .with_trait("plan", serde_json::Value::Null)
+                    .with_trait("email", "a@b.c"),
+            ),
+        );
+
+        let records = emitted(&exporter);
+        let props = format!("{}note", types::attr::PROPERTIES_PREFIX);
+        let kept = format!("{}kept", types::attr::PROPERTIES_PREFIX);
+        assert!(
+            !records[0].contains_key(&props),
+            "null property was emitted"
+        );
+        assert!(
+            records[0].contains_key(&kept),
+            "sibling property was dropped"
+        );
+
+        let plan = format!("{}plan", types::attr::TRAITS_PREFIX);
+        let email = format!("{}email", types::attr::TRAITS_PREFIX);
+        assert!(!records[1].contains_key(&plan), "null trait was emitted");
+        assert!(records[1].contains_key(&email), "sibling trait was dropped");
+    }
+
+    #[test]
+    fn test_identify_puts_both_ids_on_the_record() {
+        // The identity attributes are read off the context, so identify() has
+        // to place its own ids there before building the record.
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        logs.identify(
+            "user_42",
+            Some(
+                IdentifyOptions::new()
+                    .with_anonymous_id("anon_7")
+                    .with_trait("plan", "pro"),
+            ),
+        );
+
+        let records = emitted(&exporter);
+        assert_eq!(records.len(), 1);
+        assert!(records[0][types::attr::EVENT_NAME].contains(types::event_name::IDENTIFY));
+        assert!(records[0][types::attr::USER_ID].contains("user_42"));
+        assert!(records[0][types::attr::ANONYMOUS_ID].contains("anon_7"));
+        assert!(records[0][&format!("{}plan", types::attr::TRAITS_PREFIX)].contains("pro"));
+    }
+
+    #[test]
+    fn test_feedback_carries_the_conversation_and_agent_scope() {
+        let exporter = opentelemetry_sdk::logs::InMemoryLogExporter::default();
+        let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+
+        {
+            let _agent = logs.set_agent("planner", Some("ag_1"));
+            logs.feedback(
+                "thumbs_up",
+                FeedbackOptions::new().with_conversation_id("conv_7"),
+            );
+        }
+
+        let records = emitted(&exporter);
+        assert_eq!(records.len(), 1);
+        assert!(records[0][types::attr::EVENT_NAME].contains(types::event_name::FEEDBACK));
+        assert!(records[0][types::attr::CONVERSATION_ID].contains("conv_7"));
+        assert!(records[0][types::attr::AGENT_NAME].contains("planner"));
+        assert!(records[0][types::attr::AGENT_ID].contains("ag_1"));
     }
 
     #[test]
@@ -581,5 +915,67 @@ mod tests {
         }
 
         assert_eq!(logs.get_user_id(), None);
+    }
+
+    #[test]
+    fn conversation_mints_an_id_in_the_shape_the_other_sdks_mint() {
+        let logs = IntrospectionLogs::builder()
+            .token("test-token")
+            .build()
+            .unwrap();
+
+        let (id, _scope) = logs.conversation(None);
+        // `intro_conv_` + 32 hex, the shape the backend
+        // produce and the same one the span processor falls back to.
+        assert!(id.starts_with("intro_conv_"), "got {id}");
+        let hex = &id["intro_conv_".len()..];
+        assert_eq!(hex.len(), 32);
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+
+        let cx = Context::current();
+        assert_eq!(
+            cx.baggage()
+                .get(types::baggage::CONVERSATION_ID)
+                .map(|v| v.to_string()),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn conversation_honours_an_id_the_caller_already_has() {
+        let logs = IntrospectionLogs::builder()
+            .token("test-token")
+            .build()
+            .unwrap();
+
+        let (id, _scope) = logs.conversation(Some("conv_from_upstream"));
+        assert_eq!(id, "conv_from_upstream");
+        let cx = Context::current();
+        assert_eq!(
+            cx.baggage()
+                .get(types::baggage::CONVERSATION_ID)
+                .map(|v| v.to_string()),
+            Some("conv_from_upstream".to_string())
+        );
+    }
+
+    #[test]
+    fn the_conversation_scope_is_released_with_its_guard() {
+        let logs = IntrospectionLogs::builder()
+            .token("test-token")
+            .build()
+            .unwrap();
+
+        {
+            let (_id, _scope) = logs.conversation(None);
+            assert!(Context::current()
+                .baggage()
+                .get(types::baggage::CONVERSATION_ID)
+                .is_some());
+        }
+        assert!(Context::current()
+            .baggage()
+            .get(types::baggage::CONVERSATION_ID)
+            .is_none());
     }
 }

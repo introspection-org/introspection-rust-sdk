@@ -5,7 +5,8 @@
 //!
 //! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
 //!    `Runner`, `tasks`, `files`, `shares`, and runner telemetry reads). Always available, no OpenTelemetry
-//!    dependency. No feature flag required.
+//!    dependency. No feature flag required. [`auth`] mints the token it
+//!    takes when you have OAuth credentials rather than an API key.
 //! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
 //!    `track` / `feedback` / `identify` analytics events. Owns its own
 //!    `SdkLoggerProvider`. Requires the `otel` Cargo feature.
@@ -87,9 +88,11 @@
 //! | `INTROSPECTION_SERVICE_NAME`    | Service name (logs/traces)                  |
 //! | `INTROSPECTION_BASE_API_URL`    | REST API host (default `api.introspection.dev`) |
 //! | `INTROSPECTION_BASE_OTEL_URL`   | OTLP collector host (default `otel.introspection.dev`) |
+//! | `INTROSPECTION_DEV_TARGET`      | Development only: route this process's tasks to your own `introspection dev` server. Rides every request as a header. No default — see [`dev_target`] |
 
 pub mod agui;
 pub mod api;
+pub mod auth;
 pub mod client;
 pub mod dev_target;
 // Always compiled — `otel::messages` carries the gen_ai semantic-convention
@@ -102,29 +105,29 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
+    AgentInfo, Arm, ClusteringRunEvent, ClusteringRunPayload, Conversation, ConversationAgent,
     ConversationCost, ConversationExportFormat, ConversationExportParams,
     ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
     ConversationItemPaginator, ConversationItems, ConversationListParams, ConversationMetrics,
-    ConversationUsage, Conversations, Dimension, Event, EventListParams, Events, Experiment,
-    ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard,
-    ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileCreateText,
-    FileListParams, FileType, FileUpdate, FileUpload, FileVersions, Files, GenAiAgent,
-    GenAiAttributes, GenAiInput, GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan,
-    GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, HavingTerm, IdRef, IntrospectionAPIError,
-    IntrospectionAttributes, IntrospectionConversation, IntrospectionEventName,
-    IntrospectionRecipe, IntrospectionRuntime, JudgeGoalComponent, JudgementEvent,
-    JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
-    MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
-    PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
-    PatternPayload, Recipe, RecipeListParams, ResourceShare, ResumeEntry, RunCaller,
-    RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment,
-    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, ShareCreate, ShareListParams,
-    ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions,
-    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskKind, TaskListParams, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension,
-    TokenCount, TypedEvent, UploadSource,
+    ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
+    Conversations, Dimension, Event, EventListParams, Events, Experiment, ExperimentGoal,
+    ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams,
+    ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams,
+    FileType, FileUpdate, FileUpload, FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput,
+    GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall,
+    GenAiUsage, HavingTerm, IdRef, IntrospectionAPIError, IntrospectionAttributes,
+    IntrospectionConversation, IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime,
+    JudgeGoalComponent, JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, Metrics,
+    MetricsConfig, MetricsQuery, MetricsResponse, NameRef, ObservationEvent, ObservationPayload,
+    OrderTerm, Paginated, PaginationParams, Paginator, PatternAssignmentEvent,
+    PatternAssignmentPayload, PatternEvent, PatternPayload, Recipe, RecipeListParams,
+    ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest,
+    RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams,
+    ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection, SpanAttributes,
+    SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse,
+    TaskCreate, TaskCreateResponse, TaskKind, TaskListParams, TaskPrompt, TaskRun, TaskRunCreate,
+    TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
@@ -132,6 +135,10 @@ pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // taxonomy lives in `crate::agui`; these aliases give the common types a
 // discoverable name at the crate root (`Event` alone would be ambiguous).
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
+pub use auth::{
+    authorization_code_token, service_account_token, token_exchange, AuthorizationCodeParams,
+    OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
+};
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use resources::{ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes};
 pub use runner::{Runner, RunnerSource};
@@ -141,11 +148,10 @@ pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
 // `crate::otel` for top-level access.
 #[cfg(feature = "otel")]
 pub use otel::{
-    BaggageGuard, FeedbackOptions, GenerationUpdate, IdentifyOptions, IntrospectionLogs,
-    IntrospectionLogsConfig, IntrospectionLogsConfigBuilder, IntrospectionLogsError,
-    IntrospectionSpanProcessor, Observation, ObservationConfig, ObservationType, PropertyValue,
-    SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
-    SpanProcessorError, SpanProcessorResult, TrackOptions, Usage,
+    BaggageGuard, FeedbackOptions, IdentifyOptions, IntrospectionLogs, IntrospectionLogsConfig,
+    IntrospectionLogsConfigBuilder, IntrospectionLogsError, IntrospectionSpanProcessor,
+    PropertyValue, SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
+    SpanProcessorError, SpanProcessorResult, TrackOptions,
 };
 
 // Always available: the conversations read returns these message types inside
@@ -155,6 +161,3 @@ pub use otel::messages::{
     ContentPart, InputMessage, OutputMessage, TextPart, ThinkingPart, ToolCallRequestPart,
     ToolCallResponsePart,
 };
-
-#[cfg(feature = "openai")]
-pub use otel::openai::TracedStream;

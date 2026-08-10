@@ -16,18 +16,19 @@
 pub mod event;
 
 pub use event::{
-    ActivityDeltaEvent, ActivitySnapshotEvent, BaseEvent, CustomEvent, Event, EventType, RawEvent,
-    ReasoningEncryptedValueEvent, ReasoningEndEvent, ReasoningMessageChunkEvent,
-    ReasoningMessageContentEvent, ReasoningMessageEndEvent, ReasoningMessageStartEvent,
-    ReasoningStartEvent, RunErrorEvent, RunFinishedEvent, RunStartedEvent, StateDeltaEvent,
-    StateSnapshotEvent, StepFinishedEvent, StepStartedEvent, TextMessageChunkEvent,
-    TextMessageContentEvent, TextMessageEndEvent, TextMessageStartEvent, ToolCallArgsEvent,
-    ToolCallChunkEvent, ToolCallEndEvent, ToolCallResultEvent, ToolCallStartEvent,
+    ActivityDeltaEvent, ActivitySnapshotEvent, BaseEvent, CustomEvent, Event, EventType,
+    MessagesSnapshotEvent, RawEvent, ReasoningEncryptedValueEvent, ReasoningEndEvent,
+    ReasoningMessageChunkEvent, ReasoningMessageContentEvent, ReasoningMessageEndEvent,
+    ReasoningMessageStartEvent, ReasoningStartEvent, RunErrorEvent, RunFinishedEvent,
+    RunStartedEvent, StateDeltaEvent, StateSnapshotEvent, StepFinishedEvent, StepStartedEvent,
+    TextMessageChunkEvent, TextMessageContentEvent, TextMessageEndEvent, TextMessageStartEvent,
+    ToolCallArgsEvent, ToolCallChunkEvent, ToolCallEndEvent, ToolCallResultEvent,
+    ToolCallStartEvent,
 };
 
 /// Introspection's extensions to the AG-UI protocol, carried on the `CUSTOM`
 /// event channel so they interoperate with any AG-UI consumer and are
-/// expressible identically across the JS / Python / Rust SDKs.
+/// expressible identically in every language Introspection supports.
 pub mod introspection {
     use super::event::{BaseEvent, CustomEvent, Event};
     use serde_json::Value;
