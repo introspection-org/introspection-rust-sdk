@@ -205,12 +205,13 @@ pub use schemas::{
     PatternAssignmentPayload, PatternEvent, PatternPayload, Recipe, RecipeListParams,
     ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest,
     RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams,
-    ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent, StringOrUuid, Task,
-    TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskKind,
-    TaskListParams, TaskPrompt, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, Trajectory,
-    TrajectoryAssistantRecord, TrajectoryMetaRecord, TrajectoryReasoningRecord, TrajectoryRecord,
-    TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
+    RuntimeLlmMode, ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent,
+    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
+    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate,
+    TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent,
+    TimeDimension, Trajectory, TrajectoryAssistantRecord, TrajectoryMetaRecord,
+    TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall, TrajectoryToolRecord,
+    TrajectoryUserRecord, TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::parse_sse_response;
