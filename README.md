@@ -97,6 +97,9 @@ println!("{}", follow_up.text().await?);
 Unknown future AG-UI event types surface as `AgUiEvent::Unknown` rather than
 ending the stream.
 
+See [Tasks and streaming](https://docs.introspection.dev/sdk/rust/tasks-and-streaming) for reconnects,
+interrupts, and cancellation.
+
 ## Record feedback
 
 Enable the `otel` feature, then attach the outcome to the conversation the
@@ -133,6 +136,8 @@ logs.shutdown()?;
 `IntrospectionSpanProcessor` to an `SdkTracerProvider`; spans in the
 OpenTelemetry GenAI semantic conventions are exported as they are.
 
+See [Product signals](https://docs.introspection.dev/sdk/rust/product-signals) for the full surface.
+
 ## Read what happened
 
 A finished task leaves a durable conversation:
@@ -150,8 +155,12 @@ while let Some(page) = pages.next_page().await? {
 }
 ```
 
-The runner also exposes `files()`, `shares()`, `events()`, and `metrics()`. See
-[`examples/`](examples/) for end-to-end programs.
+The runner also exposes `files()`, `shares()`, `events()`, and `metrics()`.
+
+See [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence) for transcripts,
+typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
+for durable inputs and grants, and [`examples/`](examples/) for end-to-end
+programs.
 
 ## Environment variables
 
@@ -162,7 +171,14 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 
 ## Documentation
 
-Full documentation is available at [docs.introspection.dev](https://docs.introspection.dev).
+- [Rust quickstart](https://docs.introspection.dev/sdk/rust/quickstart)
+- [Tasks and streaming](https://docs.introspection.dev/sdk/rust/tasks-and-streaming)
+- [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
+- [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence)
+- [Product signals](https://docs.introspection.dev/sdk/rust/product-signals)
+- [Platform operations](https://docs.introspection.dev/sdk/rust/platform-operations)
+- [Rust SDK reference](https://docs.introspection.dev/sdk/rust/reference)
+- [Authentication](https://docs.introspection.dev/sdk/authentication)
 
 ## License
 
