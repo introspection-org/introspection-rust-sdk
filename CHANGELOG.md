@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.14.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.13.0...v0.14.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* IntrospectionClient::projects and ::repositories are removed, along with experiments and recipes create/update/delete and the Project, Repository, RecipeCreate, RecipeUpdate, ExperimentCreate and ExperimentUpdate types.
+
+### Features
+
+* add complete conversation export parity ([#71](https://github.com/introspection-org/introspection-rust-sdk/issues/71)) ([5573519](https://github.com/introspection-org/introspection-rust-sdk/commit/55735190538629eacfb92a6764bbcfd88143798d))
+* bring the SDK to parity on the runner-plane boundary ([#66](https://github.com/introspection-org/introspection-rust-sdk/issues/66)) ([9a6e9ae](https://github.com/introspection-org/introspection-rust-sdk/commit/9a6e9ae5609416d20e85b43d38de1b921d6c6dde))
+
+
+### Bug Fixes
+
+* drop the runtime-list filter the API never accepted ([#69](https://github.com/introspection-org/introspection-rust-sdk/issues/69)) ([1c04aa6](https://github.com/introspection-org/introspection-rust-sdk/commit/1c04aa6ea0d4d8e3116a74f21df3ae536c4633e2))
+* export the field types exported structs expose, and cut the README to the basics ([#72](https://github.com/introspection-org/introspection-rust-sdk/issues/72)) ([04898e8](https://github.com/introspection-org/introspection-rust-sdk/commit/04898e89d993ccf13d8b72d0cb182bede99d72e4))
+
 ## [0.13.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.12.0...v0.13.0) (2026-08-07)
 
 
