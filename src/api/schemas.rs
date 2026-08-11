@@ -1526,6 +1526,13 @@ pub struct RunnerIdentity {
     pub anonymous_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
+    /// Tags to stamp on the `customer` member this identity mints, **if that
+    /// member is new**. Access-bearing, and bounded on both sides: attenuated
+    /// to the asserting agent member's own tags, and applied on create only —
+    /// an existing member's tags are never changed here. Same `key:value`
+    /// grammar as every other tag write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 /// Optional segment.io-style observability payload attached to a

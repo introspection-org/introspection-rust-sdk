@@ -463,6 +463,7 @@ fn sdk_surface_matches_the_published_reference() {
             user_id: Some("u_demo".into()),
             anonymous_id: None,
             conversation_id: None,
+            tags: Some(vec!["project:x".into()]),
         }),
     };
 
