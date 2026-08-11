@@ -41,6 +41,10 @@ jobs:
   # ── Lint & Test ────────────────────────────────────────────────────
   lint-and-test:
     name: Lint & Test
+    # Tag-push releases already passed ci.yml on the tagged commit. A manual
+    # workflow_dispatch publish has no equivalent upstream gate, so retain the
+    # full validation there without compiling every feature twice on releases.
+    if: github.event_name == 'workflow_dispatch'
     needs: resolve-version
     runs-on: ubuntu-latest
     steps:
@@ -74,6 +78,10 @@ jobs:
   publish:
     name: Publish v${{ needs.resolve-version.outputs.version }} to crates.io
     needs: [resolve-version, lint-and-test]
+    if: |
+      always() &&
+      needs.resolve-version.result == 'success' &&
+      (needs.lint-and-test.result == 'success' || needs.lint-and-test.result == 'skipped')
     runs-on: ubuntu-latest
     environment: publish
     steps:
