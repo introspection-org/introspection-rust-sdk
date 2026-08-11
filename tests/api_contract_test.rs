@@ -221,6 +221,7 @@ fn sdk_surface_matches_the_published_reference() {
         idle_timeout_seconds: Some(1),
         fork_share_id: Some("share".into()),
         metadata: Some(HashMap::new()),
+        tags: Some(vec!["customer:acme".into()]),
     };
 
     let run_create = TaskRunCreate {
@@ -243,6 +244,7 @@ fn sdk_surface_matches_the_published_reference() {
         include_total: Some(true),
         statuses: Some(vec![TaskStatus::Running]),
         require_automation_id: Some(true),
+        tag: Some("customer:acme".into()),
     };
 
     let task = Task {
@@ -268,6 +270,7 @@ fn sdk_surface_matches_the_published_reference() {
             session_id: Some("s".into()),
         }),
         identity_key: Some("k".into()),
+        tags: vec!["customer:acme".into()],
     };
 
     let cancel = TaskCancelOptions::Drain {

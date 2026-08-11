@@ -302,6 +302,9 @@ pub struct Task {
     pub agent: Option<AgentInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_key: Option<String>,
+    /// `key:value` grouping tags stamped on this task.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 fn default_task_status() -> TaskStatus {
@@ -372,6 +375,16 @@ pub struct TaskCreate {
     /// Fork from a shared conversation: the `/v1/shares` grant id for the source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fork_share_id: Option<String>,
+    /// `key:value` grouping tags stamped on the task at create time (e.g.
+    /// `customer:acme`). The key is `[a-z0-9][a-z0-9_.-]*`, 1..64 chars and may
+    /// not contain `:`; the value is 1..256 chars; at most 64 tags, duplicates
+    /// collapsed. Filter with [`TaskListParams::tag`].
+    ///
+    /// Tags are access-bearing: a caller whose member tags intersect a row's
+    /// tags can read and write it, so a tag shared with a member cohort hands
+    /// them the task.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
@@ -384,6 +397,10 @@ pub struct TaskUpdate {
     pub is_archived: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Replaces the tag list wholesale (unlike `metadata`, which is merged).
+    /// `None` leaves tags untouched; `Some(vec![])` clears them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 /// Filters supported by `GET /v1/tasks`.
@@ -399,6 +416,10 @@ pub struct TaskListParams {
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_automation_id: Option<bool>,
+    /// Filter by one `key:value` tag. ANDed with the ownership predicate, so
+    /// it only ever narrows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

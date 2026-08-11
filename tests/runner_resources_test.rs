@@ -1520,3 +1520,70 @@ async fn conversations_export_sends_filters_and_no_pagination() {
         .unwrap();
     assert_eq!(records.len(), 1);
 }
+
+#[tokio::test]
+async fn task_create_forwards_grouping_tags() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/tasks"))
+        .and(body_json(json!({
+            "prompt": "go",
+            "tags": ["customer:acme", "env:prod"],
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "task": {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "org_id": "00000000-0000-0000-0000-0000000000aa",
+                "project_id": "00000000-0000-0000-0000-0000000000bb",
+                "created_at": "2026-08-11T00:00:00Z",
+                "updated_at": "2026-08-11T00:00:00Z",
+                "kind": "agent",
+                "status": "pending",
+                "is_archived": false,
+                "tags": ["customer:acme", "env:prod"],
+            },
+            "run": {
+                "id": "run-1",
+                "task_id": "11111111-1111-1111-1111-111111111111",
+                "status": "pending",
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let tasks = Tasks::new(build_http(&server));
+    let created = tasks
+        .create(&TaskCreate {
+            prompt: Some("go".into()),
+            tags: Some(vec!["customer:acme".into(), "env:prod".into()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(created.task.tags, vec!["customer:acme", "env:prod"]);
+}
+
+#[tokio::test]
+async fn task_list_sends_the_tag_filter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks"))
+        .and(query_param("tag", "customer:acme"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({ "records": [], "count": 0, "total_count": 0, "next": null }),
+            ),
+        )
+        .mount(&server)
+        .await;
+
+    let tasks = Tasks::new(build_http(&server));
+    let params = TaskListParams {
+        tag: Some("customer:acme".into()),
+        ..Default::default()
+    };
+    let found: Vec<_> = tasks.list(&params).collect().await;
+
+    assert!(found.is_empty());
+}
