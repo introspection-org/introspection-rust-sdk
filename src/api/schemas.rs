@@ -330,11 +330,10 @@ pub struct TaskFileRef {
 /// outside the grant is dropped by the server, never a launch failure.
 ///
 /// `repo` is a registered `owner/name` slug. Leave `git_ref` and `depth`
-/// unset to take the platform defaults, a shallow clone of `main`. Note the
-/// ref default really is the literal `main`, not the repository's own default
-/// branch — registration never records that — so set `git_ref` explicitly for a
-/// repository whose default branch is something else, or the clone fails and the
-/// repository is dropped.
+/// unset to take the platform defaults: a shallow clone of the repository's
+/// default branch. Nothing is stored server-side to make that work — the ref
+/// stays null and git resolves the remote's HEAD, so it cannot go stale on a
+/// rename.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskRepoRequest {
     pub repo: String,
