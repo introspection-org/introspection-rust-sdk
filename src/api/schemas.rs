@@ -355,7 +355,9 @@ pub struct TaskCreate {
     /// Recipe agent to run; `None` uses the recipe default (`agents/agent.yaml`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
-    /// Workspace repositories to clone into `workspace/repos/`, at most 10.
+    /// Workspace repositories to clone into `workspace/repos/`. No count limit —
+    /// the server refuses a statically wrong list (duplicate slugs, folder
+    /// collisions), not a long one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repositories: Option<Vec<TaskRepoRequest>>,
     /// Files to attach before the first turn, by id.
