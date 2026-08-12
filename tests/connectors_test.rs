@@ -11,9 +11,11 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
 use introspection_sdk::{
-    ConnectionCreateParams, ConnectionSubjectType, Connections, ConnectorAuthMode,
-    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams,
-    Connectors, PaginationParams, RunnerIdentity,
+    ConnectionBrokerSubjectType, ConnectionCreateParams, ConnectionCreateSubjectType,
+    ConnectionMissionConstraints, ConnectionSubjectType, ConnectionTokenParams,
+    ConnectionTokenResult, Connections, ConnectorAuthMode, ConnectorAuthorizeParams,
+    ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams, Connectors,
+    PaginationParams, RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -85,11 +87,10 @@ fn page(records: Vec<serde_json::Value>) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn list_sends_project_and_limit_and_parses_records() {
+async fn list_uses_authenticated_project_and_parses_records() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/connectors"))
-        .and(query_param("project", "proj-1"))
         .and(query_param("limit", "50"))
         .and(query_param_is_missing("next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![connector_json()])))
@@ -98,7 +99,6 @@ async fn list_sends_project_and_limit_and_parses_records() {
 
     let connectors = Connectors::new(build_http(&server));
     let params = ConnectorListParams {
-        project: Some("proj-1".into()),
         limit: Some(50),
         ..Default::default()
     };
@@ -112,11 +112,10 @@ async fn list_sends_project_and_limit_and_parses_records() {
 }
 
 #[tokio::test]
-async fn create_posts_the_body_with_project_on_the_query() {
+async fn create_posts_the_body_using_authenticated_project_scope() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/connectors"))
-        .and(query_param("project", "proj-1"))
         .and(body_json(json!({
             "name": "Slack (support)",
             "provider": "slack",
@@ -138,7 +137,7 @@ async fn create_posts_the_body_with_project_on_the_query() {
         ..ConnectorCreateParams::new("Slack (support)", "slack", ConnectorAuthMode::OauthStored)
     };
 
-    let created = connectors.create(&params, "proj-1").await.unwrap();
+    let created = connectors.create(&params).await.unwrap();
     assert_eq!(created.slug, "slack-support");
 }
 
@@ -148,13 +147,11 @@ async fn get_update_and_delete_address_one_connector() {
     let connector_path = format!("/v1/connectors/{CONNECTOR_ID}");
     Mock::given(method("GET"))
         .and(path(connector_path.clone()))
-        .and(query_param("project", "proj-1"))
         .respond_with(ResponseTemplate::new(200).set_body_json(connector_json()))
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
         .and(path(connector_path.clone()))
-        .and(query_param("project", "proj-1"))
         // An unset secret must not ride along as null: omitted is "unchanged".
         .and(body_json(json!({ "name": "Slack (renamed)" })))
         .respond_with(ResponseTemplate::new(200).set_body_json(connector_json()))
@@ -162,26 +159,22 @@ async fn get_update_and_delete_address_one_connector() {
         .await;
     Mock::given(method("DELETE"))
         .and(path(connector_path))
-        .and(query_param("project", "proj-1"))
         .respond_with(ResponseTemplate::new(204))
         .mount(&server)
         .await;
 
     let connectors = Connectors::new(build_http(&server));
 
-    let fetched = connectors.get(connector_id(), "proj-1").await.unwrap();
+    let fetched = connectors.get(connector_id()).await.unwrap();
     assert_eq!(fetched.id, connector_id());
 
     let update = ConnectorUpdateParams {
         name: Some("Slack (renamed)".to_string()),
         ..Default::default()
     };
-    connectors
-        .update(connector_id(), &update, "proj-1")
-        .await
-        .unwrap();
+    connectors.update(connector_id(), &update).await.unwrap();
 
-    connectors.delete(connector_id(), "proj-1").await.unwrap();
+    connectors.delete(connector_id()).await.unwrap();
 }
 
 #[tokio::test]
@@ -311,7 +304,7 @@ async fn a_disabled_deployment_keeps_the_servers_wording() {
         .await;
 
     let connectors = Connectors::new(build_http(&server));
-    let err = connectors.get(connector_id(), "proj-1").await.unwrap_err();
+    let err = connectors.get(connector_id()).await.unwrap_err();
 
     match err {
         IntrospectionAPIError::Http {
@@ -362,7 +355,7 @@ async fn connections_list_and_create_use_the_nested_path() {
     assert_ne!(connection.created_by_member_id, connection.member_id);
 
     let create = ConnectionCreateParams {
-        subject_type: Some(ConnectionSubjectType::App),
+        subject_type: Some(ConnectionCreateSubjectType::App),
         scopes_granted: Some(vec!["chat:write".to_string()]),
         ..ConnectionCreateParams::new("xoxb-token")
     };
@@ -397,6 +390,73 @@ async fn connections_get_and_revoke_address_one_connection() {
         .revoke(connector_id(), connection_id())
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn connections_get_token_returns_a_provider_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/token"))
+        .and(body_json(json!({
+            "connector_id": CONNECTOR_ID,
+            "subject": "user",
+            "action": "calendar.list",
+            "requested_permissions": { "host": "calendar.example.com" },
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "token": "provider-token",
+            "token_type": "bearer",
+            "expires_at": null,
+            "scopes": ["calendar.read"],
+        })))
+        .mount(&server)
+        .await;
+
+    let result = Connections::new(build_http(&server))
+        .get_token(
+            connector_id(),
+            &ConnectionTokenParams {
+                subject: Some(ConnectionBrokerSubjectType::User),
+                action: Some("calendar.list".to_string()),
+                requested_permissions: Some(ConnectionMissionConstraints {
+                    host: Some("calendar.example.com".to_string()),
+                    ..Default::default()
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+    match result {
+        ConnectionTokenResult::Token(token) => assert_eq!(token.token, "provider-token"),
+        other => panic!("expected token, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn connections_get_token_preserves_pending_authorization() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/token"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "authorization_pending",
+            "mission_id": "33333333-3333-3333-3333-333333333333",
+            "approval_url": "https://consent.example/m/333?cap=secret",
+        })))
+        .mount(&server)
+        .await;
+
+    let result = Connections::new(build_http(&server))
+        .get_token(connector_id(), &ConnectionTokenParams::default())
+        .await
+        .unwrap();
+
+    match result {
+        ConnectionTokenResult::AuthorizationPending(pending) => {
+            assert_eq!(pending.status, "authorization_pending");
+        }
+        other => panic!("expected pending authorization, got {other:?}"),
+    }
 }
 
 #[tokio::test]

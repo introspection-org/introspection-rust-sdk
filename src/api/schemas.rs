@@ -375,14 +375,16 @@ pub struct TaskCreate {
     /// Fork from a shared conversation: the `/v1/shares` grant id for the source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fork_share_id: Option<String>,
-    /// `key:value` grouping tags stamped on the task at create time (e.g.
-    /// `customer:acme`). The key is `[a-z0-9][a-z0-9_.-]*`, 1..64 chars and may
-    /// not contain `:`; the value is 1..256 chars; at most 64 tags, duplicates
-    /// collapsed. Filter with [`TaskListParams::tag`].
+    /// Grouping tags stamped on the task at create time (e.g.
+    /// `customer:acme`). A tag is an opaque, exact, case-sensitive string;
+    /// `key:value` is a convention, not a grammar. Each tag is 1..128
+    /// characters with no whitespace or control characters; at most 64 tags,
+    /// and duplicates collapse. Filter with [`TaskListParams::tag`].
     ///
     /// Tags are access-bearing: a caller whose member tags intersect a row's
     /// tags can read and write it, so a tag shared with a member cohort hands
-    /// them the task.
+    /// them the task. Shared writers may not replace the tags themselves;
+    /// that remains owner/privileged-only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1209,6 +1211,23 @@ impl<'de> Deserialize<'de> for ConnectionSubjectType {
     }
 }
 
+/// Subjects currently accepted by registered connection creation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionCreateSubjectType {
+    App,
+    User,
+}
+
+/// Subjects currently accepted by authorize and token-broker operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionBrokerSubjectType {
+    App,
+    User,
+    Person,
+}
+
 /// A connector — the CP read model returned by every `/v1/connectors` route.
 ///
 /// `client_secret` and `signing_secret` are **write-only**: accepted on create
@@ -1303,10 +1322,6 @@ pub struct Connection {
 /// Filters supported by `GET /v1/connectors`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ConnectorListParams {
-    /// Project slug or id. May be omitted when the token is project-scoped;
-    /// otherwise the server rejects the request with a 422.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1441,7 +1456,7 @@ pub struct ConnectionCreateParams {
     pub access_token: String,
     /// Defaults to `App` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject_type: Option<ConnectionSubjectType>,
+    pub subject_type: Option<ConnectionCreateSubjectType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scopes_granted: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1480,7 +1495,7 @@ pub struct ConnectorAuthorizeParams {
     pub runtime: Option<StringOrUuid>,
     /// `App` (default) / `User` / `Person`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject: Option<ConnectionSubjectType>,
+    pub subject: Option<ConnectionBrokerSubjectType>,
     /// Where the browser lands after consent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_url: Option<String>,
@@ -1511,6 +1526,59 @@ pub struct ConnectorAuthorization {
     pub expires_at: String,
 }
 
+/// Deterministic, non-PII envelope for a person-authorized action.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectionMissionConstraints {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// Opaque or hashed resource identifier; never raw PII.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_end: Option<String>,
+    /// SHA-256 of the approved artifact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_binding: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectionTokenParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<ConnectionBrokerSubjectType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_permissions: Option<ConnectionMissionConstraints>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectionToken {
+    pub token: String,
+    pub token_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectionAuthorizationPending {
+    pub status: String,
+    pub mission_id: Uuid,
+    pub approval_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ConnectionTokenResult {
+    Token(ConnectionToken),
+    AuthorizationPending(ConnectionAuthorizationPending),
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
@@ -1529,8 +1597,8 @@ pub struct RunnerIdentity {
     /// Tags to stamp on the `customer` member this identity mints, **if that
     /// member is new**. Access-bearing, and bounded on both sides: attenuated
     /// to the asserting agent member's own tags, and applied on create only —
-    /// an existing member's tags are never changed here. Same `key:value`
-    /// grammar as every other tag write.
+    /// an existing member's tags are never changed here. Tags use the same
+    /// opaque, exact-match validation as every other tag write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }

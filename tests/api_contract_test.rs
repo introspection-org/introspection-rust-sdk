@@ -47,9 +47,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
-    AgentInfo, ConnectionCreateParams, ConnectionSubjectType, ConnectorAuthMode,
-    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorStatus,
-    ConnectorUpdateParams, ConversationExportParams, ConversationItemInclude,
+    AgentInfo, ConnectionBrokerSubjectType, ConnectionCreateParams, ConnectionCreateSubjectType,
+    ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams,
+    ConnectorStatus, ConnectorUpdateParams, ConversationExportParams, ConversationItemInclude,
     ConversationItemListParams, ConversationListParams, ConversationResolution,
     ConversationSentiment, ConversationStatus, Dimension, Event, EventListParams,
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
@@ -407,7 +407,6 @@ fn sdk_surface_matches_the_published_reference() {
     };
 
     let connector_list = ConnectorListParams {
-        project: Some(StringOrUuid::from("proj")),
         limit: Some(1),
         next: Some("cursor".into()),
     };
@@ -447,7 +446,7 @@ fn sdk_surface_matches_the_published_reference() {
     };
 
     let connection_create = ConnectionCreateParams {
-        subject_type: Some(ConnectionSubjectType::App),
+        subject_type: Some(ConnectionCreateSubjectType::App),
         scopes_granted: Some(vec!["chat:write".into()]),
         refresh_token: Some("refresh".into()),
         token_expires_at: Some("2026-08-08T21:00:00Z".into()),
@@ -456,7 +455,7 @@ fn sdk_surface_matches_the_published_reference() {
 
     let connector_authorize = ConnectorAuthorizeParams {
         runtime: Some(StringOrUuid::from("support-agent")),
-        subject: Some(ConnectionSubjectType::App),
+        subject: Some(ConnectionBrokerSubjectType::App),
         return_url: Some("https://app.example/done".into()),
         expires_in: Some(3600),
         identity: Some(RunnerIdentity {
@@ -784,7 +783,8 @@ fn sdk_surface_matches_the_published_reference() {
             "connector list filters — GET /v1/connectors query parameters",
             wire_fields(&connector_list),
             query_parameters(&cp_spec, "/v1/connectors", "get"),
-            &["project_id"],
+            // Project scope comes from the authenticated credential.
+            &["project", "project_id"],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
             false,

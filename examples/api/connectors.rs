@@ -8,7 +8,6 @@
 //! Run with:
 //! ```sh
 //! INTROSPECTION_TOKEN=intro_xxx \
-//! INTROSPECTION_PROJECT=my-project \
 //! SLACK_CLIENT_ID=... SLACK_CLIENT_SECRET=... \
 //! INTROSPECTION_RUNTIME=support-agent \
 //!   cargo run --example connectors
@@ -32,8 +31,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().ok();
     let client = IntrospectionClient::new(ClientConfig::default())?;
 
-    let project = std::env::var("INTROSPECTION_PROJECT")
-        .map_err(|_| "INTROSPECTION_PROJECT must name the project that owns the connector")?;
     let client_id = std::env::var("SLACK_CLIENT_ID")
         .map_err(|_| "SLACK_CLIENT_ID is your own Slack app's client id")?;
     let client_secret = std::env::var("SLACK_CLIENT_SECRET")
@@ -62,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         client_secret: Some(client_secret),
         ..ConnectorCreateParams::new("Slack (support)", "slack", ConnectorAuthMode::OauthStored)
     };
-    let connector = client.connectors().create(&params, project.clone()).await?;
+    let connector = client.connectors().create(&params).await?;
     println!(
         "connector -> {} ({}), status={}",
         connector.slug,

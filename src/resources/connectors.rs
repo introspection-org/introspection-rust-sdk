@@ -15,9 +15,8 @@
 //! update, absent from every response — so they appear on the param structs
 //! and never on [`Connector`]. Omitting one on update leaves it as it is.
 //!
-//! The whole family sits behind a server-side feature flag; when it is off
-//! every route answers 404 with detail "Connectors are not enabled", which
-//! surfaces as the error message rather than a bare not-found.
+//! Project scope comes from the authenticated credential; connector calls do
+//! not take a separate project selector.
 
 use std::sync::Arc;
 
@@ -28,9 +27,9 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Connection, ConnectionCreateParams, Connector, ConnectorAuthorization,
-    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams,
-    PaginationParams, StringOrUuid,
+    Connection, ConnectionCreateParams, ConnectionTokenParams, ConnectionTokenResult, Connector,
+    ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams,
+    ConnectorUpdateParams, PaginationParams,
 };
 
 /// `client.connectors.connections` — the authorized subjects under one
@@ -95,6 +94,33 @@ impl Connections {
         );
         self.http.delete_empty(&path).await
     }
+
+    /// `POST /v1/oauth/connections/token` — resolve a provider credential.
+    /// A person-authorized connector may instead return a pending mission and
+    /// approval URL; callers must handle both [`ConnectionTokenResult`] arms.
+    pub async fn get_token(
+        &self,
+        connector_id: Uuid,
+        params: &ConnectionTokenParams,
+    ) -> ApiResult<ConnectionTokenResult> {
+        let mut body = serde_json::to_value(params).map_err(|err| {
+            IntrospectionAPIError::Decode(format!(
+                "ConnectionTokenParams must serialize to a JSON object: {err}"
+            ))
+        })?;
+        let map = body.as_object_mut().ok_or_else(|| {
+            IntrospectionAPIError::Decode(
+                "ConnectionTokenParams must serialize to a JSON object".to_string(),
+            )
+        })?;
+        map.insert(
+            "connector_id".to_string(),
+            serde_json::Value::String(connector_id.to_string()),
+        );
+        self.http
+            .post_json("/v1/oauth/connections/token", &body)
+            .await
+    }
 }
 
 /// `client.connectors` namespace. Holds a CP-bound HTTP client, with
@@ -119,41 +145,23 @@ impl Connectors {
             .expect("ConnectorListParams must serialize to a JSON object")
     }
 
-    /// `POST /v1/connectors?project=…` — create, idempotent on `slug`.
+    /// `POST /v1/connectors` — create, idempotent on `slug`.
     ///
     /// A repeat POST with the same slug returns the live row rather than
     /// duplicating it.
-    pub async fn create(
-        &self,
-        params: &ConnectorCreateParams,
-        project: impl Into<StringOrUuid>,
-    ) -> ApiResult<Connector> {
-        let path = format!("/v1/connectors?project={}", encode_project(project));
-        self.http.post_json(&path, params).await
+    pub async fn create(&self, params: &ConnectorCreateParams) -> ApiResult<Connector> {
+        self.http.post_json("/v1/connectors", params).await
     }
 
-    /// `GET /v1/connectors/{id}?project=…`.
-    pub async fn get(
-        &self,
-        connector_id: Uuid,
-        project: impl Into<StringOrUuid>,
-    ) -> ApiResult<Connector> {
+    /// `GET /v1/connectors/{id}`.
+    pub async fn get(&self, connector_id: Uuid) -> ApiResult<Connector> {
         #[derive(Serialize)]
-        struct Q {
-            project: StringOrUuid,
-        }
+        struct Q {}
         let path = format!("/v1/connectors/{}", connector_id);
-        self.http
-            .get_json(
-                &path,
-                &Q {
-                    project: project.into(),
-                },
-            )
-            .await
+        self.http.get_json(&path, &Q {}).await
     }
 
-    /// `PATCH /v1/connectors/{id}?project=…` — partial update.
+    /// `PATCH /v1/connectors/{id}` — partial update.
     ///
     /// Only the fields set on `params` change. Leaving `client_secret` /
     /// `signing_secret` unset means "unchanged", never "clear".
@@ -161,29 +169,16 @@ impl Connectors {
         &self,
         connector_id: Uuid,
         params: &ConnectorUpdateParams,
-        project: impl Into<StringOrUuid>,
     ) -> ApiResult<Connector> {
-        let path = format!(
-            "/v1/connectors/{}?project={}",
-            connector_id,
-            encode_project(project)
-        );
+        let path = format!("/v1/connectors/{}", connector_id);
         self.http.patch_json(&path, params).await
     }
 
-    /// `DELETE /v1/connectors/{id}?project=…` — soft delete.
+    /// `DELETE /v1/connectors/{id}` — soft delete.
     ///
     /// The server revokes the connector's connections as it goes.
-    pub async fn delete(
-        &self,
-        connector_id: Uuid,
-        project: impl Into<StringOrUuid>,
-    ) -> ApiResult<()> {
-        let path = format!(
-            "/v1/connectors/{}?project={}",
-            connector_id,
-            encode_project(project)
-        );
+    pub async fn delete(&self, connector_id: Uuid) -> ApiResult<()> {
+        let path = format!("/v1/connectors/{}", connector_id);
         self.http.delete_empty(&path).await
     }
 
@@ -231,41 +226,5 @@ impl Connectors {
         self.http
             .post_json("/v1/oauth/connections/authorize", &body)
             .await
-    }
-}
-
-/// Percent-encode a project selector for the query string. Slugs and uuids
-/// are URL-safe in practice, but the value is caller-supplied.
-fn encode_project(project: impl Into<StringOrUuid>) -> String {
-    urlencode(&project.into().to_string())
-}
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn encode_project_passes_slugs_and_uuids_through() {
-        assert_eq!(encode_project("proj-1"), "proj-1");
-        let id = Uuid::nil();
-        assert_eq!(encode_project(id), id.to_string());
-    }
-
-    #[test]
-    fn encode_project_escapes_separators() {
-        assert_eq!(encode_project("a b/c&d"), "a%20b%2Fc%26d");
     }
 }
