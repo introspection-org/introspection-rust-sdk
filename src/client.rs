@@ -19,7 +19,9 @@ use thiserror::Error;
 
 use crate::api::http::{HttpClient, HttpConfig};
 use crate::dev_target;
-use crate::resources::{ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes};
+use crate::resources::{
+    Connectors, ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes,
+};
 use crate::types::{self, ClientConfig};
 
 /// SDK version.
@@ -56,6 +58,7 @@ pub struct IntrospectionClient {
     runtimes: Runtimes,
     experiments: Experiments,
     recipes: Recipes,
+    connectors: Connectors,
 }
 
 impl IntrospectionClient {
@@ -105,7 +108,8 @@ impl IntrospectionClient {
         Ok(Self {
             runtimes: Runtimes::new(cp_http.clone()),
             experiments: Experiments::new(cp_http.clone()),
-            recipes: Recipes::new(cp_http),
+            recipes: Recipes::new(cp_http.clone()),
+            connectors: Connectors::new(cp_http),
         })
     }
 
@@ -119,6 +123,12 @@ impl IntrospectionClient {
 
     pub fn recipes(&self) -> &Recipes {
         &self.recipes
+    }
+
+    /// `/v1/connectors` CRUD, its nested `connections`, and `authorize()` —
+    /// the consent URL a Business hands its customer.
+    pub fn connectors(&self) -> &Connectors {
+        &self.connectors
     }
 
     /// Look up an active runtime by runtime group slug or ID. The server infers the

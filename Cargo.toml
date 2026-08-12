@@ -98,6 +98,10 @@ flate2 = "1"
 dotenvy = "0.15"
 
 [[example]]
+name = "connectors"
+path = "examples/api/connectors.rs"
+
+[[example]]
 name = "runtimes"
 path = "examples/api/runtimes.rs"
 
