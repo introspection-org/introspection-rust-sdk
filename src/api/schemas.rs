@@ -330,8 +330,10 @@ pub struct TaskFileRef {
 /// outside the grant is dropped by the server, never a launch failure.
 ///
 /// `repo` is a registered `owner/name` slug. Leave `git_ref` and `depth`
-/// unset to take the repository's default branch and a shallow clone — both
-/// defaults belong to the platform, so the SDK does not restate them.
+/// unset to take the platform defaults: a shallow clone of the repository's
+/// default branch. Nothing is stored server-side to make that work — the ref
+/// stays null and git resolves the remote's HEAD, so it cannot go stale on a
+/// rename.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskRepoRequest {
     pub repo: String,
@@ -355,7 +357,9 @@ pub struct TaskCreate {
     /// Recipe agent to run; `None` uses the recipe default (`agents/agent.yaml`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
-    /// Workspace repositories to clone into `workspace/repos/`, at most 10.
+    /// Workspace repositories to clone into `workspace/repos/`. No count limit —
+    /// the server refuses a statically wrong list (duplicate slugs, folder
+    /// collisions), not a long one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repositories: Option<Vec<TaskRepoRequest>>,
     /// Files to attach before the first turn, by id.
