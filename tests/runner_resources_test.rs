@@ -602,6 +602,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
             "records": [{
                 "object": "conversation",
                 "id": "c1",
+                "task_title": "Map Australian fintech leaders",
                 "created_at": "2026-08-04T22:14:34.462000Z",
                 "updated_at": "2026-08-04T22:14:35Z",
                 "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
@@ -646,8 +647,13 @@ async fn conversations_list_maps_window_params_and_paginates() {
     let all = paginator.collect_all(10).await.unwrap();
     assert_eq!(all.len(), 2);
     assert_eq!(all[0].id, "c1");
+    assert_eq!(
+        all[0].task_title.as_deref(),
+        Some("Map Australian fintech leaders")
+    );
     assert_eq!(all[0].usage.total_tokens, 3);
     assert_eq!(all[1].id, "c2");
+    assert_eq!(all[1].task_title, None);
 }
 
 #[tokio::test]

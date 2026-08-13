@@ -2001,6 +2001,8 @@ pub struct ConversationMetrics {
 pub struct Conversation {
     pub object: String,
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
