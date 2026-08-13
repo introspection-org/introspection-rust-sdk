@@ -21,6 +21,7 @@ use introspection_sdk::api::{
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
+use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -107,7 +108,6 @@ async fn tasks_create_returns_task_and_run() {
                 "kind": "agent",
                 "status": "awaiting_user",
                 "is_archived": false,
-                "identity_key": "user:customer-1",
             },
             "run": {
                 "id": "run_001",
@@ -129,7 +129,6 @@ async fn tasks_create_returns_task_and_run() {
     let task = handle.task.unwrap();
     assert_eq!(task.kind, TaskKind::Agent);
     assert_eq!(task.status, TaskStatus::AwaitingUser);
-    assert_eq!(task.identity_key.as_deref(), Some("user:customer-1"));
 }
 
 #[tokio::test]
@@ -353,6 +352,7 @@ async fn shares_support_identity_grants_and_crud() {
     let server = MockServer::start().await;
     let shares = Shares::new(build_http(&server));
     let share_id = "00000000-0000-0000-0000-000000000010";
+    let member_id: Uuid = "00000000-0000-0000-0000-000000000030".parse().unwrap();
     let response = json!({
         "id": share_id,
         "org_id": "00000000-0000-0000-0000-00000000aaaa",
@@ -361,10 +361,8 @@ async fn shares_support_identity_grants_and_crud() {
         "updated_at": "2026-01-01T00:00:00Z",
         "resource_type": "file",
         "resource_id": "file_1",
-        "granted_member_id": null,
-        "granted_identity_key": "user:user-1",
+        "granted_member_id": "00000000-0000-0000-0000-000000000030",
         "created_by_member_id": "00000000-0000-0000-0000-000000000020",
-        "created_by_identity_key": "user:admin-1",
         "url": "https://example.test/share"
     });
 
@@ -373,7 +371,7 @@ async fn shares_support_identity_grants_and_crud() {
         .and(body_json(json!({
             "resource_type": "file",
             "resource_id": "file_1",
-            "granted_identity_key": "user:user-1"
+            "granted_member_id": "00000000-0000-0000-0000-000000000030"
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(response.clone()))
         .mount(&server)
@@ -404,12 +402,11 @@ async fn shares_support_identity_grants_and_crud() {
         .create(&ShareCreate {
             resource_type: ShareResourceType::File,
             resource_id: "file_1".into(),
-            granted_member_id: None,
-            granted_identity_key: Some("user:user-1".into()),
+            granted_member_id: Some(member_id),
         })
         .await
         .unwrap();
-    assert_eq!(created.granted_identity_key.as_deref(), Some("user:user-1"));
+    assert_eq!(created.granted_member_id, Some(member_id));
 
     let mut page = shares.list(&ShareListParams {
         resource_id: Some("file_1".into()),

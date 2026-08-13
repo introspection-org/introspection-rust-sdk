@@ -300,8 +300,6 @@ pub struct Task {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity_key: Option<String>,
     /// `key:value` grouping tags stamped on this task.
     #[serde(default)]
     pub tags: Vec<String>,
@@ -530,11 +528,7 @@ pub struct ResourceShare {
     pub resource_id: String,
     #[serde(default)]
     pub granted_member_id: Option<Uuid>,
-    #[serde(default)]
-    pub granted_identity_key: Option<String>,
     pub created_by_member_id: Uuid,
-    #[serde(default)]
-    pub created_by_identity_key: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
 }
@@ -543,10 +537,10 @@ pub struct ResourceShare {
 pub struct ShareCreate {
     pub resource_type: ShareResourceType,
     pub resource_id: String,
+    /// Target one member; `None` grants project-wide read. An end customer is
+    /// a member, so there is no separate identity target.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_member_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub granted_identity_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -584,9 +578,6 @@ pub struct File {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default)]
     pub member_id: Option<Uuid>,
-    /// Coalesced caller identity that created this file.
-    #[serde(default)]
-    pub identity_key: Option<String>,
     /// Task this file was created from (accounting only).
     #[serde(default)]
     pub task_id: Option<Uuid>,
