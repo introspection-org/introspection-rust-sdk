@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.14.0...v0.15.0) (2026-08-13)
+
+
+### Features
+
+* **connectors:** add connectors, connections, and the install link ([#74](https://github.com/introspection-org/introspection-rust-sdk/issues/74)) ([550be0c](https://github.com/introspection-org/introspection-rust-sdk/commit/550be0c5a3d5ffe3196c8639de1f754da0ccdd91))
+
+
+### Bug Fixes
+
+* expose file tags, drop identity_key, and make the contract test able to run again ([#78](https://github.com/introspection-org/introspection-rust-sdk/issues/78)) ([b2d27e7](https://github.com/introspection-org/introspection-rust-sdk/commit/b2d27e7fb56486d95948ef9edb604d443c6a77bb))
+
 ## [0.14.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.13.0...v0.14.0) (2026-08-10)
 
 
