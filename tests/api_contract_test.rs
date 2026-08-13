@@ -295,11 +295,13 @@ fn sdk_surface_matches_the_published_reference() {
         version: 1,
         parent_id: Some(Uuid::nil()),
         storage_version_id: Some("v".into()),
+        tags: vec!["customer:acme".into()],
     };
 
     let file_update = FileUpdate {
         name: Some("n".into()),
         metadata: Some(HashMap::new()),
+        tags: Some(vec!["customer:acme".into()]),
     };
 
     let file_list = FileListParams {
@@ -309,6 +311,7 @@ fn sdk_surface_matches_the_published_reference() {
         name: Some("n".into()),
         file_type: Some(FileType::Upload),
         storage_path: Some("p".into()),
+        tag: Some("customer:acme".into()),
     };
 
     let share_create = ShareCreate {
