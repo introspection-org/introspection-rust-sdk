@@ -300,8 +300,6 @@ pub struct Task {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity_key: Option<String>,
     /// `key:value` grouping tags stamped on this task.
     #[serde(default)]
     pub tags: Vec<String>,
@@ -530,11 +528,7 @@ pub struct ResourceShare {
     pub resource_id: String,
     #[serde(default)]
     pub granted_member_id: Option<Uuid>,
-    #[serde(default)]
-    pub granted_identity_key: Option<String>,
     pub created_by_member_id: Uuid,
-    #[serde(default)]
-    pub created_by_identity_key: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
 }
@@ -543,10 +537,10 @@ pub struct ResourceShare {
 pub struct ShareCreate {
     pub resource_type: ShareResourceType,
     pub resource_id: String,
+    /// Target one member; `None` grants project-wide read. An end customer is
+    /// a member, so there is no separate identity target.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_member_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub granted_identity_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -584,9 +578,6 @@ pub struct File {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default)]
     pub member_id: Option<Uuid>,
-    /// Coalesced caller identity that created this file.
-    #[serde(default)]
-    pub identity_key: Option<String>,
     /// Task this file was created from (accounting only).
     #[serde(default)]
     pub task_id: Option<Uuid>,
@@ -598,6 +589,10 @@ pub struct File {
     pub parent_id: Option<Uuid>,
     #[serde(default)]
     pub storage_version_id: Option<String>,
+    /// Grouping tags stamped on this file. Tags belong to the file rather than
+    /// to a version, so they carry forward when a new version is written.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 fn default_mime() -> String {
@@ -614,6 +609,18 @@ pub struct FileUpdate {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Replaces the tag list wholesale (unlike `metadata`, which is merged).
+    /// `None` leaves tags untouched; `Some(vec![])` clears them.
+    ///
+    /// A tag is an opaque, exact, case-sensitive string: `key:value` is a
+    /// convention, not a grammar. Each tag is 1–128 characters with no
+    /// whitespace or control characters; at most 64 tags.
+    ///
+    /// Access-bearing: a caller whose member tags intersect a file's tags can
+    /// read and write it. Shared writers may not replace the tags themselves;
+    /// that remains owner/privileged-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -638,6 +645,10 @@ pub struct FileListParams {
     pub file_type: Option<FileType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_path: Option<String>,
+    /// Filter by one tag. ANDed with the ownership predicate, so it only
+    /// ever narrows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 // ----- SSE -------------------------------------------------------------------

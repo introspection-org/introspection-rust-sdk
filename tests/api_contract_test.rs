@@ -269,7 +269,6 @@ fn sdk_surface_matches_the_published_reference() {
             sandbox_status: Some("s".into()),
             session_id: Some("s".into()),
         }),
-        identity_key: Some("k".into()),
         tags: vec!["customer:acme".into()],
     };
 
@@ -289,17 +288,18 @@ fn sdk_surface_matches_the_published_reference() {
         mime_type: "text/plain".into(),
         metadata: Some(HashMap::new()),
         member_id: Some(Uuid::nil()),
-        identity_key: Some("k".into()),
         task_id: Some(Uuid::nil()),
         size_bytes: 1,
         version: 1,
         parent_id: Some(Uuid::nil()),
         storage_version_id: Some("v".into()),
+        tags: vec!["customer:acme".into()],
     };
 
     let file_update = FileUpdate {
         name: Some("n".into()),
         metadata: Some(HashMap::new()),
+        tags: Some(vec!["customer:acme".into()]),
     };
 
     let file_list = FileListParams {
@@ -309,13 +309,13 @@ fn sdk_surface_matches_the_published_reference() {
         name: Some("n".into()),
         file_type: Some(FileType::Upload),
         storage_path: Some("p".into()),
+        tag: Some("customer:acme".into()),
     };
 
     let share_create = ShareCreate {
         resource_type: ShareResourceType::File,
         resource_id: "file".into(),
         granted_member_id: Some(Uuid::nil()),
-        granted_identity_key: Some("k".into()),
     };
 
     let share = ResourceShare {
@@ -327,9 +327,7 @@ fn sdk_surface_matches_the_published_reference() {
         resource_type: ShareResourceType::File,
         resource_id: "file".into(),
         granted_member_id: Some(Uuid::nil()),
-        granted_identity_key: Some("k".into()),
         created_by_member_id: Uuid::nil(),
-        created_by_identity_key: Some("k".into()),
         url: Some("https://example.invalid/s".into()),
     };
 
@@ -624,8 +622,12 @@ fn sdk_surface_matches_the_published_reference() {
             wire_fields(&run_create),
             schema_properties(&spec, "TaskRunCreate"),
             // `resume` is a separate typed call on this client, not a field on
-            // the create body.
-            &["resume"],
+            // the create body. `runtime_id` is omitted for the same reason
+            // `TaskCreate` omits it: this client is runner-bound, and the
+            // runner credential's JWT claim is authoritative for runtime
+            // selection, so the field is only meaningful to browser/session
+            // callers.
+            &["resume", "runtime_id"],
             "sent here but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",
             true,
@@ -635,15 +637,15 @@ fn sdk_surface_matches_the_published_reference() {
             wire_fields(&list),
             query_parameters(&spec, "/v1/tasks", "get"),
             // runtime_id/runtime_ids/updated_after/conversation_id are
-            // product-UI shaped; identity_key is privileged-only and 403s for
-            // the credentials this client carries. Which filters to expose is a
-            // product decision, so absence is reported and does not fail.
+            // product-UI shaped, and member_id/conversation_ids are privileged
+            // or scoping filters the runner credential already implies. Which
+            // filters to expose is a product decision, so absence is reported
+            // and does not fail.
             &[
                 "runtime_id",
                 "runtime_ids",
                 "updated_after",
                 "conversation_id",
-                "identity_key",
             ],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
@@ -682,11 +684,10 @@ fn sdk_surface_matches_the_published_reference() {
             "file list filters — GET /v1/files query parameters",
             wire_fields(&file_list),
             query_parameters(&spec, "/v1/files", "get"),
-            // `identity_key` is privileged-only and 403s for the credentials
-            // this client carries; `task_id`/`share_id` are scoping params the
-            // runner already carries. Which filters to expose is a product
-            // decision, so absence is reported and does not fail.
-            &["identity_key", "task_id", "share_id"],
+            // `task_id`/`share_id` are scoping params the runner already
+            // carries. Which filters to expose is a product decision, so
+            // absence is reported and does not fail.
+            &["task_id", "share_id"],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
             false,
