@@ -123,6 +123,9 @@ fn opts() -> StreamOptions {
 }
 
 /// Collect every typed event the stream yields (errors surface as `Err`).
+// Keep the SDK error intact so tests exercise the public stream contract;
+// boxing it solely to shrink this test helper would change what callers see.
+#[allow(clippy::result_large_err)]
 async fn collect_events(
     runs: &TaskRuns,
     o: StreamOptions,
@@ -158,6 +161,7 @@ fn reconnects(events: &[AgUiEvent]) -> Vec<serde_json::Value> {
         .collect()
 }
 
+#[allow(clippy::result_large_err)]
 async fn collect_deltas(
     runs: &TaskRuns,
     o: StreamOptions,
