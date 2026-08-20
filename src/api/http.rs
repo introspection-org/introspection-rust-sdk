@@ -13,6 +13,7 @@ use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use reqwest::{Response, StatusCode};
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
@@ -148,6 +149,71 @@ impl HttpClient {
         }
     }
 
+    /// Lower a serializable query object into the tuple sequence reqwest uses
+    /// for repeated parameters. Passing a JSON array directly to
+    /// `RequestBuilder::query` fails with `unsupported value`; flattening it
+    /// here produces `key=a&key=b` and keeps every GET namespace consistent.
+    fn query_pairs<Q: Serialize>(query: &Q) -> ApiResult<Vec<(String, String)>> {
+        let value = serde_json::to_value(query).map_err(|e| {
+            IntrospectionAPIError::Decode(format!("failed to encode query params: {e}"))
+        })?;
+        let mut pairs = Vec::new();
+        if let Value::Array(entries) = value {
+            for entry in entries {
+                let Value::Array(mut pair) = entry else {
+                    return Err(IntrospectionAPIError::Decode(
+                        "query pair must serialize as [key, value]".to_string(),
+                    ));
+                };
+                if pair.len() != 2 {
+                    return Err(IntrospectionAPIError::Decode(
+                        "query pair must contain exactly two values".to_string(),
+                    ));
+                }
+                let value = pair.pop().expect("length checked");
+                let key = pair.pop().expect("length checked");
+                let Value::String(key) = key else {
+                    return Err(IntrospectionAPIError::Decode(
+                        "query parameter name must be a string".to_string(),
+                    ));
+                };
+                pairs.push((key, Self::query_scalar(value)?));
+            }
+            return Ok(pairs);
+        }
+        let Value::Object(fields) = value else {
+            if value.is_null() {
+                return Ok(pairs);
+            }
+            return Err(IntrospectionAPIError::Decode(
+                "query params must serialize to an object or pair sequence".to_string(),
+            ));
+        };
+        for (key, value) in fields {
+            match value {
+                Value::Null => {}
+                Value::Array(values) => {
+                    for value in values {
+                        pairs.push((key.clone(), Self::query_scalar(value)?));
+                    }
+                }
+                value => pairs.push((key, Self::query_scalar(value)?)),
+            }
+        }
+        Ok(pairs)
+    }
+
+    fn query_scalar(value: Value) -> ApiResult<String> {
+        match value {
+            Value::String(value) => Ok(value),
+            Value::Bool(value) => Ok(value.to_string()),
+            Value::Number(value) => Ok(value.to_string()),
+            _ => Err(IntrospectionAPIError::Decode(
+                "query parameter values must be scalars or scalar arrays".to_string(),
+            )),
+        }
+    }
+
     /// Send a unary request, transparently retrying on a rejected-but-retryable
     /// status, honouring `Retry-After` as the floor of a capped-exponential
     /// backoff.
@@ -193,8 +259,9 @@ impl HttpClient {
         path: &str,
         query: &Q,
     ) -> ApiResult<R> {
+        let query = Self::query_pairs(query)?;
         let res = self
-            .send_retrying(true, || self.inner.get(self.url(path)).query(query))
+            .send_retrying(true, || self.inner.get(self.url(path)).query(&query))
             .await?;
         decode_json(res).await
     }
@@ -272,8 +339,9 @@ impl HttpClient {
         accept: Option<&str>,
     ) -> ApiResult<Response> {
         let accept = accept.map(str::to_string);
+        let query = Self::query_pairs(query)?;
         self.send_retrying(true, || {
-            let mut req = self.inner.get(self.url(path)).query(query);
+            let mut req = self.inner.get(self.url(path)).query(&query);
             if let Some(a) = &accept {
                 req = req.header(reqwest::header::ACCEPT, a.clone());
             }

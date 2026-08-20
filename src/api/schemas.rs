@@ -299,6 +299,8 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_metadata: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
     /// `key:value` grouping tags stamped on this task.
     #[serde(default)]
@@ -387,6 +389,10 @@ pub struct TaskCreate {
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Immutable, filter-only metadata stamped onto every span in the
+    /// conversation. The server validates keys, values, and cardinality.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_metadata: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -2024,6 +2030,8 @@ pub struct Conversation {
     pub recipe_git_commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 /// `resolution` filter on `GET /v1/conversations`.
@@ -2118,6 +2126,10 @@ pub struct ConversationListParams {
     pub resolution: Option<ConversationResolution>,
     pub sentiment: Option<ConversationSentiment>,
     pub owner_key: Option<String>,
+    /// Match conversations whose spans contain every metadata pair. Values may
+    /// contain `:`; each pair is lowered to a repeated `metadata=key:value`
+    /// query parameter, splitting on the first colon server-side.
+    pub metadata: Option<HashMap<String, String>>,
     /// Escape hatch for a filter this SDK build predates: merged verbatim
     /// onto the query string, after the typed fields above.
     pub filters: Option<HashMap<String, serde_json::Value>>,
@@ -2236,6 +2248,7 @@ impl ConversationListParams {
             obj.insert("sentiment".to_string(), sentiment.as_str().into());
         }
         put_str(&mut obj, "owner_key", self.owner_key.as_ref());
+        put_metadata(&mut obj, self.metadata.as_ref());
         merge_filters(&mut obj, self.filters.as_ref());
         Ok(serde_json::Value::Object(obj))
     }
@@ -2732,6 +2745,27 @@ fn put_list(
     }
 }
 
+/// Insert conversation metadata as repeated `metadata=key:value` filters.
+/// Sorting makes request serialization deterministic despite `HashMap`
+/// iteration order. An empty map means no filter and is omitted.
+fn put_metadata(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    metadata: Option<&HashMap<String, String>>,
+) {
+    let Some(metadata) = metadata.filter(|metadata| !metadata.is_empty()) else {
+        return;
+    };
+    let mut pairs: Vec<_> = metadata
+        .iter()
+        .map(|(key, value)| format!("{key}:{value}"))
+        .collect();
+    pairs.sort();
+    obj.insert(
+        "metadata".to_string(),
+        serde_json::Value::Array(pairs.into_iter().map(Into::into).collect()),
+    );
+}
+
 fn merge_filters(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     filters: Option<&HashMap<String, serde_json::Value>>,
@@ -3008,6 +3042,23 @@ mod tests {
     }
 
     #[test]
+    fn task_create_serialises_conversation_metadata_at_the_top_level() {
+        let body = serde_json::to_value(TaskCreate {
+            prompt: Some("hello".into()),
+            conversation_metadata: Some(HashMap::from([
+                ("flow".into(), "checkout".into()),
+                ("tenant".into(), "acme".into()),
+            ])),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(body["conversation_metadata"]["flow"], "checkout");
+        assert_eq!(body["conversation_metadata"]["tenant"], "acme");
+        assert!(body.get("custom").is_none());
+    }
+
+    #[test]
     fn task_status_round_trips() {
         let s: TaskStatus = serde_json::from_str("\"running\"").unwrap();
         assert_eq!(s, TaskStatus::Running);
@@ -3209,6 +3260,10 @@ mod tests {
             resolution: Some(ConversationResolution::Blocked),
             sentiment: Some(ConversationSentiment::Negative),
             owner_key: Some("owner".into()),
+            metadata: Some(HashMap::from([
+                ("flow".into(), "checkout".into()),
+                ("route".into(), "checkout:retry".into()),
+            ])),
             ..Default::default()
         }
         .to_wire()
@@ -3230,6 +3285,22 @@ mod tests {
         assert_eq!(wire["resolution"], "blocked");
         assert_eq!(wire["sentiment"], "negative");
         assert_eq!(wire["owner_key"], "owner");
+        assert_eq!(
+            wire["metadata"],
+            serde_json::json!(["flow:checkout", "route:checkout:retry"])
+        );
+    }
+
+    #[test]
+    fn empty_conversation_metadata_filter_is_omitted() {
+        let wire = ConversationListParams {
+            metadata: Some(HashMap::new()),
+            ..Default::default()
+        }
+        .to_wire()
+        .unwrap();
+
+        assert!(wire.get("metadata").is_none());
     }
 
     #[test]
