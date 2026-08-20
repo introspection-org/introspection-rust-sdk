@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.15.0...v0.16.0) (2026-08-20)
+
+
+### Features
+
+* **conversations:** add conversation metadata ([#81](https://github.com/introspection-org/introspection-rust-sdk/issues/81)) ([1339423](https://github.com/introspection-org/introspection-rust-sdk/commit/13394236881f2c698a2021c28d3f9fa6e2296976))
+
+
+### Bug Fixes
+
+* expose conversation task titles ([8d53a99](https://github.com/introspection-org/introspection-rust-sdk/commit/8d53a99936ea8628cd5054f120b90f243c4bc5fc))
+
 ## [0.15.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.14.0...v0.15.0) (2026-08-13)
 
 
