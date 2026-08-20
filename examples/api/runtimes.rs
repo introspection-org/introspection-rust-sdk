@@ -8,11 +8,12 @@
 //!   cargo run --example runtimes
 //! ```
 
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
 use futures::StreamExt;
 use introspection_sdk::{
-    AgUiEvent, ClientConfig, FileCreateText, FileUpload, IntrospectionClient, RunRequest,
+    AgUiEvent, ClientConfig, ConversationListParams, FileCreateText, FileUpload,
+    IntrospectionClient, RunRequest, TaskCreate,
 };
 
 #[tokio::main]
@@ -42,7 +43,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 2) Spawn a task and stream its events.
     let run = runner
         .tasks()
-        .start_prompt("Say hello in one sentence.")
+        .start(&TaskCreate {
+            prompt: Some("Say hello in one sentence.".into()),
+            conversation_metadata: Some(HashMap::from([("flow".into(), "runner_example".into())])),
+            ..Default::default()
+        })
         .await?;
     println!(
         "spawned task={:?}, run={}",
@@ -59,6 +64,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     println!();
+
+    let mut conversations = runner.conversations().list(&ConversationListParams {
+        metadata: Some(HashMap::from([("flow".into(), "runner_example".into())])),
+        ..Default::default()
+    })?;
+    if let Some(page) = conversations.next_page().await? {
+        println!("matching conversations: {}", page.records.len());
+    }
 
     // 3) Upload files via the runner.
     let files = runner.files();

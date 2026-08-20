@@ -97,6 +97,7 @@ async fn tasks_create_returns_task_and_run() {
         // of the task the server returns, never one the client sends.
         .and(body_json(json!({
             "prompt": "hi",
+            "conversation_metadata": {"flow": "checkout", "tenant": "acme"},
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "task": {
@@ -108,6 +109,7 @@ async fn tasks_create_returns_task_and_run() {
                 "kind": "agent",
                 "status": "awaiting_user",
                 "is_archived": false,
+                "conversation_metadata": {"flow": "checkout", "tenant": "acme"},
             },
             "run": {
                 "id": "run_001",
@@ -121,6 +123,10 @@ async fn tasks_create_returns_task_and_run() {
     let handle = tasks
         .start(&TaskCreate {
             prompt: Some("hi".into()),
+            conversation_metadata: Some(HashMap::from([
+                ("flow".into(), "checkout".into()),
+                ("tenant".into(), "acme".into()),
+            ])),
             ..Default::default()
         })
         .await
@@ -129,6 +135,13 @@ async fn tasks_create_returns_task_and_run() {
     let task = handle.task.unwrap();
     assert_eq!(task.kind, TaskKind::Agent);
     assert_eq!(task.status, TaskStatus::AwaitingUser);
+    assert_eq!(
+        task.conversation_metadata
+            .unwrap()
+            .get("flow")
+            .map(String::as_str),
+        Some("checkout")
+    );
 }
 
 #[tokio::test]
@@ -597,6 +610,8 @@ async fn conversations_list_maps_window_params_and_paginates() {
         .and(query_param("start_date", "2026-01-01T00:00:00Z"))
         .and(query_param("end_date", "2026-02-01T00:00:00Z"))
         .and(query_param("limit", "10"))
+        .and(query_param("metadata", "flow:checkout"))
+        .and(query_param("metadata", "route:checkout:retry"))
         .and(query_param_is_missing("next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [{
@@ -605,6 +620,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
                 "task_title": "Map Australian fintech leaders",
                 "created_at": "2026-08-04T22:14:34.462000Z",
                 "updated_at": "2026-08-04T22:14:35Z",
+                "metadata": {"flow": "checkout", "tenant": "acme"},
                 "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
                 "cost": {"usd": 0.01},
                 "metrics": {"duration_ms": 538.0, "trace_count": 1, "span_count": 2, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
@@ -639,6 +655,10 @@ async fn conversations_list_maps_window_params_and_paginates() {
             order: Some(SortDirection::Asc),
             start: Some("2026-01-01T00:00:00Z".into()),
             end: Some("2026-02-01T00:00:00Z".into()),
+            metadata: Some(HashMap::from([
+                ("flow".into(), "checkout".into()),
+                ("route".into(), "checkout:retry".into()),
+            ])),
             ..Default::default()
         })
         .expect("params validate");
@@ -652,6 +672,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
         Some("Map Australian fintech leaders")
     );
     assert_eq!(all[0].usage.total_tokens, 3);
+    assert_eq!(all[0].metadata.as_ref().unwrap()["tenant"], "acme");
     assert_eq!(all[1].id, "c2");
     assert_eq!(all[1].task_title, None);
 }

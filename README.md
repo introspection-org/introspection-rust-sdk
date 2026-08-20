@@ -139,13 +139,27 @@ See [Product signals](https://docs.introspection.dev/sdk/rust/product-signals) f
 
 ## Read what happened
 
-A finished task leaves a durable conversation:
+A finished task leaves a durable conversation. Add immutable, filter-only
+metadata when creating the task, then use the same keys to find it later:
 
 ```rust
-use introspection_sdk::ConversationListParams;
+use std::collections::HashMap;
+use introspection_sdk::{ConversationListParams, TaskCreate};
+
+runner.tasks().create(&TaskCreate {
+    prompt: Some("Handle this checkout".into()),
+    conversation_metadata: Some(HashMap::from([
+        ("flow".into(), "checkout".into()),
+        ("tenant".into(), "acme".into()),
+    ])),
+    ..Default::default()
+}).await?;
 
 let conversations = runner.conversations();
-let mut pages = conversations.list(&ConversationListParams::default())?;
+let mut pages = conversations.list(&ConversationListParams {
+    metadata: Some(HashMap::from([("flow".into(), "checkout".into())])),
+    ..Default::default()
+})?;
 
 while let Some(page) = pages.next_page().await? {
     for summary in &page.records {

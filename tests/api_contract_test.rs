@@ -221,6 +221,7 @@ fn sdk_surface_matches_the_published_reference() {
         idle_timeout_seconds: Some(1),
         fork_share_id: Some("share".into()),
         metadata: Some(HashMap::new()),
+        conversation_metadata: Some(HashMap::new()),
         tags: Some(vec!["customer:acme".into()]),
     };
 
@@ -265,6 +266,7 @@ fn sdk_surface_matches_the_published_reference() {
         completed_at: Some("now".into()),
         last_user_message_at: Some("now".into()),
         metadata: Some(HashMap::new()),
+        conversation_metadata: Some(HashMap::new()),
         agent: Some(AgentInfo {
             sandbox_status: Some("s".into()),
             session_id: Some("s".into()),
@@ -487,7 +489,7 @@ fn sdk_surface_matches_the_published_reference() {
         end_date: Some("2026-01-02T00:00:00Z".into()),
     };
 
-    // Every typed field is populated, so the assertion below is that all 22
+    // Every typed field is populated, so the assertion below is that all 23
     // declared query params of `GET /v1/conversations` are reachable from the
     // typed surface -- not just the handful a spot-check would set.
     let conversation_list = ConversationListParams {
@@ -515,6 +517,10 @@ fn sdk_surface_matches_the_published_reference() {
         resolution: Some(ConversationResolution::Resolved),
         sentiment: Some(ConversationSentiment::Positive),
         owner_key: Some("owner".into()),
+        metadata: Some(HashMap::from([
+            ("flow".into(), "checkout".into()),
+            ("route".into(), "checkout:retry".into()),
+        ])),
         // A declared param through the escape hatch, so the verbatim merge is
         // exercised rather than assumed.
         filters: Some(HashMap::from([(
