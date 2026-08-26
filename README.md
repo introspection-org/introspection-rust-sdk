@@ -170,6 +170,40 @@ while let Some(page) = pages.next_page().await? {
 
 The runner also exposes `files()`, `shares()`, `events()`, and `metrics()`.
 
+## Curate traces with human review
+
+Annotations are append-only events on an OTel trace/span. Each write changes
+exactly one dimension; label and reviewer vectors are complete snapshots, so
+an empty vector clears that dimension.
+
+```rust
+use introspection_sdk::{
+    AdvancedOptions, AnnotationEventOptions, AnnotationMutation,
+    AnnotationTarget, ClientConfig, IntrospectionClient,
+};
+
+let client = IntrospectionClient::new(
+    ClientConfig::with_token(member_access_token).advanced(AdvancedOptions {
+        base_api_url: Some("https://api.introspection.dev".into()),
+        dp_url: Some("https://dp.example".into()),
+        cp_session: Some(encoded_member_session),
+        ..Default::default()
+    }),
+)?;
+
+client.annotations().create(
+    AnnotationTarget {
+        trace_id: "0af7651916cd43dd8448eb211c80319c".into(),
+        span_id: "b7ad6b7169203331".into(),
+    },
+    AnnotationMutation::ReviewerEmails(vec!["expert@example.com".into()]),
+    AnnotationEventOptions::default(),
+).await?;
+```
+
+Reusable labels live under `client.project_labels()`. Their slug and color are
+immutable after creation; only the optional description can be updated.
+
 See [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence) for transcripts,
 typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
 for durable inputs and grants, and [`examples/`](examples/) for end-to-end

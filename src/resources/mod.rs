@@ -2,7 +2,7 @@
 //!
 //! - [`Runtimes`] — read and resolve `/v1/runtimes`; obtain a
 //!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()`.
-//! - [`Experiments`] — `GET /v1/experiments` lookup plus lifecycle
+//! - [`Experiments`] — `/v1/experiments` CRUD plus run lifecycle
 //!   (`/start` / `/end` / `/cancel`); obtain an [`ExperimentHandle`]
 //!   via `client.experiment(id, project)` for `.run()`.
 //! - [`Recipes`] — `GET /v1/recipes` lookup. Recipes describe a
@@ -21,11 +21,13 @@
 //! administering projects, repositories, keys, and bindings — lives in the
 //! CLI, not here.
 
+pub mod annotations;
 pub mod connectors;
 pub mod experiments;
 pub mod recipes;
 pub mod runtimes;
 
+pub use annotations::{Annotations, ProjectLabels};
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
 pub use recipes::Recipes;

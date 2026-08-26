@@ -18,9 +18,11 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::api::http::{HttpClient, HttpConfig};
+use crate::api::telemetry::Events;
 use crate::dev_target;
 use crate::resources::{
-    Connectors, ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes,
+    Annotations, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes, RuntimeHandle,
+    Runtimes,
 };
 use crate::types::{self, ClientConfig};
 
@@ -59,6 +61,9 @@ pub struct IntrospectionClient {
     experiments: Experiments,
     recipes: Recipes,
     connectors: Connectors,
+    annotations: Annotations,
+    project_labels: ProjectLabels,
+    events: Events,
 }
 
 impl IntrospectionClient {
@@ -79,6 +84,10 @@ impl IntrospectionClient {
             .clone()
             .or_else(|| env::var("INTROSPECTION_BASE_API_URL").ok())
             .unwrap_or_else(|| types::defaults::BASE_API_URL.to_string());
+        let dp_url = advanced
+            .dp_url
+            .clone()
+            .unwrap_or_else(|| base_api_url.clone());
 
         // Fail here rather than storing `None` and panicking on first use:
         // every method on this client is a REST call, so a tokenless client
@@ -93,10 +102,14 @@ impl IntrospectionClient {
         // claim to carry a target.
         let api_headers =
             dev_target::with_dev_target(advanced.additional_headers.clone().unwrap_or_default());
+        let mut cp_headers = api_headers.clone();
+        if let Some(cp_session) = advanced.cp_session.as_ref() {
+            cp_headers.insert("Cookie".into(), format!("intro_cp_session={cp_session}"));
+        }
         let http_cfg = HttpConfig {
             api_url: base_api_url,
             token: token.clone(),
-            additional_headers: api_headers,
+            additional_headers: cp_headers,
             timeout: Duration::from_secs(types::defaults::API_TIMEOUT_SECS),
             max_retries: types::defaults::API_MAX_RETRIES,
             retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
@@ -104,12 +117,26 @@ impl IntrospectionClient {
         let http = HttpClient::new(http_cfg)
             .map_err(|e| IntrospectionError::InvalidConfig(e.to_string()))?;
         let cp_http = Arc::new(http);
+        let dp_http = Arc::new(
+            HttpClient::new(HttpConfig {
+                api_url: dp_url,
+                token,
+                additional_headers: api_headers,
+                timeout: Duration::from_secs(types::defaults::API_TIMEOUT_SECS),
+                max_retries: types::defaults::API_MAX_RETRIES,
+                retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
+            })
+            .map_err(|e| IntrospectionError::InvalidConfig(e.to_string()))?,
+        );
 
         Ok(Self {
             runtimes: Runtimes::new(cp_http.clone()),
             experiments: Experiments::new(cp_http.clone()),
             recipes: Recipes::new(cp_http.clone()),
-            connectors: Connectors::new(cp_http),
+            connectors: Connectors::new(cp_http.clone()),
+            annotations: Annotations::new(cp_http, dp_http.clone()),
+            project_labels: ProjectLabels::new(dp_http.clone()),
+            events: Events::new(dp_http),
         })
     }
 
@@ -123,6 +150,19 @@ impl IntrospectionClient {
 
     pub fn recipes(&self) -> &Recipes {
         &self.recipes
+    }
+
+    pub fn annotations(&self) -> &Annotations {
+        &self.annotations
+    }
+
+    pub fn project_labels(&self) -> &ProjectLabels {
+        &self.project_labels
+    }
+
+    /// Direct Data Plane event reads using this client's project token.
+    pub fn events(&self) -> &Events {
+        &self.events
     }
 
     /// `/v1/connectors` CRUD, its nested `connections`, and `authorize()` —
@@ -159,9 +199,8 @@ impl IntrospectionClient {
     ///
     /// The token is not auto-refreshed: it lives for `expires_in` seconds, so
     /// re-mint (call this again) for long-lived processes once it lapses.
-    /// Call [`crate::auth::service_account_token`] directly if you also need
-    /// the resolved `dp_url` (e.g. to hand a browser the Data Plane
-    /// endpoint).
+    /// The resolved Data Plane URL is wired into the annotation and
+    /// project-label namespaces automatically.
     ///
     /// # Example
     ///
@@ -192,11 +231,14 @@ impl IntrospectionClient {
         // whatever `INTROSPECTION_BASE_API_URL` happened to say.
         let base_api_url = crate::auth::resolve_base_api_url(params.base_api_url.as_deref());
         let token = crate::auth::service_account_token(params).await?;
+        let dp_url = token.dp_url.clone();
         let advanced = types::AdvancedOptions {
             base_api_url: advanced
                 .as_ref()
                 .and_then(|a| a.base_api_url.clone())
                 .or(Some(base_api_url)),
+            dp_url: advanced.as_ref().and_then(|a| a.dp_url.clone()).or(dp_url),
+            cp_session: advanced.as_ref().and_then(|a| a.cp_session.clone()),
             additional_headers: advanced.and_then(|a| a.additional_headers),
         };
         Self::new(ClientConfig::with_token(token.access_token).advanced(advanced))

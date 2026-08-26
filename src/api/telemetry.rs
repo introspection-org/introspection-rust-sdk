@@ -311,7 +311,7 @@ impl Events {
     /// `GET /v1/events` — cursor paginator (JSON).
     ///
     /// [`EventListParams::event_name`] is **required** (compile-enforced) —
-    /// exactly one of the six canonical families per request, so every page
+    /// exactly one of the seven canonical families per request, so every page
     /// is homogeneous and each record deserializes into the matching typed
     /// [`Event`] variant (envelope + nested typed payload). Rows whose
     /// `event_name` this SDK build doesn't recognise surface as

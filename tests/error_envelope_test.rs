@@ -172,6 +172,7 @@ async fn a_caller_supplied_user_agent_is_not_overwritten() {
                         .into_iter()
                         .collect(),
                 ),
+                ..Default::default()
             })
             .build()
             .unwrap(),

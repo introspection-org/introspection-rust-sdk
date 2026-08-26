@@ -1,10 +1,8 @@
-//! `client.experiments` (CP) — experiment lookup + lifecycle +
+//! `client.experiments` (CP) — experiment CRUD + lifecycle +
 //! `experiment(id, project).run()` to open a [`crate::Runner`].
 //!
-//! Lookup and lifecycle only. A runner brackets its own execution — it
-//! resolves the experiment, then `start` / `end` / `cancel` around the work
-//! it is being measured on. Defining an experiment is a project-authoring
-//! act and lives in the CLI.
+//! Create and update accept exact Control Plane wire documents so its schema
+//! remains authoritative.
 
 use std::sync::Arc;
 
@@ -50,6 +48,37 @@ impl Experiments {
                 },
             )
             .await
+    }
+
+    pub async fn create<T: Serialize>(&self, document: &T) -> ApiResult<Experiment> {
+        self.http.post_json("/v1/experiments", document).await
+    }
+
+    pub async fn update<T: Serialize>(
+        &self,
+        experiment_id: Uuid,
+        project: impl Into<StringOrUuid>,
+        document: &T,
+    ) -> ApiResult<Experiment> {
+        let path = format!(
+            "/v1/experiments/{}?project={}",
+            experiment_id,
+            encode_project(&project.into())
+        );
+        self.http.patch_json(&path, document).await
+    }
+
+    pub async fn delete(
+        &self,
+        experiment_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<()> {
+        let path = format!(
+            "/v1/experiments/{}?project={}",
+            experiment_id,
+            encode_project(&project.into())
+        );
+        self.http.delete_empty(&path).await
     }
 
     pub fn handle(
