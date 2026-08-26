@@ -162,7 +162,7 @@ impl Runner {
     }
 
     /// `runner.events.*` — Data-Plane telemetry reads over `GET /v1/events`
-    /// (append-only `otel_logs`; typed six-family read, `event_name`
+    /// (append-only `otel_logs`; typed seven-family read, `event_name`
     /// required). Runner-scoped (DP bearer + `events:read`). Cheap clone.
     pub fn events(&self) -> Events {
         Events::new(self.dp_http())

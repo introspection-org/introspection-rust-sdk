@@ -2,7 +2,7 @@
 //!
 //! - [`Runtimes`] — read and resolve `/v1/runtimes`; obtain a
 //!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()`.
-//! - [`Experiments`] — `GET /v1/experiments` lookup plus lifecycle
+//! - [`Experiments`] — `/v1/experiments` CRUD plus run lifecycle
 //!   (`/start` / `/end` / `/cancel`); obtain an [`ExperimentHandle`]
 //!   via `client.experiment(id, project)` for `.run()`.
 //! - [`Recipes`] — `GET /v1/recipes` lookup. Recipes describe a

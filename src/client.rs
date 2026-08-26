@@ -18,6 +18,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::api::http::{HttpClient, HttpConfig};
+use crate::api::telemetry::Events;
 use crate::dev_target;
 use crate::resources::{
     Annotations, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes, RuntimeHandle,
@@ -62,6 +63,7 @@ pub struct IntrospectionClient {
     connectors: Connectors,
     annotations: Annotations,
     project_labels: ProjectLabels,
+    events: Events,
 }
 
 impl IntrospectionClient {
@@ -133,7 +135,8 @@ impl IntrospectionClient {
             recipes: Recipes::new(cp_http.clone()),
             connectors: Connectors::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
-            project_labels: ProjectLabels::new(dp_http),
+            project_labels: ProjectLabels::new(dp_http.clone()),
+            events: Events::new(dp_http),
         })
     }
 
@@ -155,6 +158,11 @@ impl IntrospectionClient {
 
     pub fn project_labels(&self) -> &ProjectLabels {
         &self.project_labels
+    }
+
+    /// Direct Data Plane event reads using this client's project token.
+    pub fn events(&self) -> &Events {
+        &self.events
     }
 
     /// `/v1/connectors` CRUD, its nested `connections`, and `authorize()` —

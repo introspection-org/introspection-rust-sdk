@@ -62,6 +62,8 @@ pub struct AnnotationListParams {
     #[serde(flatten)]
     pub pagination: PaginationParams,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_total: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub annotated_by_member_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignee_member_id: Option<Uuid>,
@@ -140,6 +142,35 @@ impl Annotations {
     pub fn list(&self, params: &AnnotationListParams) -> Paginator<AnnotationState> {
         Paginator::new(self.dp_http.clone(), "/v1/annotations", params)
             .expect("AnnotationListParams must serialize to an object")
+    }
+
+    /// Resolve optional active Business-member emails before constructing the
+    /// folded annotation-state paginator.
+    pub async fn list_by_email(
+        &self,
+        mut params: AnnotationListParams,
+        annotated_by_email: Option<String>,
+        assigned_to_email: Option<String>,
+    ) -> ApiResult<Paginator<AnnotationState>> {
+        if params.annotated_by_member_id.is_some() && annotated_by_email.is_some() {
+            return Err(validation(
+                "Use annotated_by_member_id or annotated_by_email, not both",
+                "conflicting_annotation_annotator_filters",
+            ));
+        }
+        if params.assignee_member_id.is_some() && assigned_to_email.is_some() {
+            return Err(validation(
+                "Use assignee_member_id or assigned_to_email, not both",
+                "conflicting_annotation_assignee_filters",
+            ));
+        }
+        if let Some(email) = annotated_by_email {
+            params.annotated_by_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
+        }
+        if let Some(email) = assigned_to_email {
+            params.assignee_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
+        }
+        Ok(self.list(&params))
     }
 
     /// Append exactly one mutation. Label and reviewer vectors are complete snapshots.

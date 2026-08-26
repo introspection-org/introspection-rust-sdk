@@ -6,8 +6,8 @@ use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
     AdvancedOptions, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationTarget, Annotations, ClientConfig, IntrospectionClient, ProjectLabelCreate,
-    ProjectLabelUpdate, ProjectLabels,
+    AnnotationTarget, Annotations, ClientConfig, Event, EventListParams, IntrospectionClient,
+    IntrospectionEventName, ProjectLabelCreate, ProjectLabelUpdate, ProjectLabels,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -80,6 +80,90 @@ async fn lists_folded_annotation_state_with_filters() {
     assert_eq!(
         stream.next().await.unwrap().unwrap().labels,
         vec!["needs-review"]
+    );
+}
+
+#[tokio::test]
+async fn resolves_email_list_filter_and_requests_total() {
+    let cp = MockServer::start().await;
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/members"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{"id": MEMBER_ID, "email": "expert@example.com", "is_deactivated": false}],
+            "count": 1, "next": null
+        })))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations"))
+        .and(query_param("assignee_member_id", MEMBER_ID))
+        .and(query_param("include_total", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [annotation()], "count": 1, "total_count": 1, "next": null
+        })))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let annotations = Annotations::new(http(&cp), http(&dp));
+    let mut page = annotations
+        .list_by_email(
+            AnnotationListParams {
+                include_total: Some(true),
+                ..Default::default()
+            },
+            None,
+            Some("expert@example.com".into()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page.next_page().await.unwrap().unwrap().total_count,
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn top_level_events_decode_annotation_payload_on_the_data_plane() {
+    let cp = MockServer::start().await;
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/events"))
+        .and(query_param("event_name", "introspection.annotation"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{
+                "id": EVENT_ID,
+                "timestamp": "2026-08-25T12:00:00Z",
+                "event_name": "introspection.annotation",
+                "trace_id": TRACE_ID,
+                "span_id": SPAN_ID,
+                "payload": {"member_id": MEMBER_ID, "comment": "Strong evidence"}
+            }],
+            "count": 1, "next": null
+        })))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let client = IntrospectionClient::new(ClientConfig::with_token("intro_test").advanced(
+        AdvancedOptions {
+            base_api_url: Some(cp.uri()),
+            dp_url: Some(dp.uri()),
+            ..Default::default()
+        },
+    ))
+    .unwrap();
+    let mut events = client
+        .events()
+        .list(&EventListParams::new(IntrospectionEventName::Annotation))
+        .unwrap();
+    let event = events.next().await.unwrap().unwrap();
+    let Event::Annotation(annotation) = event else {
+        panic!("expected annotation event")
+    };
+    assert_eq!(
+        annotation.payload.comment.as_deref(),
+        Some("Strong evidence")
     );
 }
 

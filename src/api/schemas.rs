@@ -2254,9 +2254,9 @@ impl ConversationListParams {
     }
 }
 
-// ----- events: typed six-family read (`GET /v1/events`) ----------------------
+// ----- events: typed seven-family read (`GET /v1/events`) --------------------
 
-/// The six canonical platform event families served by `GET /v1/events`.
+/// The seven canonical platform event families served by `GET /v1/events`.
 ///
 /// The events read is a **closed, typed set**: `event_name` is required on
 /// every list read — exactly one family per request — so a response page is
@@ -2267,6 +2267,7 @@ impl ConversationListParams {
 /// remains aggregable via `POST /v1/metrics`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntrospectionEventName {
+    Annotation,
     Feedback,
     Observation,
     ObservationClusteringRun,
@@ -2282,6 +2283,7 @@ impl IntrospectionEventName {
     /// On-the-wire dotted family name.
     pub fn as_str(&self) -> &str {
         match self {
+            Self::Annotation => "introspection.annotation",
             Self::Feedback => "introspection.feedback",
             Self::Observation => "introspection.observation",
             Self::ObservationClusteringRun => "introspection.observation_clustering.run",
@@ -2303,6 +2305,7 @@ impl<'de> Deserialize<'de> for IntrospectionEventName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
+            "introspection.annotation" => Self::Annotation,
             "introspection.feedback" => Self::Feedback,
             "introspection.observation" => Self::Observation,
             "introspection.observation_clustering.run" => Self::ObservationClusteringRun,
@@ -2348,7 +2351,7 @@ pub struct TypedEvent<P> {
     pub experiment_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipe_git_commit_sha: Option<String>,
-    /// Family detail — one of the six `*Payload` types, fixed by the
+    /// Family detail — one of the seven `*Payload` types, fixed by the
     /// [`Event`] variant.
     pub payload: P,
 }
@@ -2507,6 +2510,18 @@ pub struct FeedbackPayload {
     pub properties: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// `introspection.annotation` payload — one member-authored mutation.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AnnotationPayload {
+    pub member_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_member_ids: Option<Vec<Uuid>>,
+}
+
 /// `introspection.judgement` payload — mirrors the runtime-agent judges
 /// emitter (`introspection.judgement.*` / `introspection.judge.*` attributes).
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -2532,6 +2547,7 @@ pub type PatternEvent = TypedEvent<PatternPayload>;
 pub type PatternAssignmentEvent = TypedEvent<PatternAssignmentPayload>;
 pub type ClusteringRunEvent = TypedEvent<ClusteringRunPayload>;
 pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
+pub type AnnotationEvent = TypedEvent<AnnotationPayload>;
 pub type JudgementEvent = TypedEvent<JudgementPayload>;
 
 /// One event from `GET /v1/events` — a discriminated union of the six
@@ -2545,6 +2561,8 @@ pub type JudgementEvent = TypedEvent<JudgementPayload>;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "event_name")]
 pub enum Event {
+    #[serde(rename = "introspection.annotation")]
+    Annotation(AnnotationEvent),
     #[serde(rename = "introspection.feedback")]
     Feedback(FeedbackEvent),
     #[serde(rename = "introspection.observation")]
@@ -2567,6 +2585,7 @@ impl Event {
     /// The canonical family, or `None` for [`Event::Unknown`] rows.
     pub fn event_name(&self) -> Option<IntrospectionEventName> {
         match self {
+            Self::Annotation(_) => Some(IntrospectionEventName::Annotation),
             Self::Feedback(_) => Some(IntrospectionEventName::Feedback),
             Self::Observation(_) => Some(IntrospectionEventName::Observation),
             Self::ObservationClusteringRun(_) => {
