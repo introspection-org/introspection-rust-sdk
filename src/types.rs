@@ -44,6 +44,10 @@ pub struct AdvancedOptions {
     /// If not provided, uses `INTROSPECTION_BASE_API_URL` or default.
     pub base_api_url: Option<String>,
 
+    /// Data Plane base URL for project-level resources. Defaults to
+    /// `base_api_url`; service-account construction fills it from `dp_url`.
+    pub dp_url: Option<String>,
+
     /// Additional HTTP headers to include in requests.
     pub additional_headers: Option<HashMap<String, String>>,
 }

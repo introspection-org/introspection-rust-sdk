@@ -278,6 +278,13 @@ impl HttpClient {
         decode_json(res).await
     }
 
+    /// POST a JSON body and accept an empty success response.
+    pub async fn post_json_empty<B: Serialize>(&self, path: &str, body: &B) -> ApiResult<()> {
+        self.send_retrying(false, || self.inner.post(self.url(path)).json(body))
+            .await?;
+        Ok(())
+    }
+
     /// PATCH a JSON body, decode JSON response.
     pub async fn patch_json<B: Serialize, R: serde::de::DeserializeOwned>(
         &self,

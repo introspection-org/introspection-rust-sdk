@@ -21,11 +21,13 @@
 //! administering projects, repositories, keys, and bindings — lives in the
 //! CLI, not here.
 
+pub mod annotations;
 pub mod connectors;
 pub mod experiments;
 pub mod recipes;
 pub mod runtimes;
 
+pub use annotations::{Annotations, ProjectLabels};
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
 pub use recipes::Recipes;

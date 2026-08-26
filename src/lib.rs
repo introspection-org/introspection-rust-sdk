@@ -147,8 +147,13 @@ pub use auth::{
     OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
+pub use resources::annotations::{
+    AnnotationEventOptions, AnnotationListParams, AnnotationMutation, AnnotationState,
+    AnnotationTarget, ProjectLabel, ProjectLabelCreate, ProjectLabelListParams, ProjectLabelUpdate,
+};
 pub use resources::{
-    Connections, Connectors, ExperimentHandle, Experiments, Recipes, RuntimeHandle, Runtimes,
+    Annotations, Connections, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes,
+    RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
