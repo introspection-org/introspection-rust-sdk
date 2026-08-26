@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, COOKIE};
 use reqwest::{Response, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
@@ -40,16 +40,6 @@ pub struct HttpConfig {
 impl HttpConfig {
     fn build_default_headers(&self) -> ApiResult<HeaderMap> {
         let mut h = HeaderMap::new();
-        let auth = format!("Bearer {}", self.token);
-        h.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&auth).map_err(|_| {
-                IntrospectionAPIError::InvalidConfig(
-                    "INTROSPECTION_TOKEN contains characters that are not valid in an HTTP header"
-                        .to_string(),
-                )
-            })?,
-        );
         for (k, v) in &self.additional_headers {
             let name = HeaderName::from_bytes(k.as_bytes()).map_err(|_| {
                 IntrospectionAPIError::InvalidConfig(format!("invalid header name `{k}`"))
@@ -58,6 +48,18 @@ impl HttpConfig {
                 IntrospectionAPIError::InvalidConfig(format!("invalid header value for `{k}`"))
             })?;
             h.insert(name, value);
+        }
+        if !h.contains_key(COOKIE) {
+            let auth = format!("Bearer {}", self.token);
+            h.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&auth).map_err(|_| {
+                    IntrospectionAPIError::InvalidConfig(
+                        "INTROSPECTION_TOKEN contains characters that are not valid in an HTTP header"
+                            .to_string(),
+                    )
+                })?,
+            );
         }
         // `entry`, not `insert`: additional_headers is applied above, and an
         // unconditional insert silently discarded a caller-supplied

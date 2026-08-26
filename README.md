@@ -178,8 +178,18 @@ an empty vector clears that dimension.
 
 ```rust
 use introspection_sdk::{
-    AnnotationEventOptions, AnnotationMutation, AnnotationTarget,
+    AdvancedOptions, AnnotationEventOptions, AnnotationMutation,
+    AnnotationTarget, ClientConfig, IntrospectionClient,
 };
+
+let client = IntrospectionClient::new(
+    ClientConfig::with_token(member_access_token).advanced(AdvancedOptions {
+        base_api_url: Some("https://api.introspection.dev".into()),
+        dp_url: Some("https://dp.example".into()),
+        cp_session: Some(encoded_member_session),
+        ..Default::default()
+    }),
+)?;
 
 client.annotations().create(
     AnnotationTarget {

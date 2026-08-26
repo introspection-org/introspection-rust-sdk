@@ -100,10 +100,14 @@ impl IntrospectionClient {
         // claim to carry a target.
         let api_headers =
             dev_target::with_dev_target(advanced.additional_headers.clone().unwrap_or_default());
+        let mut cp_headers = api_headers.clone();
+        if let Some(cp_session) = advanced.cp_session.as_ref() {
+            cp_headers.insert("Cookie".into(), format!("intro_cp_session={cp_session}"));
+        }
         let http_cfg = HttpConfig {
             api_url: base_api_url,
             token: token.clone(),
-            additional_headers: api_headers.clone(),
+            additional_headers: cp_headers,
             timeout: Duration::from_secs(types::defaults::API_TIMEOUT_SECS),
             max_retries: types::defaults::API_MAX_RETRIES,
             retry_base: Duration::from_millis(types::defaults::API_RETRY_BASE_MS),
@@ -226,6 +230,7 @@ impl IntrospectionClient {
                 .and_then(|a| a.base_api_url.clone())
                 .or(Some(base_api_url)),
             dp_url: advanced.as_ref().and_then(|a| a.dp_url.clone()).or(dp_url),
+            cp_session: advanced.as_ref().and_then(|a| a.cp_session.clone()),
             additional_headers: advanced.and_then(|a| a.additional_headers),
         };
         Self::new(ClientConfig::with_token(token.access_token).advanced(advanced))

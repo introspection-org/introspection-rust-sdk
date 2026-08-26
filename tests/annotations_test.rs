@@ -11,7 +11,7 @@ use introspection_sdk::{
 };
 use serde_json::json;
 use uuid::Uuid;
-use wiremock::matchers::{body_json, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TRACE_ID: &str = "0af7651916cd43dd8448eb211c80319c";
@@ -212,4 +212,59 @@ async fn client_routes_annotations_to_the_configured_data_plane() {
     .unwrap();
     let mut page = client.annotations().list(&AnnotationListParams::default());
     assert!(page.next_page().await.unwrap().unwrap().records.is_empty());
+}
+
+#[tokio::test]
+async fn member_session_is_used_only_for_reviewer_resolution() {
+    let cp = MockServer::start().await;
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/members"))
+        .and(header("cookie", "intro_cp_session=encoded-session"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{
+                "id": MEMBER_ID,
+                "email": "expert@example.com",
+                "is_deactivated": false
+            }],
+            "count": 1,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .and(header("authorization", "Bearer member-token"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let client = IntrospectionClient::new(ClientConfig::with_token("member-token").advanced(
+        AdvancedOptions {
+            base_api_url: Some(cp.uri()),
+            dp_url: Some(dp.uri()),
+            cp_session: Some("encoded-session".into()),
+            ..Default::default()
+        },
+    ))
+    .unwrap();
+
+    client
+        .annotations()
+        .create(
+            AnnotationTarget {
+                trace_id: TRACE_ID.into(),
+                span_id: SPAN_ID.into(),
+            },
+            AnnotationMutation::ReviewerEmails(vec!["expert@example.com".into()]),
+            AnnotationEventOptions::default(),
+        )
+        .await
+        .unwrap();
+
+    let cp_requests = cp.received_requests().await.unwrap();
+    assert!(!cp_requests[0].headers.contains_key("authorization"));
+    let dp_requests = dp.received_requests().await.unwrap();
+    assert!(!dp_requests[0].headers.contains_key("cookie"));
 }

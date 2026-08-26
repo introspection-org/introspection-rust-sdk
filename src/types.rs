@@ -48,6 +48,11 @@ pub struct AdvancedOptions {
     /// `base_api_url`; service-account construction fills it from `dp_url`.
     pub dp_url: Option<String>,
 
+    /// Encoded `intro_cp_session` cookie for member-authored Control Plane
+    /// operations such as resolving reviewer emails. It is never sent to the
+    /// Data Plane.
+    pub cp_session: Option<String>,
+
     /// Additional HTTP headers to include in requests.
     pub additional_headers: Option<HashMap<String, String>>,
 }
