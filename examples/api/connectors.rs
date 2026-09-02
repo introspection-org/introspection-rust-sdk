@@ -98,6 +98,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
         )
         .await?;
+    // For Pipedream, select an app with
+    // `client.connectors().list_apps(connector.id, Some("sheets"), Some(5))`
+    // and pass `app: Some("google_sheets".into())`. Enable
+    // `allow_progressive_scopes` only if the runtime tolerates partial grants.
     println!("install link -> {}", install.authorize_url);
     println!(
         "  valid for {}s (until {})",

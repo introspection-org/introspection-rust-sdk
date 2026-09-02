@@ -196,7 +196,7 @@ pub use schemas::{
     Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
     ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionMissionConstraints,
     ConnectionStatus, ConnectionSubjectType, ConnectionToken, ConnectionTokenParams,
-    ConnectionTokenResult, Connector, ConnectorAuthMode, ConnectorAuthorization,
+    ConnectionTokenResult, Connector, ConnectorApp, ConnectorAuthMode, ConnectorAuthorization,
     ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorStatus,
     ConnectorUpdateParams, Conversation, ConversationAgent, ConversationCost,
     ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,

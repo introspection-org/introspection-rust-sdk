@@ -28,8 +28,8 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
     Connection, ConnectionCreateParams, ConnectionTokenParams, ConnectionTokenResult, Connector,
-    ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams,
-    ConnectorUpdateParams, PaginationParams,
+    ConnectorApp, ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorListParams, ConnectorUpdateParams, PaginationParams,
 };
 
 /// `client.connectors.connections` — the authorized subjects under one
@@ -159,6 +159,31 @@ impl Connectors {
         struct Q {}
         let path = format!("/v1/connectors/{}", connector_id);
         self.http.get_json(&path, &Q {}).await
+    }
+
+    /// `GET /v1/connectors/{id}/apps` — search the provider application
+    /// catalogue (currently available for Pipedream connectors).
+    pub async fn list_apps(
+        &self,
+        connector_id: Uuid,
+        query: Option<&str>,
+        limit: Option<u32>,
+    ) -> ApiResult<Vec<ConnectorApp>> {
+        #[derive(Serialize)]
+        struct Query<'a> {
+            #[serde(rename = "q", skip_serializing_if = "Option::is_none")]
+            query: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            limit: Option<u32>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Response {
+            data: Vec<ConnectorApp>,
+        }
+
+        let path = format!("/v1/connectors/{}/apps", connector_id);
+        let response: Response = self.http.get_json(&path, &Query { query, limit }).await?;
+        Ok(response.data)
     }
 
     /// `PATCH /v1/connectors/{id}` — partial update.
