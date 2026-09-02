@@ -1037,6 +1037,7 @@ pub enum ConnectorAuthMode {
     /// `"static"` on the wire.
     Static,
     OauthStored,
+    ClientCredentials,
     IdentityAssertion,
     FederatedExchange,
     PersonAuthorized,
@@ -1050,6 +1051,7 @@ impl ConnectorAuthMode {
         match self {
             Self::Static => "static",
             Self::OauthStored => "oauth_stored",
+            Self::ClientCredentials => "client_credentials",
             Self::IdentityAssertion => "identity_assertion",
             Self::FederatedExchange => "federated_exchange",
             Self::PersonAuthorized => "person_authorized",
@@ -1063,6 +1065,7 @@ impl From<&str> for ConnectorAuthMode {
         match s {
             "static" => Self::Static,
             "oauth_stored" => Self::OauthStored,
+            "client_credentials" => Self::ClientCredentials,
             "identity_assertion" => Self::IdentityAssertion,
             "federated_exchange" => Self::FederatedExchange,
             "person_authorized" => Self::PersonAuthorized,

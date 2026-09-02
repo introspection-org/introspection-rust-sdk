@@ -98,8 +98,12 @@ flate2 = "1"
 dotenvy = "0.15"
 
 [[example]]
-name = "connectors"
-path = "examples/api/connectors.rs"
+name = "connectors-slack"
+path = "examples/api/connectors_slack.rs"
+
+[[example]]
+name = "connectors-pipedream"
+path = "examples/api/connectors_pipedream.rs"
 
 [[example]]
 name = "runtimes"

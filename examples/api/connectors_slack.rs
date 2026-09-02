@@ -10,7 +10,7 @@
 //! INTROSPECTION_TOKEN=intro_xxx \
 //! SLACK_CLIENT_ID=... SLACK_CLIENT_SECRET=... \
 //! INTROSPECTION_RUNTIME=support-agent \
-//!   cargo run --example connectors
+//!   cargo run --example connectors-slack
 //! ```
 //!
 //! Optional: `REVOKE_FIRST_CONNECTION=1` revokes the first listed connection.
