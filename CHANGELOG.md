@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.15.0...v0.16.0) (2026-09-02)
+
+
+### Features
+
+* Add span annotations and project labels client ([#82](https://github.com/introspection-org/introspection-rust-sdk/issues/82)) ([c782754](https://github.com/introspection-org/introspection-rust-sdk/commit/c782754bf473cd42dbae679b8b8d4421c391fd14))
+* **connectors:** support Pipedream applications ([#83](https://github.com/introspection-org/introspection-rust-sdk/issues/83)) ([8ab6bdf](https://github.com/introspection-org/introspection-rust-sdk/commit/8ab6bdfda964e5c9f1faafcc9318f0b9f7a433ef))
+* **conversations:** add conversation metadata ([#81](https://github.com/introspection-org/introspection-rust-sdk/issues/81)) ([1339423](https://github.com/introspection-org/introspection-rust-sdk/commit/13394236881f2c698a2021c28d3f9fa6e2296976))
+
+
+### Bug Fixes
+
+* expose conversation task titles ([8d53a99](https://github.com/introspection-org/introspection-rust-sdk/commit/8d53a99936ea8628cd5054f120b90f243c4bc5fc))
+
 ## [0.15.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.14.0...v0.15.0) (2026-08-13)
 
 
