@@ -265,6 +265,59 @@ async fn authorize_sends_only_the_connector_when_given_nothing_else() {
 }
 
 #[tokio::test]
+async fn pipedream_apps_and_progressive_scope_authorization() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/connectors/{CONNECTOR_ID}/apps")))
+        .and(query_param("q", "sheets"))
+        .and(query_param("limit", "5"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{
+                "slug": "google_sheets",
+                "name": "Google Sheets",
+                "icon_url": "https://assets.example/sheets.png",
+                "auth_type": "oauth"
+            }]
+        })))
+        .mount(&server)
+        .await;
+    let connectors = Connectors::new(build_http(&server));
+    let apps = connectors
+        .list_apps(connector_id(), Some("sheets"), Some(5))
+        .await
+        .unwrap();
+    assert_eq!(apps[0].slug, "google_sheets");
+
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/authorize"))
+        .and(body_json(json!({
+            "connector_id": CONNECTOR_ID,
+            "runtime": "coding-agent",
+            "app": "google_sheets",
+            "allow_progressive_scopes": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorize_url": "https://pipedream.com/_static/connect.html?app=google_sheets",
+            "expires_in": 600,
+            "expires_at": "2026-08-08T20:10:00Z"
+        })))
+        .mount(&server)
+        .await;
+    connectors
+        .authorize(
+            connector_id(),
+            &ConnectorAuthorizeParams {
+                runtime: Some("coding-agent".into()),
+                app: Some("google_sheets".to_string()),
+                allow_progressive_scopes: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn authorize_surfaces_the_missing_runtime_detail() {
     let server = MockServer::start().await;
     let detail = "`runtime` is required for a slack connector — it names the agent that replies";

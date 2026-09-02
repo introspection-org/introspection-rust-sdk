@@ -458,6 +458,8 @@ fn sdk_surface_matches_the_published_reference() {
         subject: Some(ConnectionBrokerSubjectType::App),
         return_url: Some("https://app.example/done".into()),
         expires_in: Some(3600),
+        app: None,
+        allow_progressive_scopes: false,
         identity: Some(RunnerIdentity {
             user_id: Some("u_demo".into()),
             anonymous_id: None,

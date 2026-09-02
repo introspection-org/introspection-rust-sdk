@@ -1037,6 +1037,7 @@ pub enum ConnectorAuthMode {
     /// `"static"` on the wire.
     Static,
     OauthStored,
+    ClientCredentials,
     IdentityAssertion,
     FederatedExchange,
     PersonAuthorized,
@@ -1050,6 +1051,7 @@ impl ConnectorAuthMode {
         match self {
             Self::Static => "static",
             Self::OauthStored => "oauth_stored",
+            Self::ClientCredentials => "client_credentials",
             Self::IdentityAssertion => "identity_assertion",
             Self::FederatedExchange => "federated_exchange",
             Self::PersonAuthorized => "person_authorized",
@@ -1063,6 +1065,7 @@ impl From<&str> for ConnectorAuthMode {
         match s {
             "static" => Self::Static,
             "oauth_stored" => Self::OauthStored,
+            "client_credentials" => Self::ClientCredentials,
             "identity_assertion" => Self::IdentityAssertion,
             "federated_exchange" => Self::FederatedExchange,
             "person_authorized" => Self::PersonAuthorized,
@@ -1507,6 +1510,13 @@ impl ConnectionCreateParams {
 /// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ConnectorAuthorizeParams {
+    /// Provider application slug (required for Pipedream connectors).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// Allow consent to a supported subset of the application's scopes.
+    /// Defaults to `false`, matching Pipedream's default.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_progressive_scopes: bool,
     /// Runtime selector (slug or runtime group id).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<StringOrUuid>,
@@ -1526,6 +1536,20 @@ pub struct ConnectorAuthorizeParams {
     /// `None` attributes the grant to the authenticated principal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<RunnerIdentity>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// An application available from a connector's provider catalogue.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectorApp {
+    pub slug: String,
+    pub name: String,
+    pub icon_url: Option<String>,
+    pub description: Option<String>,
+    pub auth_type: Option<String>,
 }
 
 /// Response of `POST /v1/oauth/connections/authorize` — a freshly minted
