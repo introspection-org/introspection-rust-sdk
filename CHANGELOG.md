@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.18.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.17.0...v0.18.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* `Repositories::list(project)` is now `Repositories::list(&RepositoryListParams)`, and every `*ListParams` struct has a new `filters` field (exhaustive struct literals need `filters: None`; `..Default::default()` is unaffected).
+
+### Features
+
+* repositories list takes params with a slug filter; every list accepts passthrough filters ([#86](https://github.com/introspection-org/introspection-rust-sdk/issues/86)) ([5fdb8fa](https://github.com/introspection-org/introspection-rust-sdk/commit/5fdb8fad469a95c5abce1cee173a3f492669074b))
+
 ## [0.17.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.16.0...v0.17.0) (2026-09-17)
 
 
