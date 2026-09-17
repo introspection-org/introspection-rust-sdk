@@ -11,8 +11,8 @@
 use std::{collections::HashMap, error::Error};
 
 use introspection_sdk::{
-    ClientConfig, ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams,
-    IntrospectionClient,
+    ClientConfig, ConnectorAppListParams, ConnectorAuthMode, ConnectorAuthorizeParams,
+    ConnectorCreateParams, IntrospectionClient,
 };
 use uuid::Uuid;
 
@@ -54,7 +54,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let applications = client
         .connectors()
-        .list_apps(connector_id, Some(&requested_app), Some(5))
+        .list_apps(
+            connector_id,
+            &ConnectorAppListParams {
+                query: Some(requested_app.clone()),
+                limit: Some(5),
+                ..Default::default()
+            },
+        )
         .await?;
     let application = applications
         .into_iter()

@@ -27,9 +27,9 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Connection, ConnectionCreateParams, ConnectionTokenParams, ConnectionTokenResult, Connector,
-    ConnectorApp, ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams,
-    ConnectorListParams, ConnectorUpdateParams, PaginationParams,
+    Connection, ConnectionCreateParams, ConnectionListParams, ConnectionTokenParams,
+    ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthorization,
+    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams,
 };
 
 /// `client.connectors.connections` — the authorized subjects under one
@@ -50,10 +50,10 @@ impl Connections {
     }
 
     /// `GET /v1/connectors/{connector_id}/connections` — paginated.
-    pub fn list(&self, connector_id: Uuid, params: &PaginationParams) -> Paginator<Connection> {
+    pub fn list(&self, connector_id: Uuid, params: &ConnectionListParams) -> Paginator<Connection> {
         let path = format!("/v1/connectors/{}/connections", connector_id);
         Paginator::new(self.http.clone(), path, params)
-            .expect("PaginationParams must serialize to a JSON object")
+            .expect("ConnectionListParams must serialize to a JSON object")
     }
 
     /// `POST /v1/connectors/{connector_id}/connections` — registered mode:
@@ -166,23 +166,15 @@ impl Connectors {
     pub async fn list_apps(
         &self,
         connector_id: Uuid,
-        query: Option<&str>,
-        limit: Option<u32>,
+        params: &ConnectorAppListParams,
     ) -> ApiResult<Vec<ConnectorApp>> {
-        #[derive(Serialize)]
-        struct Query<'a> {
-            #[serde(rename = "q", skip_serializing_if = "Option::is_none")]
-            query: Option<&'a str>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            limit: Option<u32>,
-        }
         #[derive(serde::Deserialize)]
         struct Response {
             data: Vec<ConnectorApp>,
         }
 
         let path = format!("/v1/connectors/{}/apps", connector_id);
-        let response: Response = self.http.get_json(&path, &Query { query, limit }).await?;
+        let response: Response = self.http.get_json(&path, params).await?;
         Ok(response.data)
     }
 

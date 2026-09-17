@@ -48,18 +48,18 @@ use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
     AgentInfo, ConnectionBrokerSubjectType, ConnectionCreateParams, ConnectionCreateSubjectType,
-    ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams,
-    ConnectorStatus, ConnectorUpdateParams, ConversationExportParams, ConversationItemInclude,
-    ConversationItemListParams, ConversationListParams, ConversationResolution,
-    ConversationSentiment, ConversationStatus, Dimension, Event, EventListParams,
-    ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
-    FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec,
-    MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, Repository,
-    RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
-    RunnerIdentity, RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType,
-    SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind,
-    TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus,
-    TimeDimension,
+    ConnectionListParams, ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorListParams, ConnectorStatus, ConnectorUpdateParams, ConversationExportParams,
+    ConversationItemInclude, ConversationItemListParams, ConversationListParams,
+    ConversationResolution, ConversationSentiment, ConversationStatus, Dimension, Event,
+    EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File,
+    FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter,
+    MetricSpec, MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams,
+    Repository, RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus,
+    ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate, ShareListParams,
+    ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate,
+    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind,
+    TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -849,9 +849,12 @@ fn sdk_surface_matches_the_published_reference() {
         ),
         compare(
             "connection list filters — GET /v1/connectors/{id}/connections query parameters",
-            wire_fields(&PaginationParams {
-                limit: Some(1),
-                next: Some("cursor".into()),
+            wire_fields(&ConnectionListParams {
+                pagination: PaginationParams {
+                    limit: Some(1),
+                    next: Some("cursor".into()),
+                },
+                filters: None,
             }),
             query_parameters(
                 &cp_spec,

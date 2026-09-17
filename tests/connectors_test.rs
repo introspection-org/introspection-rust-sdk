@@ -12,10 +12,10 @@ use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
 use introspection_sdk::{
     ConnectionBrokerSubjectType, ConnectionCreateParams, ConnectionCreateSubjectType,
-    ConnectionMissionConstraints, ConnectionSubjectType, ConnectionTokenParams,
-    ConnectionTokenResult, Connections, ConnectorAuthMode, ConnectorAuthorizeParams,
-    ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams, Connectors,
-    PaginationParams, RunnerIdentity,
+    ConnectionListParams, ConnectionMissionConstraints, ConnectionSubjectType,
+    ConnectionTokenParams, ConnectionTokenResult, Connections, ConnectorAppListParams,
+    ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams,
+    ConnectorUpdateParams, Connectors, PaginationParams, RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -283,7 +283,14 @@ async fn pipedream_apps_and_progressive_scope_authorization() {
         .await;
     let connectors = Connectors::new(build_http(&server));
     let apps = connectors
-        .list_apps(connector_id(), Some("sheets"), Some(5))
+        .list_apps(
+            connector_id(),
+            &ConnectorAppListParams {
+                query: Some("sheets".into()),
+                limit: Some(5),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(apps[0].slug, "google_sheets");
@@ -394,8 +401,11 @@ async fn connections_list_and_create_use_the_nested_path() {
 
     let connections = Connections::new(build_http(&server));
 
-    let params = PaginationParams {
-        limit: Some(25),
+    let params = ConnectionListParams {
+        pagination: PaginationParams {
+            limit: Some(25),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let listed: Vec<_> = connections.list(connector_id(), &params).collect().await;

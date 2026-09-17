@@ -678,6 +678,18 @@ pub struct FileListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Parameters for `GET /v1/files/{id}/versions`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FileVersionListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
 // ----- SSE -------------------------------------------------------------------
 
 /// A single Server-Sent Event frame.
@@ -1560,6 +1572,18 @@ pub struct ConnectorListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Parameters for `GET /v1/connectors/{connector_id}/connections`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectionListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
 /// `POST /v1/connectors` body. `name`, `provider`, and `auth_mode` are
 /// required; build with [`Self::new`] and struct-update syntax for the rest:
 /// `ConnectorCreateParams { slug: Some("slack-support".into()), ..ConnectorCreateParams::new(...) }`.
@@ -1752,6 +1776,23 @@ pub struct ConnectorAuthorizeParams {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Parameters for `GET /v1/connectors/{id}/apps`, the provider catalogue search.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectorAppListParams {
+    /// Free-text search over the catalogue (`q` on the wire).
+    #[serde(rename = "q", skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// An application available from a connector's provider catalogue.

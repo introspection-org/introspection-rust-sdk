@@ -14,10 +14,11 @@ use introspection_sdk::api::{
     ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
     ConversationItemInclude, ConversationItemListParams, ConversationListParams, Conversations,
     Event, EventListParams, Events, FileCreateText, FileListParams, FileUpdate, FileUpload,
-    FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError, IntrospectionEventName,
-    MetricSpec, Metrics, MetricsQuery, PaginationParams, ResumeEntry, ShareCreate, ShareListParams,
-    ShareResourceType, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt,
-    TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TrajectoryRecord,
+    FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError,
+    IntrospectionEventName, MetricSpec, Metrics, MetricsQuery, ResumeEntry, ShareCreate,
+    ShareListParams, ShareResourceType, Shares, SortDirection, TaskCreate, TaskKind,
+    TaskListParams, TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate,
+    Tasks, TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -563,7 +564,7 @@ async fn file_versions_list_and_get() {
         .mount(&server)
         .await;
 
-    let mut paginator = versions.list("abc", &PaginationParams::default());
+    let mut paginator = versions.list("abc", &FileVersionListParams::default());
     let page = paginator.next_page().await.unwrap().unwrap();
     assert_eq!(page.records.len(), 1);
     let one = versions.get("abc", "v1").await.unwrap();
