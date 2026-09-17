@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.18.0...v0.19.0) (2026-09-17)
+
+
+### Features
+
+* make every resource namespace's `new` public ([#88](https://github.com/introspection-org/introspection-rust-sdk/issues/88)) ([ae037cd](https://github.com/introspection-org/introspection-rust-sdk/commit/ae037cd60d680cc422ee5449e2b7e0faf2e62d34))
+
 ## [0.18.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.17.0...v0.18.0) (2026-09-17)
 
 
