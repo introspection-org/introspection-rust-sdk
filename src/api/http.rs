@@ -124,6 +124,16 @@ impl HttpClient {
     /// has to be on `inner` as a default header. `cfg.api_url`, `cfg.timeout`
     /// and the retry fields still govern every request. There is no
     /// token-empty check, which is also what lets a test fixture skip one.
+    ///
+    /// Wrap the result in `Arc` and hand it to a resource namespace's `new`
+    /// (e.g. `Repositories::new`, `Recipes::new`) to reach one resource
+    /// directly — without going through [`crate::IntrospectionClient`], whose
+    /// constructor demands a non-empty bearer token even for a caller (a CP
+    /// session-cookie flow, say) that authenticates entirely through
+    /// `additional_headers` here. Every resource namespace's `new` is `pub`
+    /// for exactly this; it is `#[doc(hidden)]` because it is not the
+    /// intended way to reach a resource with a bearer token in hand —
+    /// `IntrospectionClient` still is.
     pub fn from_parts(inner: reqwest::Client, cfg: HttpConfig) -> Self {
         Self {
             inner,

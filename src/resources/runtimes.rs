@@ -18,7 +18,8 @@ pub struct Runtimes {
 }
 
 impl Runtimes {
-    pub(crate) fn new(http: Arc<HttpClient>) -> Self {
+    #[doc(hidden)]
+    pub fn new(http: Arc<HttpClient>) -> Self {
         Self { http }
     }
 
@@ -95,7 +96,8 @@ pub struct RuntimeHandle {
 }
 
 impl RuntimeHandle {
-    pub(crate) fn new(http: Arc<HttpClient>, runtime_id: Uuid) -> Self {
+    #[doc(hidden)]
+    pub fn new(http: Arc<HttpClient>, runtime_id: Uuid) -> Self {
         Self { http, runtime_id }
     }
 
