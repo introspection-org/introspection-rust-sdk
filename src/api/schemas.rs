@@ -717,6 +717,135 @@ pub struct RecipeListParams {
     pub pagination: PaginationParams,
 }
 
+// ----- repositories (CP) -----------------------------------------------------
+
+/// Who serves a repository's Git, which decides how a client reaches it.
+/// `hosted` is served by the project's own data plane; `github` needs the
+/// installation the row's `integration_id` names. `Other` captures a provider
+/// the CP adds later so the rest of the record still reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RepositoryProvider {
+    #[default]
+    Github,
+    Hosted,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RepositoryProvider {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Github => "github",
+            Self::Hosted => "hosted",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for RepositoryProvider {
+    fn from(s: &str) -> Self {
+        match s {
+            "github" => Self::Github,
+            "hosted" => Self::Hosted,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RepositoryProvider {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RepositoryProvider {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Whether the hosted copy of a repository exists on its data plane.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RepositoryProvisioningStatus {
+    #[default]
+    Pending,
+    Ready,
+    Failed,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RepositoryProvisioningStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for RepositoryProvisioningStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "pending" => Self::Pending,
+            "ready" => Self::Ready,
+            "failed" => Self::Failed,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RepositoryProvisioningStatus {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RepositoryProvisioningStatus {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+fn default_branch() -> String {
+    "main".to_string()
+}
+
+/// A repository registered to a project — the Git source a recipe pins.
+/// Mirrors the CP `RepositoryResponse`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Repository {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    /// The GitHub App installation that reaches a `github` repository;
+    /// `None` for a hosted one.
+    #[serde(default)]
+    pub integration_id: Option<Uuid>,
+    /// Credential-free Git transport URL. Authentication comes from the
+    /// credential helper configured for its origin, never from the URL.
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub provider: RepositoryProvider,
+    #[serde(default = "default_branch")]
+    pub default_branch: String,
+    #[serde(default)]
+    pub provisioning_status: RepositoryProvisioningStatus,
+    #[serde(default)]
+    pub seed_template: Option<String>,
+    pub created_at: String,
+    #[serde(default)]
+    pub is_recipe_source: bool,
+}
+
 // ----- runtimes (CP) ---------------------------------------------------------
 
 /// How a Runtime acquires LLM provider credentials at session create —
@@ -772,12 +901,27 @@ pub struct Runtime {
     pub id: Uuid,
     pub org_id: Uuid,
     pub project_id: Uuid,
-    pub recipe_id: Uuid,
+    /// `None` until a recipe is pinned; the CP declares it nullable.
+    #[serde(default)]
+    pub recipe_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
     pub slug: String,
+    /// Environments this version serves (`development` / `staging` /
+    /// `production`). Empty when the CP omits it.
+    #[serde(default)]
+    pub environments: Vec<String>,
+    /// Set when the runtime has been withdrawn: it never resolves as the
+    /// active runtime for its environment, while in-flight sticky runs keep
+    /// using it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yanked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yanked_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3140,6 +3284,74 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn a_runtime_reads_its_yank_and_group_fields_and_a_null_recipe() {
+        let runtime: Runtime = serde_json::from_value(json!({
+            "id": "00000000-0000-0000-0000-000000000041",
+            "org_id": "00000000-0000-0000-0000-0000000000aa",
+            "project_id": "00000000-0000-0000-0000-0000000000bb",
+            "recipe_id": null,
+            "runtime_group_id": "00000000-0000-0000-0000-000000000042",
+            "created_by_member_id": "00000000-0000-0000-0000-0000000000cc",
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-02T00:00:00Z",
+            "name": "Support",
+            "slug": "support",
+            "environments": ["staging", "production"],
+            "yanked_at": "2026-09-03T00:00:00Z",
+            "yanked_reason": "bad prompt"
+        }))
+        .unwrap();
+        assert!(runtime.recipe_id.is_none());
+        assert_eq!(
+            runtime.runtime_group_id.unwrap().to_string(),
+            "00000000-0000-0000-0000-000000000042"
+        );
+        assert_eq!(runtime.environments, ["staging", "production"]);
+        assert_eq!(runtime.yanked_at.as_deref(), Some("2026-09-03T00:00:00Z"));
+        assert_eq!(runtime.yanked_reason.as_deref(), Some("bad prompt"));
+
+        // A Control Plane predating these fields still reads, and the optional
+        // ones stay off the wire when absent.
+        let older: Runtime = serde_json::from_value(json!({
+            "id": "00000000-0000-0000-0000-000000000041",
+            "org_id": "00000000-0000-0000-0000-0000000000aa",
+            "project_id": "00000000-0000-0000-0000-0000000000bb",
+            "recipe_id": "00000000-0000-0000-0000-000000000043",
+            "created_by_member_id": "00000000-0000-0000-0000-0000000000cc",
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-02T00:00:00Z",
+            "name": "Support",
+            "slug": "support"
+        }))
+        .unwrap();
+        assert!(older.environments.is_empty());
+        assert!(older.yanked_at.is_none());
+        let wire = serde_json::to_value(&older).unwrap();
+        assert!(wire.get("yanked_at").is_none());
+        assert!(wire.get("runtime_group_id").is_none());
+    }
+
+    #[test]
+    fn repository_enums_round_trip_and_keep_unknown_values() {
+        for (wire, provider) in [
+            ("github", RepositoryProvider::Github),
+            ("hosted", RepositoryProvider::Hosted),
+            ("codeberg", RepositoryProvider::Other("codeberg".into())),
+        ] {
+            let decoded: RepositoryProvider = serde_json::from_value(json!(wire)).unwrap();
+            assert_eq!(decoded, provider);
+            assert_eq!(serde_json::to_value(&decoded).unwrap(), json!(wire));
+        }
+        let status: RepositoryProvisioningStatus = serde_json::from_value(json!("failed")).unwrap();
+        assert_eq!(status, RepositoryProvisioningStatus::Failed);
+        assert_eq!(
+            RepositoryProvisioningStatus::default(),
+            RepositoryProvisioningStatus::Pending
+        );
+        assert_eq!(RepositoryProvider::default(), RepositoryProvider::Github);
     }
 
     #[test]

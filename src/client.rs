@@ -21,8 +21,8 @@ use crate::api::http::{HttpClient, HttpConfig};
 use crate::api::telemetry::Events;
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes, RuntimeHandle,
-    Runtimes,
+    Annotations, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes, Repositories,
+    RuntimeHandle, Runtimes,
 };
 use crate::types::{self, ClientConfig};
 
@@ -60,6 +60,7 @@ pub struct IntrospectionClient {
     runtimes: Runtimes,
     experiments: Experiments,
     recipes: Recipes,
+    repositories: Repositories,
     connectors: Connectors,
     annotations: Annotations,
     project_labels: ProjectLabels,
@@ -133,6 +134,7 @@ impl IntrospectionClient {
             runtimes: Runtimes::new(cp_http.clone()),
             experiments: Experiments::new(cp_http.clone()),
             recipes: Recipes::new(cp_http.clone()),
+            repositories: Repositories::new(cp_http.clone()),
             connectors: Connectors::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             project_labels: ProjectLabels::new(dp_http.clone()),
@@ -150,6 +152,11 @@ impl IntrospectionClient {
 
     pub fn recipes(&self) -> &Recipes {
         &self.recipes
+    }
+
+    /// `GET /v1/repositories` lookups: the Git source a recipe pins.
+    pub fn repositories(&self) -> &Repositories {
+        &self.repositories
     }
 
     pub fn annotations(&self) -> &Annotations {

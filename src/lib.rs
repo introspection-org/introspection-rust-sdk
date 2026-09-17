@@ -126,15 +126,15 @@ pub use api::{
     JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig,
     MetricsQuery, MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm,
     Paginated, PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload,
-    PatternEvent, PatternPayload, Recipe, RecipeListParams, ResourceShare, ResumeEntry, RunCaller,
-    RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment,
-    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate,
-    ShareListParams, ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus,
-    SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest,
-    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus,
-    TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent,
-    UploadSource,
+    PatternEvent, PatternPayload, Recipe, RecipeListParams, Repository, RepositoryProvider,
+    RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
+    RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity,
+    RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams,
+    ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions,
+    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
+    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate,
+    TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
@@ -153,7 +153,7 @@ pub use resources::annotations::{
 };
 pub use resources::{
     Annotations, Connections, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes,
-    RuntimeHandle, Runtimes,
+    Repositories, RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
