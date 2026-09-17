@@ -170,6 +170,11 @@ while let Some(page) = pages.next_page().await? {
 
 The runner also exposes `files()`, `shares()`, `events()`, and `metrics()`.
 
+Every list-params struct carries a `filters: Option<HashMap<String, serde_json::Value>>`
+passthrough for a query parameter this SDK build predates: each pair goes on
+the wire verbatim (an array as a repeated key), so a new server-side filter
+is usable the day it ships, without waiting for a typed field here.
+
 ## Curate traces with human review
 
 Annotations are append-only events on an OTel trace/span. Each write changes

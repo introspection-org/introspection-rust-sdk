@@ -11,7 +11,7 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    File, FileCreateText, FileListParams, FileType, FileUpdate, PaginationParams,
+    File, FileCreateText, FileListParams, FileType, FileUpdate, FileVersionListParams,
 };
 
 /// Source of bytes for an upload.
@@ -109,13 +109,13 @@ impl FileVersions {
 
     /// `GET /v1/files/{id}/versions` — paginator over the file's
     /// version chain (newest first).
-    pub fn list(&self, file_id: &str, params: &PaginationParams) -> Paginator<File> {
+    pub fn list(&self, file_id: &str, params: &FileVersionListParams) -> Paginator<File> {
         let path = format!(
             "/v1/files/{}/versions",
             crate::api::encoding::encode(file_id)
         );
         Paginator::new(self.http.clone(), path, params)
-            .expect("PaginationParams must serialize to a JSON object")
+            .expect("FileVersionListParams must serialize to a JSON object")
     }
 
     /// `GET /v1/files/{id}/versions/{vid}`.

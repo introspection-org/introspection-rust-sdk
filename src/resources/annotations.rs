@@ -75,6 +75,21 @@ pub struct AnnotationListParams {
     pub conversation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The annotator as an active Business member's email, resolved to
+    /// `annotated_by_member_id` on the Control Plane before the read; never
+    /// on the wire. Setting both is refused.
+    #[serde(skip)]
+    pub annotated_by_email: Option<String>,
+    /// The assignee as an email, resolved like `annotated_by_email`.
+    #[serde(skip)]
+    pub assigned_to_email: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +133,13 @@ pub struct ProjectLabelListParams {
     pub pagination: PaginationParams,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,38 +161,36 @@ impl Annotations {
         Self { cp_http, dp_http }
     }
 
-    pub fn list(&self, params: &AnnotationListParams) -> Paginator<AnnotationState> {
-        Paginator::new(self.dp_http.clone(), "/v1/annotations", params)
-            .expect("AnnotationListParams must serialize to an object")
-    }
-
-    /// Resolve optional active Business-member emails before constructing the
-    /// folded annotation-state paginator.
-    pub async fn list_by_email(
+    /// `GET /v1/annotations` — the folded annotation-state paginator. An
+    /// email filter on `params` costs one Control Plane member lookup first,
+    /// which is why the read is `async` before the page is fetched.
+    pub async fn list(
         &self,
-        mut params: AnnotationListParams,
-        annotated_by_email: Option<String>,
-        assigned_to_email: Option<String>,
+        params: &AnnotationListParams,
     ) -> ApiResult<Paginator<AnnotationState>> {
-        if params.annotated_by_member_id.is_some() && annotated_by_email.is_some() {
+        let mut params = params.clone();
+        if params.annotated_by_member_id.is_some() && params.annotated_by_email.is_some() {
             return Err(validation(
                 "Use annotated_by_member_id or annotated_by_email, not both",
                 "conflicting_annotation_annotator_filters",
             ));
         }
-        if params.assignee_member_id.is_some() && assigned_to_email.is_some() {
+        if params.assignee_member_id.is_some() && params.assigned_to_email.is_some() {
             return Err(validation(
                 "Use assignee_member_id or assigned_to_email, not both",
                 "conflicting_annotation_assignee_filters",
             ));
         }
-        if let Some(email) = annotated_by_email {
+        if let Some(email) = params.annotated_by_email.take() {
             params.annotated_by_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
         }
-        if let Some(email) = assigned_to_email {
+        if let Some(email) = params.assigned_to_email.take() {
             params.assignee_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
         }
-        Ok(self.list(&params))
+        Ok(
+            Paginator::new(self.dp_http.clone(), "/v1/annotations", &params)
+                .expect("AnnotationListParams must serialize to an object"),
+        )
     }
 
     /// Append exactly one mutation. Label and reviewer vectors are complete snapshots.

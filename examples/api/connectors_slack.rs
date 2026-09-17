@@ -22,8 +22,8 @@ use std::error::Error;
 
 use futures::StreamExt;
 use introspection_sdk::{
-    ClientConfig, ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams,
-    IntrospectionClient, PaginationParams,
+    ClientConfig, ConnectionListParams, ConnectorAuthMode, ConnectorAuthorizeParams,
+    ConnectorCreateParams, IntrospectionClient,
 };
 
 #[tokio::main]
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .await?;
     // For Pipedream, select an app with
-    // `client.connectors().list_apps(connector.id, Some("sheets"), Some(5))`
+    // `client.connectors().list_apps(connector.id, &ConnectorAppListParams { query: Some("sheets".into()), limit: Some(5), ..Default::default() })`
     // and pass `app: Some("google_sheets".into())`. Enable
     // `allow_progressive_scopes` only if the runtime tolerates partial grants.
     println!("install link -> {}", install.authorize_url);
@@ -119,7 +119,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut listing = client
         .connectors()
         .connections
-        .list(connector.id, &PaginationParams::default());
+        .list(connector.id, &ConnectionListParams::default());
     while let Some(connection) = listing.next().await {
         let connection = connection?;
         println!(

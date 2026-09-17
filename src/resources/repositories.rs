@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
-use crate::api::schemas::{Repository, StringOrUuid};
+use crate::api::schemas::{Repository, RepositoryListParams, StringOrUuid};
 
 #[derive(Serialize)]
 struct ProjectQuery {
@@ -33,17 +33,10 @@ impl Repositories {
         Self { http }
     }
 
-    /// `GET /v1/repositories?project=…` — every repository linked to the
-    /// project, as one array.
-    pub async fn list(&self, project: impl Into<StringOrUuid>) -> ApiResult<Vec<Repository>> {
-        self.http
-            .get_json(
-                "/v1/repositories",
-                &ProjectQuery {
-                    project: project.into(),
-                },
-            )
-            .await
+    /// `GET /v1/repositories?project=…[&slug=…]` — the repositories linked to
+    /// the project, as one array.
+    pub async fn list(&self, params: &RepositoryListParams) -> ApiResult<Vec<Repository>> {
+        self.http.get_json("/v1/repositories", params).await
     }
 
     /// `GET /v1/repositories/{id}?project=…`.

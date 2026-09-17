@@ -426,6 +426,13 @@ pub struct TaskListParams {
     /// it only ever narrows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -563,6 +570,13 @@ pub struct ShareListParams {
     pub created_by_me: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_to_me: Option<bool>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- files -----------------------------------------------------------------
@@ -655,6 +669,25 @@ pub struct FileListParams {
     /// ever narrows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Parameters for `GET /v1/files/{id}/versions`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FileVersionListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- SSE -------------------------------------------------------------------
@@ -715,6 +748,13 @@ pub struct RecipeListParams {
 
     #[serde(flatten)]
     pub pagination: PaginationParams,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- repositories (CP) -----------------------------------------------------
@@ -846,6 +886,25 @@ pub struct Repository {
     pub is_recipe_source: bool,
 }
 
+/// Filters supported by `GET /v1/repositories`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RepositoryListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    /// Only the repository with this slug: `owner/repo` for a GitHub one,
+    /// the Runtime slug for a hosted one. The route answers a bare array
+    /// either way, so a hit is a one-element `Vec`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
 // ----- runtimes (CP) ---------------------------------------------------------
 
 /// How a Runtime acquires LLM provider credentials at session create —
@@ -958,6 +1017,13 @@ pub struct RuntimeListParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- experiments (CP) ------------------------------------------------------
@@ -1166,6 +1232,13 @@ pub struct ExperimentListParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- connectors (CP) -------------------------------------------------------
@@ -1490,6 +1563,25 @@ pub struct ConnectorListParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Parameters for `GET /v1/connectors/{connector_id}/connections`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectionListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// `POST /v1/connectors` body. `name`, `provider`, and `auth_mode` are
@@ -1684,6 +1776,23 @@ pub struct ConnectorAuthorizeParams {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Parameters for `GET /v1/connectors/{id}/apps`, the provider catalogue search.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ConnectorAppListParams {
+    /// Free-text search over the catalogue (`q` on the wire).
+    #[serde(rename = "q", skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// An application available from a connector's provider catalogue.
@@ -2356,6 +2465,11 @@ pub struct ConversationItemListParams {
     pub operation_name: Option<String>,
     pub lookback_days: Option<u32>,
     pub share_id: Option<Uuid>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists.
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Parameters for `GET /v1/conversations/{conversation_id}/items/{item_id}`.
@@ -3457,6 +3571,47 @@ mod tests {
         assert_eq!(value["runtime"], "customer-agent");
         assert!(value.get("name").is_none());
         assert!(value.get("slug").is_none());
+    }
+
+    #[test]
+    fn list_filters_ride_the_query_beside_the_typed_fields() {
+        // Unset, the passthrough adds nothing: the object is exactly the
+        // typed fields, so a Paginator still sees a plain object.
+        let bare = serde_json::to_value(RuntimeListParams {
+            runtime: Some("customer-agent".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(bare, json!({ "runtime": "customer-agent" }));
+
+        // Set, every pair lands beside them, and a pair naming a typed field
+        // replaces it — the passthrough is the caller's last word.
+        let merged = serde_json::to_value(RuntimeListParams {
+            runtime: Some("customer-agent".into()),
+            limit: Some(1),
+            filters: Some(HashMap::from([
+                ("environment".to_string(), json!("staging")),
+                ("yanked".to_string(), json!(false)),
+                ("limit".to_string(), json!(5)),
+            ])),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            merged,
+            json!({ "runtime": "customer-agent", "limit": 5, "environment": "staging", "yanked": false })
+        );
+
+        let repositories = serde_json::to_value(RepositoryListParams {
+            project: Some("acme".into()),
+            slug: Some("example/recipes".into()),
+            filters: None,
+        })
+        .unwrap();
+        assert_eq!(
+            repositories,
+            json!({ "project": "acme", "slug": "example/recipes" })
+        );
     }
 
     #[test]
