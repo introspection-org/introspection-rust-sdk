@@ -53,7 +53,9 @@ opentelemetry-otlp = { version = "0.32.0", default-features = false, features = 
 # responses transparently — the DP gateway compresses JSON when offered
 # (Arrow stream responses are never compressed and arrive unchanged).
 percent-encoding = "2"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs", "gzip"] }
+# `system-proxy` is what makes 0.13 honour HTTPS_PROXY / NO_PROXY; 0.12 did so
+# unconditionally, and a client behind a corporate proxy otherwise never connects.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs", "gzip", "system-proxy"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
