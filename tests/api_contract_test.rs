@@ -55,10 +55,11 @@ use introspection_sdk::api::schemas::{
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
     FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec,
     MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, Repository,
-    RepositoryProvider, RepositoryProvisioningStatus, ResourceShare, RunnerIdentity,
-    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, SortDirection,
-    StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams,
-    TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
+    RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
+    RunnerIdentity, RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType,
+    SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind,
+    TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus,
+    TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -246,6 +247,7 @@ fn sdk_surface_matches_the_published_reference() {
         statuses: Some(vec![TaskStatus::Running]),
         require_automation_id: Some(true),
         tag: Some("customer:acme".into()),
+        filters: None,
     };
 
     let task = Task {
@@ -313,6 +315,12 @@ fn sdk_surface_matches_the_published_reference() {
         is_recipe_source: true,
     };
 
+    let repository_list = RepositoryListParams {
+        project: Some(StringOrUuid::from("proj")),
+        slug: Some("example/recipes".into()),
+        filters: None,
+    };
+
     let file_update = FileUpdate {
         name: Some("n".into()),
         metadata: Some(HashMap::new()),
@@ -327,6 +335,7 @@ fn sdk_surface_matches_the_published_reference() {
         file_type: Some(FileType::Upload),
         storage_path: Some("p".into()),
         tag: Some("customer:acme".into()),
+        filters: None,
     };
 
     let share_create = ShareCreate {
@@ -355,6 +364,7 @@ fn sdk_surface_matches_the_published_reference() {
         resource_id: Some("file".into()),
         created_by_me: Some(true),
         granted_to_me: Some(true),
+        filters: None,
     };
 
     // Serialized through the `Event` enum rather than the bare `TypedEvent`:
@@ -397,6 +407,7 @@ fn sdk_surface_matches_the_published_reference() {
         status: Some(ExperimentStatus::Running),
         limit: Some(1),
         next: Some("cursor".into()),
+        filters: None,
     };
 
     // The last list surface without a declaration, and it had drifted:
@@ -409,6 +420,7 @@ fn sdk_surface_matches_the_published_reference() {
         environment: Some("production".into()),
         limit: Some(1),
         next: Some("cursor".into()),
+        filters: None,
     };
 
     let recipe_list = RecipeListParams {
@@ -419,11 +431,13 @@ fn sdk_surface_matches_the_published_reference() {
             limit: Some(1),
             next: Some("cursor".into()),
         },
+        filters: None,
     };
 
     let connector_list = ConnectorListParams {
         limit: Some(1),
         next: Some("cursor".into()),
+        filters: None,
     };
 
     let connector_create = ConnectorCreateParams {
@@ -504,6 +518,7 @@ fn sdk_surface_matches_the_published_reference() {
         share_id: Some(Uuid::nil()),
         start_date: Some("2026-01-01T00:00:00Z".into()),
         end_date: Some("2026-01-02T00:00:00Z".into()),
+        filters: None,
     };
 
     // Every typed field is populated, so the assertion below is that all 23
@@ -799,6 +814,15 @@ fn sdk_surface_matches_the_published_reference() {
             wire_fields(&recipe_list),
             query_parameters(&cp_spec, "/v1/recipes", "get"),
             &["project_id"],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
+            "repository list filters — GET /v1/repositories query parameters",
+            wire_fields(&repository_list),
+            query_parameters(&cp_spec, "/v1/repositories", "get"),
+            &[],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
             false,

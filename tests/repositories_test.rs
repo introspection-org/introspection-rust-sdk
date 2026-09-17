@@ -5,8 +5,10 @@
 //! has never seen; both are exercised here so a Control Plane ahead of the SDK
 //! still reads.
 
+use std::collections::HashMap;
+
 use introspection_sdk::{
-    AdvancedOptions, ClientConfig, IntrospectionClient, RepositoryProvider,
+    AdvancedOptions, ClientConfig, IntrospectionClient, RepositoryListParams, RepositoryProvider,
     RepositoryProvisioningStatus,
 };
 use serde_json::json;
@@ -63,7 +65,14 @@ async fn list_reads_the_bare_array_and_tolerates_a_new_provider() {
         .mount(&server)
         .await;
 
-    let repositories = client(&server).repositories().list("acme").await.unwrap();
+    let repositories = client(&server)
+        .repositories()
+        .list(&RepositoryListParams {
+            project: Some("acme".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
     assert_eq!(repositories.len(), 2);
     let github = &repositories[0];
@@ -131,4 +140,43 @@ async fn get_scopes_the_read_to_the_project() {
         repository.provisioning_status,
         RepositoryProvisioningStatus::Pending
     );
+}
+
+#[tokio::test]
+async fn list_narrows_by_slug_and_passes_an_unknown_filter_through() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/repositories"))
+        .and(query_param("project", PROJECT_ID))
+        .and(query_param("slug", "example/recipes"))
+        // A filter this SDK build has no field for still reaches the wire.
+        .and(query_param("provider", "github"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": GITHUB_ID,
+                "project_id": PROJECT_ID,
+                "url": "https://github.com/example/recipes",
+                "name": "example/recipes",
+                "slug": "example/recipes",
+                "provider": "github",
+                "created_at": "2026-09-01T00:00:00Z"
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let repositories = client(&server)
+        .repositories()
+        .list(&RepositoryListParams {
+            project: Some(Uuid::parse_str(PROJECT_ID).unwrap().into()),
+            slug: Some("example/recipes".into()),
+            filters: Some(HashMap::from([("provider".to_string(), json!("github"))])),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(repositories.len(), 1);
+    assert_eq!(repositories[0].slug.as_deref(), Some("example/recipes"));
+    assert_eq!(repositories[0].provider, RepositoryProvider::Github);
 }

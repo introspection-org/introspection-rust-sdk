@@ -250,7 +250,26 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     if let Some(share_id) = params.share_id {
         query.push(("share_id".into(), share_id.to_string()));
     }
+    for (key, value) in params.filters.iter().flatten() {
+        match value {
+            serde_json::Value::Null => {}
+            serde_json::Value::Array(values) => {
+                query.extend(values.iter().map(|value| (key.clone(), scalar(value))));
+            }
+            value => query.push((key.clone(), scalar(value))),
+        }
+    }
     query
+}
+
+/// A passthrough value as it goes on the wire: a string as itself, anything
+/// else in its JSON spelling (an object would not be a query value; the
+/// transport refuses one before the request is built).
+fn scalar(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        value => value.to_string(),
+    }
 }
 
 fn get_query(params: &ConversationItemGetParams) -> Vec<(String, String)> {

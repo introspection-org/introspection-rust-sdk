@@ -75,6 +75,13 @@ pub struct AnnotationListParams {
     pub conversation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +125,13 @@ pub struct ProjectLabelListParams {
     pub pagination: PaginationParams,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
