@@ -115,10 +115,15 @@ impl HttpClient {
         })
     }
 
-    /// Test seam: build an [`HttpClient`] around an already-configured
-    /// [`reqwest::Client`]. Skips the token-empty / header-validation
-    /// checks so wiremock fixtures don't need a real token.
-    #[doc(hidden)]
+    /// Build an [`HttpClient`] around an already-configured
+    /// [`reqwest::Client`], for a caller that owns its own transport
+    /// (proxy, trust roots, user agent, connect timeout).
+    ///
+    /// The caller's client is used as given: `cfg.token` and
+    /// `cfg.additional_headers` are **not** applied to it, so authentication
+    /// has to be on `inner` as a default header. `cfg.api_url`, `cfg.timeout`
+    /// and the retry fields still govern every request. There is no
+    /// token-empty check, which is also what lets a test fixture skip one.
     pub fn from_parts(inner: reqwest::Client, cfg: HttpConfig) -> Self {
         Self {
             inner,

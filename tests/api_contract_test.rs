@@ -54,11 +54,11 @@ use introspection_sdk::api::schemas::{
     ConversationSentiment, ConversationStatus, Dimension, Event, EventListParams,
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
     FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter, MetricSpec,
-    MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, ResourceShare,
-    RunnerIdentity, RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType,
-    SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind,
-    TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus,
-    TimeDimension,
+    MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams, Repository,
+    RepositoryProvider, RepositoryProvisioningStatus, ResourceShare, RunnerIdentity,
+    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, SortDirection,
+    StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams,
+    TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -296,6 +296,21 @@ fn sdk_surface_matches_the_published_reference() {
         parent_id: Some(Uuid::nil()),
         storage_version_id: Some("v".into()),
         tags: vec!["customer:acme".into()],
+    };
+
+    let repository = Repository {
+        id: Uuid::nil(),
+        project_id: Uuid::nil(),
+        integration_id: Some(Uuid::nil()),
+        url: Some("https://github.com/example/recipes".into()),
+        name: Some("example/recipes".into()),
+        slug: Some("example-recipes".into()),
+        provider: RepositoryProvider::Github,
+        default_branch: "main".into(),
+        provisioning_status: RepositoryProvisioningStatus::Ready,
+        seed_template: Some("pi-agent".into()),
+        created_at: "now".into(),
+        is_recipe_source: true,
     };
 
     let file_update = FileUpdate {
@@ -787,6 +802,16 @@ fn sdk_surface_matches_the_published_reference() {
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
             false,
+        ),
+        compare(
+            "Repository — the repository read model",
+            wire_fields(&repository),
+            schema_properties(&cp_spec, "RepositoryResponse"),
+            // Being retired by the Control Plane in favour of `url`; never read here.
+            &["clone_url"],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
         ),
         compare(
             "connector list filters — GET /v1/connectors query parameters",

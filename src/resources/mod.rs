@@ -8,6 +8,8 @@
 //! - [`Recipes`] — `GET /v1/recipes` lookup. Recipes describe a
 //!   (repo, git_ref, git_commit_sha) tuple used by platform-managed runtime
 //!   versions.
+//! - [`Repositories`] — `GET /v1/repositories` lookup: the Git source a
+//!   recipe pins, resolved to its credential-free transport URL.
 //! - [`Connectors`] — `/v1/connectors` CRUD with [`Connections`] nested
 //!   under `.connections`, plus `authorize()`, which mints the consent URL
 //!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer
@@ -25,10 +27,12 @@ pub mod annotations;
 pub mod connectors;
 pub mod experiments;
 pub mod recipes;
+pub mod repositories;
 pub mod runtimes;
 
 pub use annotations::{Annotations, ProjectLabels};
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
 pub use recipes::Recipes;
+pub use repositories::Repositories;
 pub use runtimes::{RuntimeHandle, Runtimes};
