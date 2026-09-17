@@ -73,10 +73,13 @@ async fn lists_folded_annotation_state_with_filters() {
         .mount(&dp)
         .await;
     let annotations = Annotations::new(http(&dp), http(&dp));
-    let mut stream = annotations.list(&AnnotationListParams {
-        label: Some("needs-review".into()),
-        ..Default::default()
-    });
+    let mut stream = annotations
+        .list(&AnnotationListParams {
+            label: Some("needs-review".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     assert_eq!(
         stream.next().await.unwrap().unwrap().labels,
         vec!["needs-review"]
@@ -108,20 +111,52 @@ async fn resolves_email_list_filter_and_requests_total() {
         .await;
     let annotations = Annotations::new(http(&cp), http(&dp));
     let mut page = annotations
-        .list_by_email(
-            AnnotationListParams {
-                include_total: Some(true),
-                ..Default::default()
-            },
-            None,
-            Some("expert@example.com".into()),
-        )
+        .list(&AnnotationListParams {
+            include_total: Some(true),
+            assigned_to_email: Some("expert@example.com".into()),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(
         page.next_page().await.unwrap().unwrap().total_count,
         Some(1)
     );
+}
+
+#[tokio::test]
+async fn refuses_a_member_id_and_email_filter_naming_the_same_person() {
+    let cp = MockServer::start().await;
+    let dp = MockServer::start().await;
+    let annotations = Annotations::new(http(&cp), http(&dp));
+
+    let annotator = match annotations
+        .list(&AnnotationListParams {
+            annotated_by_member_id: Some(Uuid::nil()),
+            annotated_by_email: Some("expert@example.com".into()),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(_) => panic!("expected the conflicting annotator filters to be refused"),
+        Err(err) => err,
+    };
+    assert!(annotator.to_string().contains("annotated_by_member_id"));
+
+    let assignee = match annotations
+        .list(&AnnotationListParams {
+            assignee_member_id: Some(Uuid::nil()),
+            assigned_to_email: Some("expert@example.com".into()),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(_) => panic!("expected the conflicting assignee filters to be refused"),
+        Err(err) => err,
+    };
+    assert!(assignee.to_string().contains("assignee_member_id"));
+
+    // Refused before either mock server is asked anything.
 }
 
 #[tokio::test]
@@ -294,7 +329,11 @@ async fn client_routes_annotations_to_the_configured_data_plane() {
         },
     ))
     .unwrap();
-    let mut page = client.annotations().list(&AnnotationListParams::default());
+    let mut page = client
+        .annotations()
+        .list(&AnnotationListParams::default())
+        .await
+        .unwrap();
     assert!(page.next_page().await.unwrap().unwrap().records.is_empty());
 }
 
