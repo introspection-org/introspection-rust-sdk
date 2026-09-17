@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.16.0...v0.17.0) (2026-09-17)
+
+
+### Features
+
+* add repositories lookup, runtime yank fields, and a public HttpClient::from_parts ([#84](https://github.com/introspection-org/introspection-rust-sdk/issues/84)) ([6d4244c](https://github.com/introspection-org/introspection-rust-sdk/commit/6d4244c8a42d90d564bd0747c1c18feceb3a5972))
+
 ## [0.16.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.15.0...v0.16.0) (2026-09-02)
 
 
