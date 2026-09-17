@@ -6,10 +6,13 @@
 //! still reads.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
+use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, ClientConfig, IntrospectionClient, RepositoryListParams, RepositoryProvider,
-    RepositoryProvisioningStatus,
+    AdvancedOptions, ClientConfig, IntrospectionClient, Repositories, RepositoryListParams,
+    RepositoryProvider, RepositoryProvisioningStatus,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -179,4 +182,76 @@ async fn list_narrows_by_slug_and_passes_an_unknown_filter_through() {
     assert_eq!(repositories.len(), 1);
     assert_eq!(repositories[0].slug.as_deref(), Some("example/recipes"));
     assert_eq!(repositories[0].provider, RepositoryProvider::Github);
+}
+
+/// `Repositories::new` is reachable directly from outside the crate, wrapping
+/// a caller-built `HttpClient` — no `IntrospectionClient`, no bearer token.
+///
+/// This is the shape a CP session-cookie caller needs: `IntrospectionClient`
+/// requires a non-empty token even when `additional_headers` already carries
+/// the caller's own auth (see `HttpClient::from_parts`'s doc). Constructing
+/// `Repositories` on the caller's own `HttpClient` skips that requirement
+/// entirely, so only the Cookie this test sets reaches the wire.
+#[tokio::test]
+async fn repositories_is_constructible_directly_from_a_caller_owned_http_client() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/repositories"))
+        .and(query_param("project", "acme"))
+        .and(query_param("slug", "support-triage"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": HOSTED_ID,
+                "project_id": PROJECT_ID,
+                "name": "support-triage",
+                "slug": "support-triage",
+                "provider": "hosted",
+                "created_at": "2026-09-01T00:00:00Z"
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inner = reqwest::Client::builder()
+        .default_headers({
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::COOKIE,
+                "intro_cp_session=cli-session".parse().unwrap(),
+            );
+            headers
+        })
+        .build()
+        .unwrap();
+    let http = HttpClient::from_parts(
+        inner,
+        HttpConfig {
+            api_url: server.uri(),
+            token: String::new(),
+            additional_headers: HashMap::new(),
+            timeout: Duration::from_secs(5),
+            max_retries: 0,
+            retry_base: Duration::ZERO,
+        },
+    );
+
+    let repositories = Repositories::new(Arc::new(http))
+        .list(&RepositoryListParams {
+            project: Some("acme".into()),
+            slug: Some("support-triage".into()),
+            filters: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(repositories.len(), 1);
+    assert_eq!(repositories[0].provider, RepositoryProvider::Hosted);
+
+    let request = &server.received_requests().await.unwrap()[0];
+    assert_eq!(
+        request.headers.get("cookie").unwrap(),
+        "intro_cp_session=cli-session"
+    );
+    assert!(!request.headers.contains_key("authorization"));
 }

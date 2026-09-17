@@ -29,7 +29,8 @@ pub struct Repositories {
 }
 
 impl Repositories {
-    pub(crate) fn new(http: Arc<HttpClient>) -> Self {
+    #[doc(hidden)]
+    pub fn new(http: Arc<HttpClient>) -> Self {
         Self { http }
     }
 
