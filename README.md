@@ -29,9 +29,8 @@ output, and record what users thought of the result.
 
 ## Install
 
-```toml
-[dependencies]
-introspection-sdk = "0.13"
+```shell
+cargo add introspection-sdk
 ```
 
 | Feature | Adds |
@@ -104,8 +103,8 @@ interrupts, and cancellation.
 Enable the `otel` feature, then attach the outcome to the conversation the
 agent produced:
 
-```toml
-introspection-sdk = { version = "0.13", features = ["otel"] }
+```shell
+cargo add introspection-sdk --features otel
 ```
 
 ```rust
