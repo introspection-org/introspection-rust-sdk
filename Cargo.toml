@@ -78,7 +78,7 @@ derive_builder = "0.20"
 # Optional: Apache Arrow IPC-stream decode for the telemetry reads (gated by
 # the `arrow` feature). `ipc` alone keeps the dependency tree lean — no
 # csv/json/prettyprint/pyarrow.
-arrow = { version = "59", default-features = false, features = ["ipc"], optional = true }
+arrow = { version = "60", default-features = false, features = ["ipc"], optional = true }
 
 # Streaming support (StreamExt)
 futures = "0.3"
