@@ -10,7 +10,8 @@
 //!   versions.
 //! - [`Repositories`] — `GET /v1/repositories` lookup: the Git source a
 //!   recipe pins, resolved to its credential-free transport URL — and
-//!   [`RepositoryContents`], its files read through the Data Plane.
+//!   [`RepositoryContents`], its files read through the Data Plane, and its
+//!   commits via [`Repositories::commits`] / [`Repositories::commit`].
 //! - [`Connectors`] — `/v1/connectors` CRUD with [`Connections`] nested
 //!   under `.connections`, plus `authorize()`, which mints the consent URL
 //!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer

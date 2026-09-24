@@ -106,7 +106,7 @@ pub mod types;
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
     AgentInfo, AnnotationEvent, AnnotationPayload, Arm, ClusteringRunEvent, ClusteringRunPayload,
-    Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
+    CommitsQuery, Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
     ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams,
     ConnectionMissionConstraints, ConnectionStatus, ConnectionSubjectType, ConnectionToken,
     ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorAppListParams,
@@ -127,16 +127,18 @@ pub use api::{
     JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
     MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
     PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
-    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryContent, RepositoryDirectory,
-    RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryProvider,
-    RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
-    RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity,
-    RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams,
-    ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions,
-    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate,
-    TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
+    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
+    RepositoryCommitFile, RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent,
+    RepositoryDirectory, RepositoryEntry, RepositoryEntryType, RepositoryFile,
+    RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
+    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
+    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode,
+    ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection, SpanAttributes,
+    SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse,
+    TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
+    TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns,
+    TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory,
+    TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
