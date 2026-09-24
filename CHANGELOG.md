@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.19.0...v0.20.0) (2026-09-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* Repositories::new takes (cp_http, dp_http), and Repository has two new fields (exhaustive struct literals need them).
+
+### Features
+
+* add repository commits ([#94](https://github.com/introspection-org/introspection-rust-sdk/issues/94)) ([ee85c09](https://github.com/introspection-org/introspection-rust-sdk/commit/ee85c0901446f2ee4d8a84649934b15b0537b02f))
+* add repository contents ([#92](https://github.com/introspection-org/introspection-rust-sdk/issues/92)) ([170efa1](https://github.com/introspection-org/introspection-rust-sdk/commit/170efa1cc1ddf84578791fb7e73893d9de3ac65e))
+
 ## [0.19.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.18.0...v0.19.0) (2026-09-17)
 
 
