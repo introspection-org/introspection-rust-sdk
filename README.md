@@ -213,6 +213,36 @@ typed events, and metrics queries, [Files and shares](https://docs.introspection
 for durable inputs and grants, and [`examples/`](examples/) for end-to-end
 programs.
 
+## Read a repository's files
+
+`client.repositories()` resolves a repository on the Control Plane;
+`contents(id)` reads its files through the Data Plane (`repositories:read`).
+
+```rust
+use futures::StreamExt;
+use introspection_sdk::{ContentsQuery, RepositoryContent, RepositoryListParams};
+
+let repository = client.repositories().list(&RepositoryListParams {
+    project: Some("acme".into()),
+    slug: Some("support-triage".into()),
+    ..Default::default()
+}).await?.remove(0);
+let contents = client.repositories().contents(repository.id);
+
+// Every entry of a directory, following the cursor; errors if the path is a file.
+let mut entries = contents.list(&ContentsQuery { path: "agents".into(), ..Default::default() })?;
+while let Some(entry) = entries.next().await {
+    let entry = entry?;
+    println!("{} {}", entry.entry_type.as_str(), entry.path);
+}
+
+// One file (or a directory's first page), at a branch, tag or commit.
+let query = ContentsQuery { r#ref: Some("main".into()), ..Default::default() };
+if let RepositoryContent::File(file) = contents.get("agents/agent.yaml", &query).await? {
+    println!("{} ({})", file.content, file.encoding);
+}
+```
+
 ## Environment variables
 
 ```shell

@@ -236,7 +236,7 @@ async fn repositories_is_constructible_directly_from_a_caller_owned_http_client(
         },
     );
 
-    let repositories = Repositories::new(Arc::new(http))
+    let repositories = Repositories::new(Arc::new(http.clone()), Arc::new(http))
         .list(&RepositoryListParams {
             project: Some("acme".into()),
             slug: Some("support-triage".into()),

@@ -134,7 +134,7 @@ impl IntrospectionClient {
             runtimes: Runtimes::new(cp_http.clone()),
             experiments: Experiments::new(cp_http.clone()),
             recipes: Recipes::new(cp_http.clone()),
-            repositories: Repositories::new(cp_http.clone()),
+            repositories: Repositories::new(cp_http.clone(), dp_http.clone()),
             connectors: Connectors::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             project_labels: ProjectLabels::new(dp_http.clone()),
@@ -154,7 +154,8 @@ impl IntrospectionClient {
         &self.recipes
     }
 
-    /// `GET /v1/repositories` lookups: the Git source a recipe pins.
+    /// `GET /v1/repositories` lookups (the Git source a recipe pins) and
+    /// their contents.
     pub fn repositories(&self) -> &Repositories {
         &self.repositories
     }

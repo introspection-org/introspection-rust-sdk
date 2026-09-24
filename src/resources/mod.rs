@@ -9,7 +9,8 @@
 //!   (repo, git_ref, git_commit_sha) tuple used by platform-managed runtime
 //!   versions.
 //! - [`Repositories`] — `GET /v1/repositories` lookup: the Git source a
-//!   recipe pins, resolved to its credential-free transport URL.
+//!   recipe pins, resolved to its credential-free transport URL — and
+//!   [`RepositoryContents`], its files read through the Data Plane.
 //! - [`Connectors`] — `/v1/connectors` CRUD with [`Connections`] nested
 //!   under `.connections`, plus `authorize()`, which mints the consent URL
 //!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer
@@ -34,5 +35,5 @@ pub use annotations::{Annotations, ProjectLabels};
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
 pub use recipes::Recipes;
-pub use repositories::Repositories;
+pub use repositories::{Repositories, RepositoryContents};
 pub use runtimes::{RuntimeHandle, Runtimes};

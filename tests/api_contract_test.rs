@@ -312,6 +312,8 @@ fn sdk_surface_matches_the_published_reference() {
         provisioning_status: RepositoryProvisioningStatus::Ready,
         seed_template: Some("pi-agent".into()),
         created_at: "now".into(),
+        pushed_at: Some("now".into()),
+        head_commit_sha: Some("abc".into()),
         is_recipe_source: true,
     };
 
