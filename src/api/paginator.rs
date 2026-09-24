@@ -21,6 +21,10 @@ use crate::api::schemas::Paginated;
 
 type PageFut<T> = Pin<Box<dyn Future<Output = ApiResult<Paginated<T>>> + Send>>;
 
+/// Lowers an endpoint's page body into the shared envelope, for an endpoint
+/// whose page carries more than `Paginated<T>` or can answer a non-page.
+pub(crate) type PageDecoder<T> = fn(serde_json::Value) -> ApiResult<Paginated<T>>;
+
 /// Async paginator over a DP list endpoint.
 ///
 /// # As a [`Stream`]
@@ -79,6 +83,8 @@ pub struct Paginator<T> {
     exhausted: bool,
     buffer: VecDeque<T>,
     pending: Option<PageFut<T>>,
+    cursor_param: &'static str,
+    decoder: Option<PageDecoder<T>>,
 }
 
 impl<T> Paginator<T>
@@ -102,7 +108,39 @@ where
             exhausted: false,
             buffer: VecDeque::new(),
             pending: None,
+            cursor_param: "next",
+            decoder: None,
         })
+    }
+
+    /// A paginator whose cursor rides as `cursor_param` and whose page body
+    /// is lowered by `decoder` rather than read as `Paginated<T>`.
+    pub(crate) fn with_decoder<P: Serialize>(
+        http: Arc<HttpClient>,
+        path: impl Into<String>,
+        params: &P,
+        cursor_param: &'static str,
+        decoder: PageDecoder<T>,
+    ) -> ApiResult<Self> {
+        let mut paginator = Self::new(http, path, params)?;
+        paginator.cursor_param = cursor_param;
+        paginator.decoder = Some(decoder);
+        Ok(paginator)
+    }
+
+    async fn fetch(
+        http: Arc<HttpClient>,
+        path: String,
+        params: serde_json::Value,
+        decoder: Option<PageDecoder<T>>,
+    ) -> ApiResult<Paginated<T>> {
+        match decoder {
+            None => http.get_json(&path, &params).await,
+            Some(decode) => {
+                let body: serde_json::Value = http.get_json(&path, &params).await?;
+                decode(body)
+            }
+        }
     }
 
     /// Fetch the next page synchronously (as far as `next_page` itself is
@@ -114,7 +152,7 @@ where
         }
         self.started = true;
         let params = self.params_for_current_cursor();
-        let page: Paginated<T> = self.http.get_json(&self.path, &params).await?;
+        let page = Self::fetch(self.http.clone(), self.path.clone(), params, self.decoder).await?;
         // Same non-advancing-cursor guard as the Stream path; an empty
         // cursor is absence, not a value.
         let next = page.next.clone().filter(|c| !c.is_empty());
@@ -148,7 +186,10 @@ where
         let mut params = self.base_params.clone();
         if let Some(ref c) = self.next_cursor {
             if let Some(obj) = params.as_object_mut() {
-                obj.insert("next".to_string(), serde_json::Value::String(c.clone()));
+                obj.insert(
+                    self.cursor_param.to_string(),
+                    serde_json::Value::String(c.clone()),
+                );
             }
         }
         params
@@ -202,10 +243,7 @@ where
             let http = this.http.clone();
             let path = this.path.clone();
             let params = this.params_for_current_cursor();
-            let fut: PageFut<T> = Box::pin(async move {
-                http.get_json::<serde_json::Value, Paginated<T>>(&path, &params)
-                    .await
-            });
+            let fut: PageFut<T> = Box::pin(Self::fetch(http, path, params, this.decoder));
             this.pending = Some(fut);
         }
     }

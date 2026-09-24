@@ -111,8 +111,8 @@ pub use api::{
     ConnectionMissionConstraints, ConnectionStatus, ConnectionSubjectType, ConnectionToken,
     ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorAppListParams,
     ConnectorAuthMode, ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams,
-    ConnectorListParams, ConnectorStatus, ConnectorUpdateParams, Conversation, ConversationAgent,
-    ConversationCost, ConversationExportFormat, ConversationExportParams,
+    ConnectorListParams, ConnectorStatus, ConnectorUpdateParams, ContentsQuery, Conversation,
+    ConversationAgent, ConversationCost, ConversationExportFormat, ConversationExportParams,
     ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
     ConversationItemPaginator, ConversationItems, ConversationListParams, ConversationMetrics,
     ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
@@ -127,7 +127,8 @@ pub use api::{
     JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
     MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
     PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
-    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryListParams, RepositoryProvider,
+    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryContent, RepositoryDirectory,
+    RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryProvider,
     RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
     RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity,
     RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams,
@@ -154,7 +155,7 @@ pub use resources::annotations::{
 };
 pub use resources::{
     Annotations, Connections, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes,
-    Repositories, RuntimeHandle, Runtimes,
+    Repositories, RepositoryContents, RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

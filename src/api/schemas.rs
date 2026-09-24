@@ -882,6 +882,12 @@ pub struct Repository {
     #[serde(default)]
     pub seed_template: Option<String>,
     pub created_at: String,
+    /// When the repository last received a push; `None` before the first.
+    #[serde(default)]
+    pub pushed_at: Option<String>,
+    /// The default branch's head commit as of the last push.
+    #[serde(default)]
+    pub head_commit_sha: Option<String>,
     #[serde(default)]
     pub is_recipe_source: bool,
 }
@@ -903,6 +909,125 @@ pub struct RepositoryListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+// ----- repository contents (DP) ----------------------------------------------
+
+/// What a directory entry is — mirrors the DP `RepositoryEntryType`.
+///
+/// `Other` keeps a listing readable when the Data Plane reports a kind this
+/// SDK build predates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepositoryEntryType {
+    File,
+    Dir,
+    Symlink,
+    Submodule,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RepositoryEntryType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::File => "file",
+            Self::Dir => "dir",
+            Self::Symlink => "symlink",
+            Self::Submodule => "submodule",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl From<&str> for RepositoryEntryType {
+    fn from(s: &str) -> Self {
+        match s {
+            "file" => Self::File,
+            "dir" => Self::Dir,
+            "symlink" => Self::Symlink,
+            "submodule" => Self::Submodule,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RepositoryEntryType {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RepositoryEntryType {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// One entry of a repository directory listing.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryEntry {
+    pub name: String,
+    pub path: String,
+    #[serde(rename = "type")]
+    pub entry_type: RepositoryEntryType,
+    #[serde(default)]
+    pub size: u64,
+    pub sha: String,
+}
+
+/// One page of a directory listing.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryDirectory {
+    pub path: String,
+    /// What `ref` resolved to; every page of the listing is read at it.
+    pub commit_sha: String,
+    pub records: Vec<RepositoryEntry>,
+    pub count: u64,
+    /// Opaque cursor for the next page; `None` on the last.
+    #[serde(default)]
+    pub next: Option<String>,
+}
+
+/// A file's content at one commit.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryFile {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+    pub sha: String,
+    /// What `ref` resolved to.
+    pub commit_sha: String,
+    /// `utf-8` or `base64`.
+    pub encoding: String,
+    pub content: String,
+    /// The file is larger than a read returns, and `content` is empty.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// `GET /v1/repositories/{id}/contents/{path}` — a directory or a file.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum RepositoryContent {
+    Dir(RepositoryDirectory),
+    File(RepositoryFile),
+}
+
+/// Query for a repository contents read.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ContentsQuery {
+    /// Repository-relative path; empty is the root. Read by
+    /// `RepositoryContents::list`; `RepositoryContents::get` takes its path as
+    /// an argument instead.
+    #[serde(skip)]
+    pub path: String,
+    /// Branch, tag or commit; the default branch when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+    /// Page size for a directory listing (server default 100, max 1000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
 }
 
 // ----- runtimes (CP) ---------------------------------------------------------
