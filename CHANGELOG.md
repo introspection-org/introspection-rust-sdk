@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.21.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.20.0...v0.21.0) (2026-09-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** the otel feature now uses opentelemetry, opentelemetry_sdk and opentelemetry-otlp 0.33, which appear in the public API (e.g. to_otel_value, otel::testing); callers must move to 0.33 with it.
+
+### Miscellaneous Chores
+
+* **deps:** bump OpenTelemetry to 0.33 ([#95](https://github.com/introspection-org/introspection-rust-sdk/issues/95)) ([bf6158e](https://github.com/introspection-org/introspection-rust-sdk/commit/bf6158e6a47cf1968a115660b4a87fc3c5a9214b))
+
 ## [0.20.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.19.0...v0.20.0) (2026-09-24)
 
 
