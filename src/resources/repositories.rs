@@ -1,4 +1,5 @@
-//! `client.repositories` — repository lookup (CP) and contents reads (DP).
+//! `client.repositories` — repository lookup (CP) and contents and commit
+//! reads (DP).
 //!
 //! Read-only: a runner resolves the repository behind the recipe it runs, it
 //! does not register one. Linking a repository to a project is a
@@ -18,8 +19,8 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    ContentsQuery, Paginated, Repository, RepositoryContent, RepositoryEntry, RepositoryListParams,
-    StringOrUuid,
+    CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryCommit, RepositoryCommitDetail,
+    RepositoryContent, RepositoryEntry, RepositoryListParams, StringOrUuid,
 };
 
 #[derive(Serialize)]
@@ -28,7 +29,7 @@ struct ProjectQuery {
 }
 
 /// `client.repositories` namespace. Repository rows come from the Control
-/// Plane; their contents are read through the Data Plane.
+/// Plane; their contents and commits are read through the Data Plane.
 #[derive(Clone)]
 pub struct Repositories {
     cp_http: Arc<HttpClient>,
@@ -62,6 +63,36 @@ impl Repositories {
                 },
             )
             .await
+    }
+
+    /// `GET /v1/repositories/{id}/commits` on the Data Plane — the history
+    /// reachable from `query.sha`, newest first, following the `next` cursor.
+    pub fn commits(
+        &self,
+        repository_id: Uuid,
+        query: &CommitsQuery,
+    ) -> ApiResult<Paginator<RepositoryCommit>> {
+        let path = format!("/v1/repositories/{repository_id}/commits");
+        Paginator::with_cursor_param(self.dp_http.clone(), path, query, "cursor")
+    }
+
+    /// `GET /v1/repositories/{id}/commits/{sha}` on the Data Plane — one
+    /// commit with its changed files and unified diff. `sha` may be a branch
+    /// or tag, which reads its head commit.
+    pub async fn commit(
+        &self,
+        repository_id: Uuid,
+        sha: &str,
+    ) -> ApiResult<RepositoryCommitDetail> {
+        // A URL parser resolves `.` / `..` even percent-encoded, so the request
+        // would silently read a different path.
+        if sha.is_empty() || sha == "." || sha == ".." {
+            return Err(IntrospectionAPIError::InvalidConfig(format!(
+                "invalid commit sha {sha:?}"
+            )));
+        }
+        let path = format!("/v1/repositories/{repository_id}/commits/{}", encode(sha));
+        self.dp_http.get_json(&path, &()).await
     }
 
     /// The files of one repository, read through the Data Plane.

@@ -1030,6 +1030,119 @@ pub struct ContentsQuery {
     pub limit: Option<u32>,
 }
 
+// ----- repository commits (DP) -----------------------------------------------
+
+/// The author or committer of a commit.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryCommitPerson {
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub date: Option<String>,
+}
+
+/// One commit of a repository's history.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryCommit {
+    pub sha: String,
+    #[serde(default)]
+    pub parents: Vec<String>,
+    pub message: String,
+    pub author: RepositoryCommitPerson,
+    pub committer: RepositoryCommitPerson,
+}
+
+/// How a commit changed a file — mirrors the DP `RepositoryCommitFileStatus`.
+///
+/// `Other` keeps a commit readable when the Data Plane reports a status this
+/// SDK build predates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepositoryCommitFileStatus {
+    Added,
+    Removed,
+    Modified,
+    Renamed,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RepositoryCommitFileStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Added => "added",
+            Self::Removed => "removed",
+            Self::Modified => "modified",
+            Self::Renamed => "renamed",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl From<&str> for RepositoryCommitFileStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "added" => Self::Added,
+            "removed" => Self::Removed,
+            "modified" => Self::Modified,
+            "renamed" => Self::Renamed,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RepositoryCommitFileStatus {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RepositoryCommitFileStatus {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// One file a commit changed.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryCommitFile {
+    pub filename: String,
+    pub status: RepositoryCommitFileStatus,
+    #[serde(default)]
+    pub additions: u64,
+    #[serde(default)]
+    pub deletions: u64,
+    #[serde(default)]
+    pub changes: u64,
+}
+
+/// `GET /v1/repositories/{id}/commits/{sha}` — a commit with what it changed.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryCommitDetail {
+    #[serde(flatten)]
+    pub commit: RepositoryCommit,
+    #[serde(default)]
+    pub files: Vec<RepositoryCommitFile>,
+    /// The whole commit as a unified git diff.
+    #[serde(default)]
+    pub patch: String,
+}
+
+/// Query for a repository's commit history.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CommitsQuery {
+    /// Branch, tag or commit to walk back from; the default branch when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
+    /// Only commits that touch this repository-relative path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Page size (server default 30, max 100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
 // ----- runtimes (CP) ---------------------------------------------------------
 
 /// How a Runtime acquires LLM provider credentials at session create —

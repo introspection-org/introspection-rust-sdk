@@ -113,6 +113,18 @@ where
         })
     }
 
+    /// A paginator whose cursor rides as `cursor_param` rather than `next`.
+    pub(crate) fn with_cursor_param<P: Serialize>(
+        http: Arc<HttpClient>,
+        path: impl Into<String>,
+        params: &P,
+        cursor_param: &'static str,
+    ) -> ApiResult<Self> {
+        let mut paginator = Self::new(http, path, params)?;
+        paginator.cursor_param = cursor_param;
+        Ok(paginator)
+    }
+
     /// A paginator whose cursor rides as `cursor_param` and whose page body
     /// is lowered by `decoder` rather than read as `Paginated<T>`.
     pub(crate) fn with_decoder<P: Serialize>(
@@ -122,8 +134,7 @@ where
         cursor_param: &'static str,
         decoder: PageDecoder<T>,
     ) -> ApiResult<Self> {
-        let mut paginator = Self::new(http, path, params)?;
-        paginator.cursor_param = cursor_param;
+        let mut paginator = Self::with_cursor_param(http, path, params, cursor_param)?;
         paginator.decoder = Some(decoder);
         Ok(paginator)
     }

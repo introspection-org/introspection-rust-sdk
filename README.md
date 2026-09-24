@@ -243,6 +243,25 @@ if let RepositoryContent::File(file) = contents.get("agents/agent.yaml", &query)
 }
 ```
 
+`commits(id, query)` walks a repository's history, newest first, and
+`commit(id, sha)` reads one commit with its changed files and unified diff.
+
+```rust
+use introspection_sdk::CommitsQuery;
+
+let query = CommitsQuery { path: Some("agents/agent.yaml".into()), ..Default::default() };
+let mut commits = client.repositories().commits(repository.id, &query)?;
+while let Some(commit) = commits.next().await {
+    let commit = commit?;
+    println!("{} {}", &commit.sha[..7], commit.message.lines().next().unwrap_or(""));
+}
+
+let detail = client.repositories().commit(repository.id, "main").await?;
+for file in &detail.files {
+    println!("{} {} +{} -{}", file.status.as_str(), file.filename, file.additions, file.deletions);
+}
+```
+
 ## Environment variables
 
 ```shell

@@ -193,7 +193,7 @@ pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
     AgentInfo, AnnotationEvent, AnnotationPayload, Arm, ClusteringRunEvent, ClusteringRunPayload,
-    Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
+    CommitsQuery, Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
     ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams,
     ConnectionMissionConstraints, ConnectionStatus, ConnectionSubjectType, ConnectionToken,
     ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
@@ -209,17 +209,18 @@ pub use schemas::{
     JudgeGoalComponent, JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, MetricsConfig,
     MetricsQuery, MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
     PaginationParams, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
-    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryContent, RepositoryDirectory,
-    RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryProvider,
-    RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
-    RunCallerPage, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec,
-    Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams, ShareResourceType,
-    SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest,
-    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate,
-    TelemetryGoalComponent, TimeDimension, Trajectory, TrajectoryAssistantRecord,
-    TrajectoryMetaRecord, TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall,
-    TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
+    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
+    RepositoryCommitFile, RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent,
+    RepositoryDirectory, RepositoryEntry, RepositoryEntryType, RepositoryFile,
+    RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
+    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext,
+    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode,
+    ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent, StringOrUuid, Task,
+    TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind,
+    TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind,
+    TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension,
+    Trajectory, TrajectoryAssistantRecord, TrajectoryMetaRecord, TrajectoryReasoningRecord,
+    TrajectoryRecord, TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::parse_sse_response;
