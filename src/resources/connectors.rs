@@ -29,7 +29,9 @@ use crate::api::paginator::Paginator;
 use crate::api::schemas::{
     Connection, ConnectionCreateParams, ConnectionListParams, ConnectionTokenParams,
     ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthorization,
-    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams, ConnectorUpdateParams,
+    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorCustomAppSearchParams,
+    ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams,
+    ConnectorUpdateParams,
 };
 
 /// `client.connectors.connections` — the authorized subjects under one
@@ -145,10 +147,17 @@ impl Connectors {
             .expect("ConnectorListParams must serialize to a JSON object")
     }
 
-    /// `POST /v1/connectors` — create, idempotent on `slug`.
+    /// `POST /v1/connectors` — create, upserting on `(project, slug)`.
     ///
-    /// A repeat POST with the same slug returns the live row rather than
-    /// duplicating it.
+    /// A repeat POST with the same slug does not duplicate the connector: it
+    /// replaces the live row's configuration (name, environment, endpoints,
+    /// scopes, API hosts, client id, metadata, ...) and keeps its provider,
+    /// auth mode and stored secrets.
+    ///
+    /// With only `issuer` set, the server discovers the endpoints and
+    /// registers an OAuth client on its own; pass the `client_id` /
+    /// `client_secret` from [`Self::discover_oauth`] when you already ran
+    /// discovery, so a second client is not registered.
     pub async fn create(&self, params: &ConnectorCreateParams) -> ApiResult<Connector> {
         self.http.post_json("/v1/connectors", params).await
     }
@@ -176,6 +185,45 @@ impl Connectors {
         let path = format!("/v1/connectors/{}/apps", connector_id);
         let response: Response = self.http.get_json(&path, params).await?;
         Ok(response.data)
+    }
+
+    /// `GET /v1/connectors/custom/apps` — search the open MCP registry, the
+    /// catalogue a custom connector picks from.
+    ///
+    /// Unlike [`Self::list_apps`] this takes no connector: it is read before
+    /// any connector exists. A listing's `mcp_url` is what to hand
+    /// [`Self::discover_oauth`] and [`Self::create`] as `issuer`.
+    pub async fn search_custom_apps(
+        &self,
+        params: &ConnectorCustomAppSearchParams,
+    ) -> ApiResult<Vec<ConnectorApp>> {
+        #[derive(serde::Deserialize)]
+        struct Response {
+            data: Vec<ConnectorApp>,
+        }
+
+        let response: Response = self
+            .http
+            .get_json("/v1/connectors/custom/apps", params)
+            .await?;
+        Ok(response.data)
+    }
+
+    /// `POST /v1/connectors/discover-oauth` — resolve a provider's OAuth
+    /// metadata before creating a custom connector.
+    ///
+    /// `issuer` may be the authorization server or the MCP server it
+    /// protects. This is not a pure read: when the provider supports it, the
+    /// server **registers an OAuth client** (dynamic registration) and returns
+    /// its `client_id` / `client_secret`. Pass those to [`Self::create`] so a
+    /// second client is not registered. Answers 400 when discovery fails.
+    pub async fn discover_oauth(
+        &self,
+        params: &ConnectorOAuthDiscoveryParams,
+    ) -> ApiResult<ConnectorOAuthDiscovery> {
+        self.http
+            .post_json("/v1/connectors/discover-oauth", params)
+            .await
     }
 
     /// `PATCH /v1/connectors/{id}` — partial update.
@@ -219,6 +267,10 @@ impl Connectors {
     /// Setting [`ConnectorAuthorizeParams::identity`] mints a `customer`
     /// member for the asserted end user, so it can answer 409 when the org has
     /// reached its member limit — a plan conflict, not back-pressure.
+    ///
+    /// Setting [`ConnectorAuthorizeParams::binding`] (with `runtime`) makes a
+    /// successful grant also write the runtime's MCP endpoint binding, in the
+    /// same transaction as the connection.
     pub async fn authorize(
         &self,
         connector_id: Uuid,

@@ -108,6 +108,10 @@ name = "connectors-pipedream"
 path = "examples/api/connectors_pipedream.rs"
 
 [[example]]
+name = "connectors-custom-app"
+path = "examples/api/connectors_custom_app.rs"
+
+[[example]]
 name = "runtimes"
 path = "examples/api/runtimes.rs"
 

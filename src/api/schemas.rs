@@ -1717,7 +1717,7 @@ pub struct Connector {
     pub project_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
-    /// Stable per-org identifier; create is idempotent on it.
+    /// Stable identifier, unique per project; create upserts on it.
     pub slug: String,
     pub name: String,
     /// Provider slug, e.g. `"slack"`, `"gmail"`, `"stripe"`.
@@ -1789,6 +1789,17 @@ pub struct Connection {
     pub subject_type: ConnectionSubjectType,
     #[serde(default)]
     pub scopes_granted: Vec<String>,
+    /// Application slug within a multi-application provider (Pipedream), as
+    /// [`Connectors::list_apps`] returns it. `None` for a provider with a
+    /// dedicated host.
+    ///
+    /// [`Connectors::list_apps`]: crate::resources::connectors::Connectors::list_apps
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_app: Option<String>,
+    /// The provider's own identifier for the connected account. An opaque
+    /// routing id, not a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_account_id: Option<String>,
     pub status: ConnectionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<String>,
@@ -1830,14 +1841,20 @@ pub struct ConnectionListParams {
 /// here (and on update) but never returned on any read. `issuer` drives
 /// server-side OAuth discovery (endpoints resolved from `.well-known` when
 /// omitted) and is not persisted.
+///
+/// Create upserts on `(project, slug)`: a repeat create with the same slug
+/// replaces the live connector's configuration (name, environment, endpoints,
+/// scopes, API hosts, client id, metadata, ...) and keeps its provider, auth
+/// mode and stored secrets.
 #[derive(Debug, Clone, Serialize)]
 pub struct ConnectorCreateParams {
     pub name: String,
     /// Provider slug, e.g. `"slack"`, `"gmail"`, `"stripe"`.
     pub provider: String,
     pub auth_mode: ConnectorAuthMode,
-    /// Derived from `name` server-side when omitted; create is idempotent on
-    /// the resulting slug.
+    /// Derived from `name` server-side when omitted. Unique per project; a
+    /// repeat create with the same slug replaces that connector's
+    /// configuration rather than adding a second one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slug: Option<String>,
     /// Defaults to `"production"` server-side.
@@ -1861,10 +1878,18 @@ pub struct ConnectorCreateParams {
     /// Write-only; never present on a read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signing_secret: Option<String>,
+    /// Provider-specific settings. A `pipedream` connector requires
+    /// `provider_workspace_id` — its Pipedream Connect project id
+    /// (`proj_...`). `provider_environment` is derived server-side from
+    /// `environment` and must not be sent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     /// OAuth discovery: when set and the endpoints are omitted, the server
-    /// resolves them from `.well-known`. Not persisted.
+    /// resolves them from `.well-known` (and registers a client when neither
+    /// `client_id` nor a discovered one is supplied — see
+    /// [`Connectors::discover_oauth`]). Not persisted.
+    ///
+    /// [`Connectors::discover_oauth`]: crate::resources::connectors::Connectors::discover_oauth
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issuer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2010,6 +2035,52 @@ pub struct ConnectorAuthorizeParams {
     /// `None` attributes the grant to the authenticated principal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<RunnerIdentity>,
+    /// Complete the grant into an MCP endpoint binding for one Runtime
+    /// environment. Requires `runtime`. On a successful grant the control
+    /// plane writes the binding in the same transaction as the connection, so
+    /// the runtime is never authorized but unbound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ConnectorAuthorizeBinding>,
+}
+
+/// The MCP endpoint binding an authorize completes into
+/// ([`ConnectorAuthorizeParams::binding`]). Non-secret: the provider token
+/// stays on the connection and is injected at the egress.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectorAuthorizeBinding {
+    /// Runtime environment lane: `development` / `staging` / `production`.
+    pub environment: String,
+    /// The Recipe MCP server id this connector backs
+    /// (`package.json#pi.mcp.servers[].id`): lowercase alphanumerics, `_` and
+    /// `-`, starting and ending alphanumeric, at most 255 characters.
+    pub mcp_server_id: String,
+    /// Streamable-HTTP MCP resource URL (https, at most 1024 characters).
+    pub url: String,
+    /// Display label; defaults to `mcp_server_id` server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Extra non-`Authorization` headers injected alongside the connection
+    /// token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
+}
+
+impl ConnectorAuthorizeBinding {
+    /// A binding with the three required fields set; combine with
+    /// struct-update syntax for `name` / `headers`.
+    pub fn new(
+        environment: impl Into<String>,
+        mcp_server_id: impl Into<String>,
+        url: impl Into<String>,
+    ) -> Self {
+        Self {
+            environment: environment.into(),
+            mcp_server_id: mcp_server_id.into(),
+            url: url.into(),
+            name: None,
+            headers: None,
+        }
+    }
 }
 
 fn is_false(value: &bool) -> bool {
@@ -2033,14 +2104,158 @@ pub struct ConnectorAppListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// An application available from a connector's provider catalogue.
+/// Parameters for `GET /v1/connectors/custom/apps`, the open MCP registry
+/// search. `query` is required (2–100 characters); build with [`Self::new`].
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectorCustomAppSearchParams {
+    /// Free-text search over the registry (`q` on the wire).
+    #[serde(rename = "q")]
+    pub query: String,
+    /// 1–50, default 20 server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl ConnectorCustomAppSearchParams {
+    /// Search params for `query` with the server's default limit.
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            limit: None,
+            filters: None,
+        }
+    }
+}
+
+/// An application listing — from a connector's provider catalogue
+/// ([`Connectors::list_apps`]) or the open MCP registry
+/// ([`Connectors::search_custom_apps`]).
+///
+/// [`Connectors::list_apps`]: crate::resources::connectors::Connectors::list_apps
+/// [`Connectors::search_custom_apps`]: crate::resources::connectors::Connectors::search_custom_apps
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectorApp {
     pub slug: String,
     pub name: String,
     pub icon_url: Option<String>,
     pub description: Option<String>,
+    /// How the provider authenticates; the open registry leaves it unset on
+    /// most listings.
     pub auth_type: Option<String>,
+    /// The listing's MCP server, where it has one. A Pipedream app is reached
+    /// through Pipedream instead.
+    #[serde(default)]
+    pub mcp_url: Option<String>,
+    /// The vendor's own documentation for this server, where the registry
+    /// knows it.
+    #[serde(default)]
+    pub docs_url: Option<String>,
+}
+
+/// `POST /v1/connectors/discover-oauth` body.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectorOAuthDiscoveryParams {
+    /// OAuth authorization-server issuer URL, or the URL of an MCP server /
+    /// protected resource whose RFC 9728 metadata names its authorization
+    /// server.
+    pub issuer: String,
+}
+
+impl ConnectorOAuthDiscoveryParams {
+    pub fn new(issuer: impl Into<String>) -> Self {
+        Self {
+            issuer: issuer.into(),
+        }
+    }
+}
+
+/// How the platform identified itself to a custom OAuth provider — mirrors
+/// the CP `ClientRegistrationMethod` enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientRegistrationMethod {
+    /// The platform's Client ID Metadata Document URL is the client id; no
+    /// state is kept on the provider.
+    ClientIdMetadataDocument,
+    /// A client registered with the provider through RFC 7591 dynamic
+    /// registration.
+    Dynamic,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl ClientRegistrationMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ClientIdMetadataDocument => "client_id_metadata_document",
+            Self::Dynamic => "dynamic",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for ClientRegistrationMethod {
+    fn from(s: &str) -> Self {
+        match s {
+            "client_id_metadata_document" => Self::ClientIdMetadataDocument,
+            "dynamic" => Self::Dynamic,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for ClientRegistrationMethod {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ClientRegistrationMethod {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Response of `POST /v1/connectors/discover-oauth` — the provider's OAuth
+/// metadata plus, when the provider allows it, a client the platform
+/// registered for itself.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectorOAuthDiscovery {
+    pub issuer: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registration_endpoint: Option<String>,
+    #[serde(default)]
+    pub token_endpoint_auth_methods_supported: Vec<String>,
+    #[serde(default)]
+    pub code_challenge_methods_supported: Vec<String>,
+    #[serde(default)]
+    pub scopes_supported: Vec<String>,
+    #[serde(default)]
+    pub client_id_metadata_document_supported: bool,
+    /// RFC 9728 resource identifier when discovery started at an MCP server;
+    /// sent as the RFC 8707 `resource` parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// The callback this deployment sends. A client registered by hand must
+    /// be given exactly this.
+    pub redirect_uri: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// How `client_id` was obtained; `None` when the provider offers no
+    /// automatic registration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_registration: Option<ClientRegistrationMethod>,
 }
 
 /// Response of `POST /v1/oauth/connections/authorize` — a freshly minted

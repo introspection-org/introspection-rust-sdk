@@ -1,8 +1,9 @@
 //! Create a Pipedream connector and authorize one downstream application.
 //!
-//! Run with either `PIPEDREAM_CONNECTOR_ID`, or `PIPEDREAM_PROJECT_ID`,
-//! `PIPEDREAM_CLIENT_ID`, and `PIPEDREAM_CLIENT_SECRET`. Also set
-//! `INTROSPECTION_RUNTIME`. `PIPEDREAM_APP` defaults to `google_sheets`.
+//! Run with either `PIPEDREAM_CONNECTOR_ID`, or `PIPEDREAM_PROJECT_ID` (the
+//! Pipedream Connect project id, `proj_...`), `PIPEDREAM_CLIENT_ID`, and
+//! `PIPEDREAM_CLIENT_SECRET`. Also set `INTROSPECTION_RUNTIME`.
+//! `PIPEDREAM_APP` defaults to `google_sheets`.
 //!
 //! ```sh
 //! cargo run --example connectors-pipedream
@@ -30,8 +31,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let project_id = std::env::var("PIPEDREAM_PROJECT_ID")?;
             let client_id = std::env::var("PIPEDREAM_CLIENT_ID")?;
             let client_secret = std::env::var("PIPEDREAM_CLIENT_SECRET")?;
+            // A pipedream connector requires its Connect project id as
+            // `provider_workspace_id`. `provider_environment` is derived from
+            // the connector's `environment` server-side; do not send it.
             let mut metadata = HashMap::new();
-            metadata.insert("pipedream_project_id".into(), project_id.into());
+            metadata.insert("provider_workspace_id".into(), project_id.into());
 
             let connector = client
                 .connectors()
