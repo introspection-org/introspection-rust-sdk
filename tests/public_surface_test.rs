@@ -50,3 +50,26 @@ fn a_runtime_llm_mode_is_nameable_from_the_crate_root() {
     let mode = RuntimeLlmMode::default();
     assert_eq!(mode, RuntimeLlmMode::default());
 }
+
+#[test]
+fn a_connector_authorize_binding_is_nameable_from_the_crate_root() {
+    use introspection_sdk::{
+        ClientRegistrationMethod, ConnectorApp, ConnectorAuthorizeBinding,
+        ConnectorAuthorizeParams, ConnectorOAuthDiscovery,
+    };
+
+    let params = ConnectorAuthorizeParams {
+        binding: Some(ConnectorAuthorizeBinding::new(
+            "production",
+            "linear",
+            "https://mcp.linear.app/mcp",
+        )),
+        ..Default::default()
+    };
+    assert!(params.binding.is_some());
+
+    // Response types reached through public methods are nameable too.
+    let _: Option<ConnectorApp> = None;
+    let _: Option<ConnectorOAuthDiscovery> = None;
+    assert_eq!(ClientRegistrationMethod::Dynamic.as_str(), "dynamic");
+}

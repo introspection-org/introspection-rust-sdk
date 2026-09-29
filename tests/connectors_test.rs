@@ -11,11 +11,13 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
 use introspection_sdk::{
-    ConnectionBrokerSubjectType, ConnectionCreateParams, ConnectionCreateSubjectType,
-    ConnectionListParams, ConnectionMissionConstraints, ConnectionSubjectType,
-    ConnectionTokenParams, ConnectionTokenResult, Connections, ConnectorAppListParams,
-    ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorListParams,
-    ConnectorUpdateParams, Connectors, PaginationParams, RunnerIdentity,
+    ClientRegistrationMethod, ConnectionBrokerSubjectType, ConnectionCreateParams,
+    ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
+    ConnectionSubjectType, ConnectionTokenParams, ConnectionTokenResult, Connections,
+    ConnectorAppListParams, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
+    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, Connectors, PaginationParams,
+    RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -541,4 +543,237 @@ async fn the_connectors_namespace_carries_connections() {
         .unwrap();
 
     assert_eq!(fetched.connector_id, connector_id());
+}
+
+#[tokio::test]
+async fn search_custom_apps_queries_the_open_registry_without_a_connector() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/connectors/custom/apps"))
+        .and(query_param("q", "linear"))
+        .and(query_param("limit", "5"))
+        .and(query_param_is_missing("project"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{
+                "slug": "linear",
+                "name": "Linear",
+                "icon_url": null,
+                "description": "Issue tracking",
+                "auth_type": null,
+                "mcp_url": "https://mcp.linear.app/mcp",
+                "docs_url": "https://linear.app/docs/mcp"
+            }, {
+                "slug": "linear-community",
+                "name": "Linear (community)"
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let apps = connectors
+        .search_custom_apps(&ConnectorCustomAppSearchParams {
+            limit: Some(5),
+            ..ConnectorCustomAppSearchParams::new("linear")
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(apps.len(), 2);
+    assert_eq!(
+        apps[0].mcp_url.as_deref(),
+        Some("https://mcp.linear.app/mcp")
+    );
+    assert_eq!(
+        apps[0].docs_url.as_deref(),
+        Some("https://linear.app/docs/mcp")
+    );
+    // A sparse listing still decodes; the optional fields are simply absent.
+    assert!(apps[1].mcp_url.is_none());
+    assert!(apps[1].docs_url.is_none());
+}
+
+#[tokio::test]
+async fn discover_oauth_posts_the_issuer_and_returns_the_registered_client() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/connectors/discover-oauth"))
+        .and(body_json(json!({ "issuer": "https://mcp.linear.app/mcp" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": "https://mcp.linear.app",
+            "authorization_endpoint": "https://mcp.linear.app/authorize",
+            "token_endpoint": "https://mcp.linear.app/token",
+            "registration_endpoint": "https://mcp.linear.app/register",
+            "token_endpoint_auth_methods_supported": ["client_secret_post"],
+            "code_challenge_methods_supported": ["S256"],
+            "scopes_supported": ["read", "write"],
+            "client_id_metadata_document_supported": false,
+            "resource": "https://mcp.linear.app/mcp",
+            "redirect_uri": "https://api.introspection.dev/v1/oauth/connections/callback",
+            "client_id": "registered-client",
+            "client_secret": "registered-secret",
+            "client_registration": "dynamic"
+        })))
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let discovered = connectors
+        .discover_oauth(&ConnectorOAuthDiscoveryParams::new(
+            "https://mcp.linear.app/mcp",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(discovered.token_endpoint, "https://mcp.linear.app/token");
+    assert_eq!(discovered.scopes_supported, vec!["read", "write"]);
+    assert_eq!(discovered.client_id.as_deref(), Some("registered-client"));
+    assert_eq!(
+        discovered.client_registration,
+        Some(ClientRegistrationMethod::Dynamic)
+    );
+}
+
+#[tokio::test]
+async fn discover_oauth_decodes_a_provider_without_registration() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/connectors/discover-oauth"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": "https://auth.example",
+            "authorization_endpoint": "https://auth.example/authorize",
+            "token_endpoint": "https://auth.example/token",
+            "redirect_uri": "https://api.introspection.dev/v1/oauth/connections/callback",
+            "client_registration": "something_new"
+        })))
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let discovered = connectors
+        .discover_oauth(&ConnectorOAuthDiscoveryParams::new("https://auth.example"))
+        .await
+        .unwrap();
+
+    assert!(discovered.client_id.is_none());
+    assert!(discovered.scopes_supported.is_empty());
+    assert!(!discovered.client_id_metadata_document_supported);
+    assert_eq!(
+        discovered.client_registration,
+        Some(ClientRegistrationMethod::Other("something_new".into()))
+    );
+}
+
+#[tokio::test]
+async fn discover_oauth_surfaces_a_failed_discovery() {
+    let server = MockServer::start().await;
+    let detail = "No OAuth authorization server metadata found";
+    Mock::given(method("POST"))
+        .and(path("/v1/connectors/discover-oauth"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({ "detail": detail })))
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let err = connectors
+        .discover_oauth(&ConnectorOAuthDiscoveryParams::new(
+            "https://nowhere.example",
+        ))
+        .await
+        .unwrap_err();
+
+    match err {
+        IntrospectionAPIError::Http {
+            status, message, ..
+        } => {
+            assert_eq!(status, 400);
+            assert_eq!(message, detail);
+        }
+        other => panic!("expected an HTTP error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn authorize_carries_an_mcp_endpoint_binding() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/authorize"))
+        .and(body_json(json!({
+            "connector_id": CONNECTOR_ID,
+            "runtime": "support-agent",
+            "binding": {
+                "environment": "production",
+                "mcp_server_id": "linear",
+                "url": "https://mcp.linear.app/mcp",
+                "headers": { "X-Workspace": "acme" }
+            },
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorize_url": "https://mcp.linear.app/authorize?state=single-use",
+            "expires_in": 600,
+            "expires_at": "2026-08-08T20:10:00Z",
+        })))
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let params = ConnectorAuthorizeParams {
+        runtime: Some("support-agent".into()),
+        // `name` is unset, so it stays off the wire and defaults server-side.
+        binding: Some(ConnectorAuthorizeBinding {
+            headers: Some(HashMap::from([("X-Workspace".into(), "acme".into())])),
+            ..ConnectorAuthorizeBinding::new("production", "linear", "https://mcp.linear.app/mcp")
+        }),
+        ..Default::default()
+    };
+
+    connectors.authorize(connector_id(), &params).await.unwrap();
+}
+
+#[tokio::test]
+async fn connection_exposes_the_provider_app_and_account() {
+    let server = MockServer::start().await;
+    let mut body = connection_json();
+    body["provider_app"] = json!("google_sheets");
+    body["provider_account_id"] = json!("apn_abc123");
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v1/connectors/{CONNECTOR_ID}/connections/{CONNECTION_ID}"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let connections = Connections::new(build_http(&server));
+    let connection = connections
+        .get(connector_id(), connection_id())
+        .await
+        .unwrap();
+
+    assert_eq!(connection.provider_app.as_deref(), Some("google_sheets"));
+    assert_eq!(
+        connection.provider_account_id.as_deref(),
+        Some("apn_abc123")
+    );
+}
+
+#[tokio::test]
+async fn a_connection_without_provider_fields_decodes_to_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v1/connectors/{CONNECTOR_ID}/connections/{CONNECTION_ID}"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(connection_json()))
+        .mount(&server)
+        .await;
+
+    let connections = Connections::new(build_http(&server));
+    let connection = connections
+        .get(connector_id(), connection_id())
+        .await
+        .unwrap();
+
+    assert!(connection.provider_app.is_none());
+    assert!(connection.provider_account_id.is_none());
 }

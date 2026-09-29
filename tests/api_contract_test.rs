@@ -47,19 +47,21 @@
 use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
-    AgentInfo, ConnectionBrokerSubjectType, ConnectionCreateParams, ConnectionCreateSubjectType,
-    ConnectionListParams, ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams,
-    ConnectorListParams, ConnectorStatus, ConnectorUpdateParams, ConversationExportParams,
-    ConversationItemInclude, ConversationItemListParams, ConversationListParams,
-    ConversationResolution, ConversationSentiment, ConversationStatus, Dimension, Event,
-    EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File,
-    FileListParams, FileType, FileUpdate, HavingTerm, IntrospectionEventName, MetricFilter,
-    MetricSpec, MetricsConfig, MetricsQuery, OrderTerm, PaginationParams, RecipeListParams,
-    Repository, RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus,
-    ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate, ShareListParams,
-    ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions, TaskCreate,
-    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind,
-    TaskStatus, TimeDimension,
+    AgentInfo, ClientRegistrationMethod, Connection, ConnectionBrokerSubjectType,
+    ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams, ConnectionStatus,
+    ConnectionSubjectType, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
+    ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
+    ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
+    ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
+    Dimension, Event, EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent,
+    FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
+    IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
+    PaginationParams, RecipeListParams, Repository, RepositoryListParams, RepositoryProvider,
+    RepositoryProvisioningStatus, ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate,
+    ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions,
+    TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate,
+    TaskRunKind, TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -497,6 +499,57 @@ fn sdk_surface_matches_the_published_reference() {
             conversation_id: None,
             tags: Some(vec!["project:x".into()]),
         }),
+        binding: Some(ConnectorAuthorizeBinding::new(
+            "production",
+            "linear",
+            "https://mcp.linear.app/mcp",
+        )),
+    };
+
+    let connector_binding = ConnectorAuthorizeBinding {
+        name: Some("Linear".into()),
+        headers: Some(Default::default()),
+        ..ConnectorAuthorizeBinding::new("production", "linear", "https://mcp.linear.app/mcp")
+    };
+
+    let connection = Connection {
+        id: Uuid::nil(),
+        org_id: Uuid::nil(),
+        created_at: "2026-08-08T00:00:00Z".into(),
+        updated_at: "2026-08-08T00:00:00Z".into(),
+        connector_id: Uuid::nil(),
+        member_id: Some(Uuid::nil()),
+        created_by_member_id: Some(Uuid::nil()),
+        runtime_group_id: Some(Uuid::nil()),
+        subject_type: ConnectionSubjectType::App,
+        scopes_granted: vec!["chat:write".into()],
+        provider_app: Some("google_sheets".into()),
+        provider_account_id: Some("apn_1".into()),
+        status: ConnectionStatus::Active,
+        token_expires_at: Some("2026-08-08T21:00:00Z".into()),
+    };
+
+    let custom_app_search = ConnectorCustomAppSearchParams {
+        limit: Some(5),
+        ..ConnectorCustomAppSearchParams::new("linear")
+    };
+
+    let oauth_discovery_request = ConnectorOAuthDiscoveryParams::new("https://mcp.linear.app/mcp");
+
+    let oauth_discovery = ConnectorOAuthDiscovery {
+        issuer: "https://mcp.linear.app".into(),
+        authorization_endpoint: "https://mcp.linear.app/authorize".into(),
+        token_endpoint: "https://mcp.linear.app/token".into(),
+        registration_endpoint: Some("https://mcp.linear.app/register".into()),
+        token_endpoint_auth_methods_supported: vec!["none".into()],
+        code_challenge_methods_supported: vec!["S256".into()],
+        scopes_supported: vec!["read".into()],
+        client_id_metadata_document_supported: true,
+        resource: Some("https://mcp.linear.app/mcp".into()),
+        redirect_uri: "https://api.example/callback".into(),
+        client_id: Some("client".into()),
+        client_secret: Some("secret".into()),
+        client_registration: Some(ClientRegistrationMethod::Dynamic),
     };
 
     let conversation_export = ConversationExportParams {
@@ -905,6 +958,51 @@ fn sdk_surface_matches_the_published_reference() {
             "sent but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",
             false,
+        ),
+        compare(
+            "ConnectBindingRequest — ConnectAuthorizeRequest.binding",
+            wire_fields(&connector_binding),
+            schema_properties(&cp_spec, "ConnectBindingRequest"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "Connection — the connection read model",
+            wire_fields(&connection),
+            schema_properties(&cp_spec, "ConnectionResponse"),
+            &[],
+            "declared here but not returned by the API (the SDK describes a response that no longer exists)",
+            "returned by the API but not surfaced by this SDK",
+            false,
+        ),
+        compare(
+            "custom app search — GET /v1/connectors/custom/apps query parameters",
+            wire_fields(&custom_app_search),
+            query_parameters(&cp_spec, "/v1/connectors/custom/apps", "get"),
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
+        ),
+        compare(
+            "ConnectorOAuthDiscoveryRequest — POST /v1/connectors/discover-oauth body",
+            wire_fields(&oauth_discovery_request),
+            schema_properties(&cp_spec, "ConnectorOAuthDiscoveryRequest"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "ConnectorOAuthDiscoveryResponse — POST /v1/connectors/discover-oauth response",
+            wire_fields(&oauth_discovery),
+            schema_properties(&cp_spec, "ConnectorOAuthDiscoveryResponse"),
+            &[],
+            "declared here but not returned by the API (the SDK describes a response that no longer exists)",
+            "returned by the API but not surfaced by this SDK",
+            true,
         ),
         compare(
             "conversation export filters — GET /v1/conversations/{id}/export query parameters",
