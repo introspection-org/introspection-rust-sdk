@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.21.0...v0.22.0) (2026-09-29)
+
+
+### Features
+
+* add repository merges ([#98](https://github.com/introspection-org/introspection-rust-sdk/issues/98)) ([7965eb7](https://github.com/introspection-org/introspection-rust-sdk/commit/7965eb7238b3c1c6b9596acc070d7383397f39d9))
+* **connectors:** custom-app search, OAuth discovery and authorize binding ([#97](https://github.com/introspection-org/introspection-rust-sdk/issues/97)) ([b954e1a](https://github.com/introspection-org/introspection-rust-sdk/commit/b954e1a839f22ba433ae097247d9aa8d36c87cfb))
+
 ## [0.21.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.20.0...v0.21.0) (2026-09-24)
 
 
