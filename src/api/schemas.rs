@@ -1143,6 +1143,32 @@ pub struct CommitsQuery {
     pub limit: Option<u32>,
 }
 
+// ----- repository merges (DP) ------------------------------------------------
+
+/// `POST /v1/repositories/{id}/merges` body — mirrors GitHub's merges API.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RepositoryMergeCreate {
+    /// The branch to merge into.
+    pub base: String,
+    /// A branch name or a full 40-character commit sha to merge.
+    pub head: String,
+    /// Defaults server-side to `Merge {head} into {base}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
+}
+
+/// The merge commit a `201` answers with. For a `base` with no commits, `sha`
+/// equals `head_sha` and `parents` is `[head_sha]`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryMergeCommit {
+    pub sha: String,
+    pub base: String,
+    pub head: String,
+    pub head_sha: String,
+    #[serde(default)]
+    pub parents: Vec<String>,
+}
+
 // ----- runtimes (CP) ---------------------------------------------------------
 
 /// How a Runtime acquires LLM provider credentials at session create —

@@ -155,7 +155,7 @@ impl IntrospectionClient {
     }
 
     /// `GET /v1/repositories` lookups (the Git source a recipe pins), their
-    /// contents and their commits.
+    /// contents and commits, and branch merges.
     pub fn repositories(&self) -> &Repositories {
         &self.repositories
     }
