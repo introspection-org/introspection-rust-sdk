@@ -1,9 +1,9 @@
-//! `client.repositories` — repository lookup (CP) and contents and commit
-//! reads (DP).
+//! `client.repositories` — repository lookup (CP), and contents and commit
+//! reads and branch merges (DP).
 //!
-//! Read-only: a runner resolves the repository behind the recipe it runs, it
-//! does not register one. Linking a repository to a project is a
-//! project-authoring act and lives in the CLI.
+//! A runner resolves the repository behind the recipe it runs, it does not
+//! register one. Linking a repository to a project is a project-authoring act
+//! and lives in the CLI.
 //!
 //! Unlike the other CP lists, `GET /v1/repositories` answers a bare JSON
 //! array rather than the cursor envelope, so [`Repositories::list`] returns a
@@ -20,7 +20,8 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
     CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryCommit, RepositoryCommitDetail,
-    RepositoryContent, RepositoryEntry, RepositoryListParams, StringOrUuid,
+    RepositoryContent, RepositoryEntry, RepositoryListParams, RepositoryMergeCommit,
+    RepositoryMergeCreate, StringOrUuid,
 };
 
 #[derive(Serialize)]
@@ -29,7 +30,7 @@ struct ProjectQuery {
 }
 
 /// `client.repositories` namespace. Repository rows come from the Control
-/// Plane; their contents and commits are read through the Data Plane.
+/// Plane; their contents, commits and merges go through the Data Plane.
 #[derive(Clone)]
 pub struct Repositories {
     cp_http: Arc<HttpClient>,
@@ -93,6 +94,24 @@ impl Repositories {
         }
         let path = format!("/v1/repositories/{repository_id}/commits/{}", encode(sha));
         self.dp_http.get_json(&path, &()).await
+    }
+
+    /// `POST /v1/repositories/{id}/merges` on the Data Plane
+    /// (`repositories:write`) — merges `head` into `base`, like GitHub's
+    /// merges API. `Ok(None)` is `204`: `base` already contains `head`.
+    ///
+    /// `404` (repository or `head` not found), `409` (conflict; nothing
+    /// changed), `502` (the merge failed) and `504` (still running after 60s)
+    /// surface as [`IntrospectionAPIError::Http`]. The call is idempotent on
+    /// repository + `base` + `head`, so re-sending after a `504` attaches to
+    /// the running merge.
+    pub async fn merge(
+        &self,
+        repository_id: Uuid,
+        merge: &RepositoryMergeCreate,
+    ) -> ApiResult<Option<RepositoryMergeCommit>> {
+        let path = format!("/v1/repositories/{repository_id}/merges");
+        self.dp_http.post_json_or_no_content(&path, merge).await
     }
 
     /// The files of one repository, read through the Data Plane.

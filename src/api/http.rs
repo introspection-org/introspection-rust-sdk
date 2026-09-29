@@ -295,6 +295,21 @@ impl HttpClient {
         decode_json(res).await
     }
 
+    /// POST a JSON body; `None` on `204 No Content`, else the decoded JSON.
+    pub async fn post_json_or_no_content<B: Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> ApiResult<Option<R>> {
+        let res = self
+            .send_retrying(false, || self.inner.post(self.url(path)).json(body))
+            .await?;
+        if res.status() == StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        decode_json(res).await.map(Some)
+    }
+
     /// POST a JSON body and accept an empty success response.
     pub async fn post_json_empty<B: Serialize>(&self, path: &str, body: &B) -> ApiResult<()> {
         self.send_retrying(false, || self.inner.post(self.url(path)).json(body))

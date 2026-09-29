@@ -262,6 +262,24 @@ for file in &detail.files {
 }
 ```
 
+`merge(id, &RepositoryMergeCreate)` merges a branch or commit into a branch,
+like GitHub's merges API (`repositories:write`). `None` means `base` already
+contains `head`; a conflict is a `409` error and leaves the branch unchanged.
+
+```rust
+use introspection_sdk::RepositoryMergeCreate;
+
+let merge = RepositoryMergeCreate {
+    base: "main".into(),
+    head: "feature/triage".into(),
+    commit_message: None, // "Merge feature/triage into main"
+};
+match client.repositories().merge(repository.id, &merge).await? {
+    Some(commit) => println!("merged as {}", commit.sha),
+    None => println!("already up to date"),
+}
+```
+
 ## Environment variables
 
 ```shell

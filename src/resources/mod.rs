@@ -11,13 +11,15 @@
 //! - [`Repositories`] — `GET /v1/repositories` lookup: the Git source a
 //!   recipe pins, resolved to its credential-free transport URL — and
 //!   [`RepositoryContents`], its files read through the Data Plane, and its
-//!   commits via [`Repositories::commits`] / [`Repositories::commit`].
+//!   commits via [`Repositories::commits`] / [`Repositories::commit`], and
+//!   branch merges via [`Repositories::merge`].
 //! - [`Connectors`] — `/v1/connectors` CRUD with [`Connections`] nested
 //!   under `.connections`, plus `authorize()`, which mints the consent URL
 //!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer
 //!   so their workspace connects to an agent.
 //!
-//! Read and lifecycle only, with one exception: connectors are full CRUD.
+//! Read and lifecycle only, with two exceptions: connectors are full CRUD, and
+//! a repository's branches can be merged.
 //! A connector is not an authoring artifact but the B2B2C seam an integrator
 //! drives from their own backend — creating one and minting install links for
 //! their customers is runner-plane work, not operator work. Authoring the rest
