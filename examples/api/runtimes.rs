@@ -81,6 +81,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             name: "notes.md".into(),
             content: "# Hello\n\nFrom the Rust SDK Runner.".into(),
             mime_type: Some("text/markdown".into()),
+            ..Default::default()
         })
         .await?;
     println!("created file: {}", note.id);

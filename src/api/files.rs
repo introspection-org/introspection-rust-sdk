@@ -1,5 +1,6 @@
 //! `client.files.*` — upload / download / list / versions.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -58,6 +59,12 @@ pub struct FileUpload {
     /// Content-Type for the file part. Defaults to a guess from the
     /// filename (or `application/octet-stream`).
     pub content_type: Option<String>,
+    /// Sent as a JSON object string in the `metadata` form field.
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Tags stamped on the file when this request creates it; a new version
+    /// keeps the file's existing tags — change them with [`Files::update`].
+    /// Sent as one `tags` form field per tag.
+    pub tags: Option<Vec<String>>,
 }
 
 impl FileUpload {
@@ -67,6 +74,8 @@ impl FileUpload {
             name: None,
             file_type: None,
             content_type: None,
+            metadata: None,
+            tags: None,
         }
     }
 
@@ -76,6 +85,8 @@ impl FileUpload {
             name: Some(name.into()),
             file_type: None,
             content_type: None,
+            metadata: None,
+            tags: None,
         }
     }
 
@@ -91,6 +102,20 @@ impl FileUpload {
 
     pub fn with_content_type(mut self, ct: impl Into<String>) -> Self {
         self.content_type = Some(ct.into());
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: HashMap<String, serde_json::Value>) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    pub fn with_tags<I, T>(mut self, tags: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        self.tags = Some(tags.into_iter().map(Into::into).collect());
         self
     }
 }
@@ -249,6 +274,15 @@ async fn build_upload_form(upload: FileUpload) -> ApiResult<Form> {
     let mut form = Form::new().part("file", part).text("name", name);
     if let Some(ft) = upload.file_type {
         form = form.text("file_type", ft.as_str().to_string());
+    }
+    if let Some(metadata) = upload.metadata {
+        let json = serde_json::to_string(&metadata).map_err(|e| {
+            IntrospectionAPIError::InvalidConfig(format!("invalid file metadata: {e}"))
+        })?;
+        form = form.text("metadata", json);
+    }
+    for tag in upload.tags.into_iter().flatten() {
+        form = form.text("tags", tag);
     }
     Ok(form)
 }
