@@ -80,7 +80,9 @@ impl RunHandle {
     }
 
     /// Convenience: concatenate the assistant's streamed text — the `delta`
-    /// of every [`Event::TextMessageContent`] — into a single string. Returns
+    /// of every [`Event::TextMessageContent`] — into a single string. A
+    /// [`Event::MessagesSnapshot`] (a reconnect behind the replay buffer)
+    /// replaces the text read so far with its assistant content. Returns
     /// an error on run failure, lost output, or exhausted recovery.
     pub async fn text(&self) -> ApiResult<String> {
         let mut out = String::new();
@@ -88,6 +90,15 @@ impl RunHandle {
         tokio::pin!(stream);
         while let Some(ev) = stream.next().await {
             match ev? {
+                // A snapshot carries the whole run so far, so it replaces what was read.
+                Event::MessagesSnapshot(e) => {
+                    out = e
+                        .messages
+                        .iter()
+                        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+                        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                        .collect();
+                }
                 Event::TextMessageContent(e) => out.push_str(&e.delta),
                 Event::TextMessageChunk(e) => out.push_str(e.delta.as_deref().unwrap_or_default()),
                 Event::RunError(e) => {

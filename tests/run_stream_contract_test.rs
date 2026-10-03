@@ -21,6 +21,8 @@ struct Scenario {
     deltas: Vec<String>,
     error: Option<String>,
     text_error: Option<String>,
+    text: Option<String>,
+    attach_statuses: Option<Vec<u16>>,
     stream_delays_ms: Option<Vec<u64>>,
     timeout_ms: Option<u64>,
 }
@@ -50,14 +52,19 @@ async fn setup(scenario: &Scenario) -> (MockServer, TaskRuns, Arc<Mutex<Seen>>) 
                         .unwrap()
                         .to_string(),
                 );
-                ResponseTemplate::new(200)
-                    .set_delay(Duration::from_millis(
-                        fixture
-                            .stream_delays_ms
-                            .as_ref()
-                            .map_or(0, |delays| delays[index]),
-                    ))
-                    .set_body_raw(fixture.streams[index].clone(), "text/event-stream")
+                ResponseTemplate::new(
+                    fixture
+                        .attach_statuses
+                        .as_ref()
+                        .map_or(200, |statuses| statuses[index]),
+                )
+                .set_delay(Duration::from_millis(
+                    fixture
+                        .stream_delays_ms
+                        .as_ref()
+                        .map_or(0, |delays| delays[index]),
+                ))
+                .set_body_raw(fixture.streams[index].clone(), "text/event-stream")
             } else {
                 assert_eq!(
                     request.url.path(),
@@ -106,7 +113,7 @@ fn fixture_hash() {
         .collect();
     assert_eq!(
         hex,
-        "f1dfd4501a3466442e1201210fc5c7a17150b03787405f22def762aaf511ea78"
+        "b25a2d3d463ce20ccc6e95abeccf549ef053db059c1c79a4b602f014362fc7fb"
     );
 }
 
@@ -165,7 +172,7 @@ async fn shared_stream_contract() {
 async fn text_outcomes() {
     for fixture in scenarios()
         .into_iter()
-        .filter(|s| s.text_error.is_some() || s.name == "text_chunk")
+        .filter(|s| s.text_error.is_some() || s.text.is_some() || s.name == "text_chunk")
     {
         let (_server, runs, _seen) = setup(&fixture).await;
         let request = Default::default();
@@ -179,7 +186,12 @@ async fn text_outcomes() {
                 fixture.name
             );
         } else {
-            assert_eq!(result.unwrap(), "chunk");
+            assert_eq!(
+                result.unwrap(),
+                fixture.text.as_deref().unwrap_or("chunk"),
+                "{}",
+                fixture.name
+            );
         }
     }
 }

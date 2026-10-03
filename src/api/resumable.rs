@@ -191,6 +191,12 @@ pub fn stream_resumable(
                     tokio::time::sleep(backoff_delay(reconnects, opts.backoff, None).min(rem)).await;
                     continue;
                 }
+                // The runtime holds neither the frames after this cursor nor a
+                // snapshot covering them, so no reconnect can complete the stream.
+                Ok(res) if res.status().as_u16() == 410 => {
+                    yield Err(IntrospectionAPIError::StreamIncomplete("The stream history is no longer available; read the conversation transcript".into()));
+                    return;
+                }
                 // Other non-2xx — surface it (won't fix on retry).
                 Ok(res) => {
                     let status = res.status().as_u16();
