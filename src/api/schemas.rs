@@ -676,6 +676,16 @@ pub struct FileListParams {
     /// ever narrows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// Match files whose `metadata` holds every pair, each compared exactly
+    /// against the string value (at most 16 pairs). Values may contain `:`;
+    /// keys are letters, digits, `_` and `-`. Each pair is lowered to a
+    /// repeated `metadata=key:value` query parameter. A server that predates
+    /// this filter ignores it and returns the unfiltered list.
+    #[serde(
+        serialize_with = "serialize_metadata_filter",
+        skip_serializing_if = "metadata_filter_is_empty"
+    )]
+    pub metadata: Option<HashMap<String, String>>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -3532,9 +3542,19 @@ fn put_list(
     }
 }
 
+/// Lower a metadata filter to its `key:value` pairs. Sorting makes request
+/// serialization deterministic despite `HashMap` iteration order.
+fn metadata_filter_pairs(metadata: &HashMap<String, String>) -> Vec<String> {
+    let mut pairs: Vec<_> = metadata
+        .iter()
+        .map(|(key, value)| format!("{key}:{value}"))
+        .collect();
+    pairs.sort();
+    pairs
+}
+
 /// Insert conversation metadata as repeated `metadata=key:value` filters.
-/// Sorting makes request serialization deterministic despite `HashMap`
-/// iteration order. An empty map means no filter and is omitted.
+/// An empty map means no filter and is omitted.
 fn put_metadata(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     metadata: Option<&HashMap<String, String>>,
@@ -3542,15 +3562,31 @@ fn put_metadata(
     let Some(metadata) = metadata.filter(|metadata| !metadata.is_empty()) else {
         return;
     };
-    let mut pairs: Vec<_> = metadata
-        .iter()
-        .map(|(key, value)| format!("{key}:{value}"))
-        .collect();
-    pairs.sort();
     obj.insert(
         "metadata".to_string(),
-        serde_json::Value::Array(pairs.into_iter().map(Into::into).collect()),
+        serde_json::Value::Array(
+            metadata_filter_pairs(metadata)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ),
     );
+}
+
+fn metadata_filter_is_empty(metadata: &Option<HashMap<String, String>>) -> bool {
+    metadata.as_ref().is_none_or(HashMap::is_empty)
+}
+
+/// Serde form of [`put_metadata`] for derive-serialized list params.
+fn serialize_metadata_filter<S: serde::Serializer>(
+    metadata: &Option<HashMap<String, String>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let pairs = metadata
+        .as_ref()
+        .map(metadata_filter_pairs)
+        .unwrap_or_default();
+    serializer.collect_seq(pairs)
 }
 
 fn merge_filters(

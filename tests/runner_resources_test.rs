@@ -450,6 +450,85 @@ async fn files_list_returns_paginated() {
 }
 
 #[tokio::test]
+async fn files_list_sends_metadata_as_repeated_pairs() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/files"))
+        .and(query_param("metadata", "ref:a:b"))
+        .and(query_param("metadata", "source:crm"))
+        .and(query_param("tag", "customer:acme"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [file_response("a.txt")],
+            "count": 1,
+            "next": "cursor_2",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The filter rides along on every page, not just the first.
+    Mock::given(method("GET"))
+        .and(path("/v1/files"))
+        .and(query_param("metadata", "ref:a:b"))
+        .and(query_param("metadata", "source:crm"))
+        .and(query_param("next", "cursor_2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [file_response("b.txt")],
+            "count": 1,
+            "next": null,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut paginator = files.list(&FileListParams {
+        tag: Some("customer:acme".into()),
+        metadata: Some(HashMap::from([
+            ("source".into(), "crm".into()),
+            ("ref".into(), "a:b".into()),
+        ])),
+        ..Default::default()
+    });
+    let all = paginator.collect_all(10).await.unwrap();
+    assert_eq!(all.len(), 2);
+
+    let requests = server.received_requests().await.unwrap();
+    let metadata: Vec<_> = requests[0]
+        .url
+        .query_pairs()
+        .filter(|(key, _)| key == "metadata")
+        .map(|(_, value)| value.into_owned())
+        .collect();
+    assert_eq!(metadata, ["ref:a:b", "source:crm"]);
+}
+
+#[tokio::test]
+async fn files_list_omits_empty_metadata_filter() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/files"))
+        .and(query_param_is_missing("metadata"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [],
+            "count": 0,
+            "next": null,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut paginator = files.list(&FileListParams {
+        metadata: Some(HashMap::new()),
+        ..Default::default()
+    });
+    paginator.next_page().await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn files_create_text_sends_json() {
     let server = MockServer::start().await;
     let files = Files::new(build_http(&server));

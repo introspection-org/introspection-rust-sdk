@@ -339,6 +339,7 @@ fn sdk_surface_matches_the_published_reference() {
         file_type: Some(FileType::Upload),
         storage_path: Some("p".into()),
         tag: Some("customer:acme".into()),
+        metadata: Some(HashMap::from([("source".into(), "crm".into())])),
         filters: None,
     };
 
