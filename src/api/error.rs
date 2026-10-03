@@ -56,6 +56,17 @@ pub enum IntrospectionAPIError {
     /// payload.
     #[error("timeout: {0}")]
     Timeout(String),
+
+    /// Output was lost or the stream ended without a confirmed outcome.
+    #[error("incomplete stream: {0}")]
+    StreamIncomplete(String),
+
+    /// The run failed or was cancelled.
+    #[error("run failed: {message}")]
+    RunFailed {
+        message: String,
+        code: Option<String>,
+    },
 }
 
 impl IntrospectionAPIError {
@@ -99,7 +110,8 @@ impl IntrospectionAPIError {
     /// indistinguishable from a bad API key.
     pub fn code(&self) -> Option<&str> {
         match self {
-            Self::Http { code, .. } => code.as_deref(),
+            Self::Http { code, .. } | Self::RunFailed { code, .. } => code.as_deref(),
+            Self::StreamIncomplete(_) => Some("stream_incomplete"),
             _ => None,
         }
     }

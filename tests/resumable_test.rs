@@ -179,7 +179,7 @@ async fn clean_completion_single_attach() {
 
     let deltas = collect_deltas(&runs, opts()).await.unwrap();
     assert_eq!(deltas, vec!["a", "b"]);
-    assert_eq!(*seen.lock().unwrap(), vec![None]); // no resume header on first attach
+    assert_eq!(*seen.lock().unwrap(), vec![Some("0".into())]); // include output produced before the first attach
 }
 
 #[tokio::test]
@@ -196,7 +196,10 @@ async fn mid_turn_drop_reattaches_with_last_event_id() {
     let deltas = collect_deltas(&runs, opts()).await.unwrap();
     assert_eq!(deltas, vec!["a", "b", "c"]); // gap-free
                                              // Reconnect resumes from the last numeric content-frame id seen.
-    assert_eq!(*seen.lock().unwrap(), vec![None, Some("2".to_string())]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![Some("0".into()), Some("2".to_string())]
+    );
 }
 
 #[tokio::test]
@@ -258,7 +261,10 @@ async fn resume_cursor_ignores_control_ids() {
 
     let deltas = collect_deltas(&runs, opts()).await.unwrap();
     assert_eq!(deltas, vec!["a", "b"]);
-    assert_eq!(*seen.lock().unwrap(), vec![None, Some("5".to_string())]); // "c-9" not a cursor
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![Some("0".into()), Some("5".to_string())]
+    ); // "c-9" not a cursor
 }
 
 #[tokio::test]

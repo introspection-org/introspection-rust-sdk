@@ -234,6 +234,7 @@ async fn run_handle_streams_typed_agui_events() {
 event: ag_ui\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"run_001:text:0\",\"delta\":\"hello \"}\n\n\
 event: heartbeat\ndata: {\"runId\":\"run_001\"}\n\n\
 event: ag_ui\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"run_001:text:0\",\"delta\":\"world\"}\n\n";
+    let body = format!("{body}event: ag_ui\ndata: {{\"type\":\"RUN_FINISHED\",\"threadId\":\"t\",\"runId\":\"run_001\"}}\n\n");
     Mock::given(method("GET"))
         .and(path(
             "/v1/tasks/00000000-0000-0000-0000-000000000001/runs/run_001/stream",
@@ -251,12 +252,13 @@ event: ag_ui\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"run_001:t
         .await
         .unwrap();
     let events: Vec<_> = stream.collect().await;
-    // Two typed events; the heartbeat transport frame is not surfaced.
-    assert_eq!(events.len(), 2);
+    // Text and terminal events are surfaced; the heartbeat is not.
+    assert_eq!(events.len(), 3);
     let deltas: Vec<String> = events
         .iter()
-        .map(|ev| match ev.as_ref().unwrap() {
-            AgUiEvent::TextMessageContent(e) => e.delta.clone(),
+        .filter_map(|ev| match ev.as_ref().unwrap() {
+            AgUiEvent::TextMessageContent(e) => Some(e.delta.clone()),
+            AgUiEvent::RunFinished(_) => None,
             other => panic!("expected TextMessageContent, got {other:?}"),
         })
         .collect();
