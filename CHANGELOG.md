@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.23.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.22.0...v0.23.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **files:** FileCreateText and FileUpload have new fields `tags` and `metadata` (exhaustive struct literals need them; `FileCreateText { .., ..Default::default() }` and the FileUpload constructors are unaffected).
+
+### Features
+
+* **files:** accept tags and metadata on file create ([#100](https://github.com/introspection-org/introspection-rust-sdk/issues/100)) ([f65cbf2](https://github.com/introspection-org/introspection-rust-sdk/commit/f65cbf2438f890b2b7c0f5e246925eb0b215621d))
+
 ## [0.22.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.21.0...v0.22.0) (2026-09-29)
 
 
