@@ -28,7 +28,7 @@ pub struct StreamOptions {
     /// Base step for the capped-exponential reconnect/readiness backoff.
     /// `Retry-After` is the floor on a `429`.
     pub backoff: Duration,
-    /// Wall-clock deadline after which no further recovery is attempted.
+    /// Recovery window, renewed by each new content cursor; checked before retrying.
     pub timeout: Duration,
     /// Emit an opt-in `introspection.reconnect` AG-UI `CUSTOM` event into the
     /// stream on each reconnect / readiness wait. Default `false` — the stream
@@ -65,14 +65,16 @@ pub fn stream_resumable(
     run_id: &str,
     opts: StreamOptions,
 ) -> impl Stream<Item = ApiResult<Event>> {
-    let path = format!(
-        "/v1/tasks/{}/runs/{}/stream",
+    let run_path = format!(
+        "/v1/tasks/{}/runs/{}",
         crate::api::encoding::encode(task_id),
         crate::api::encoding::encode(run_id),
     );
 
+    let path = format!("{run_path}/stream");
+
     stream! {
-        let start = Instant::now();
+        let mut last_progress = Instant::now();
         let mut last_event_id = Some("0".to_string());
         let mut reconnects: u32 = 0;
         // Readiness waits are counted separately from reconnects: they are
@@ -90,7 +92,7 @@ pub fn stream_resumable(
                     // Not attachable yet — a readiness wait, not a failed attempt.
                     let retry_after = retry_after_from(res.headers());
                     let phase = readiness_phase(res).await;
-                    let remaining = opts.timeout.checked_sub(start.elapsed());
+                    let remaining = opts.timeout.checked_sub(last_progress.elapsed());
                     match remaining {
                         None => {
                             yield Err(timeout_error());
@@ -137,6 +139,7 @@ pub fn stream_resumable(
                                                 let previous = last_event_id.as_ref().and_then(|id| id.parse::<u64>().ok()).unwrap_or(0);
                                                 if cursor <= previous { continue; }
                                                 last_event_id = frame.id.clone();
+                                                last_progress = Instant::now();
                                                 progressed = true;
                                             }
                                         }
@@ -160,7 +163,7 @@ pub fn stream_resumable(
                         }
                     }
                     if severed.is_none() {
-                        let state = http.get_json::<_, TaskRun>(path.trim_end_matches("/stream"), &()).await.ok();
+                        let state = http.get_json::<_, TaskRun>(&run_path, &()).await.ok();
                         if let Some(state) = state {
                             if matches!(state.status, TaskStatus::Failed | TaskStatus::Cancelled) {
                                 yield Err(IntrospectionAPIError::RunFailed { message: format!("The run ended with status {}", state.status.as_str()), code: Some("run_failed".into()) });
@@ -173,7 +176,7 @@ pub fn stream_resumable(
                         }
                     }
                     reconnects = if progressed { 0 } else { reconnects + 1 };
-                    if reconnects > opts.max_reconnects || start.elapsed() >= opts.timeout {
+                    if reconnects > opts.max_reconnects || last_progress.elapsed() >= opts.timeout {
                         yield Err(severed.unwrap_or_else(|| IntrospectionAPIError::StreamIncomplete("The stream ended before the run settled".into())));
                         return;
                     }
@@ -184,7 +187,7 @@ pub fn stream_resumable(
                             "last_event_id": last_event_id,
                         })));
                     }
-                    let rem = opts.timeout.saturating_sub(start.elapsed());
+                    let rem = opts.timeout.saturating_sub(last_progress.elapsed());
                     tokio::time::sleep(backoff_delay(reconnects, opts.backoff, None).min(rem)).await;
                     continue;
                 }
@@ -208,7 +211,7 @@ pub fn stream_resumable(
                 // Transport error before any response.
                 Err(e) => {
                     reconnects += 1;
-                    if reconnects > opts.max_reconnects || start.elapsed() >= opts.timeout {
+                    if reconnects > opts.max_reconnects || last_progress.elapsed() >= opts.timeout {
                         yield Err(e);
                         return;
                     }

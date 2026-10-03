@@ -21,6 +21,8 @@ struct Scenario {
     deltas: Vec<String>,
     error: Option<String>,
     text_error: Option<String>,
+    stream_delays_ms: Option<Vec<u64>>,
+    timeout_ms: Option<u64>,
 }
 
 #[derive(Default)]
@@ -49,6 +51,12 @@ async fn setup(scenario: &Scenario) -> (MockServer, TaskRuns, Arc<Mutex<Seen>>) 
                         .to_string(),
                 );
                 ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(
+                        fixture
+                            .stream_delays_ms
+                            .as_ref()
+                            .map_or(0, |delays| delays[index]),
+                    ))
                     .set_body_raw(fixture.streams[index].clone(), "text/event-stream")
             } else {
                 assert_eq!(
@@ -85,6 +93,23 @@ async fn setup(scenario: &Scenario) -> (MockServer, TaskRuns, Arc<Mutex<Seen>>) 
     (server, runs, seen)
 }
 
+#[test]
+fn fixture_hash() {
+    let digest = ring::digest::digest(
+        &ring::digest::SHA256,
+        include_bytes!("fixtures/run-stream-contract.json"),
+    );
+    let hex: String = digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        hex,
+        "f1dfd4501a3466442e1201210fc5c7a17150b03787405f22def762aaf511ea78"
+    );
+}
+
 fn scenarios() -> Vec<Scenario> {
     serde_json::from_str(include_str!("fixtures/run-stream-contract.json")).unwrap()
 }
@@ -107,6 +132,7 @@ async fn shared_stream_contract() {
             StreamOptions {
                 max_reconnects: 2,
                 backoff: Duration::from_millis(1),
+                timeout: Duration::from_millis(fixture.timeout_ms.unwrap_or(300000)),
                 ..Default::default()
             },
         );
