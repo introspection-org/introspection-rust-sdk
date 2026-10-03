@@ -81,6 +81,7 @@
 //!     name: "notes.md".into(),
 //!     content: "# Hello".into(),
 //!     mime_type: Some("text/markdown".into()),
+//!     ..Default::default()
 //! }).await?;
 //!
 //! // Download into memory.

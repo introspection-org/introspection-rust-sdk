@@ -470,6 +470,7 @@ async fn files_create_text_sends_json() {
             name: "note.md".into(),
             content: "hello".into(),
             mime_type: Some("text/markdown".into()),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -492,6 +493,135 @@ async fn files_upload_sends_multipart() {
         .await
         .unwrap();
     assert_eq!(file.name, "payload.bin");
+}
+
+#[tokio::test]
+async fn files_create_text_sends_tags_and_metadata() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .and(body_json(json!({
+            "name": "note.md",
+            "content": "hello",
+            "metadata": {"source": "sdk"},
+            "tags": ["customer:acme", "draft"],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(file_response("note.md")))
+        .mount(&server)
+        .await;
+
+    files
+        .create_text(&FileCreateText {
+            name: "note.md".into(),
+            content: "hello".into(),
+            metadata: Some(HashMap::from([("source".into(), json!("sdk"))])),
+            tags: Some(vec!["customer:acme".into(), "draft".into()]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn files_create_text_omits_unset_tags_and_metadata() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .and(body_json(json!({"name": "note.md", "content": "hello"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(file_response("note.md")))
+        .mount(&server)
+        .await;
+
+    files
+        .create_text(&FileCreateText {
+            name: "note.md".into(),
+            content: "hello".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+}
+
+/// `(field name, value)` for each text part of a multipart body; the file
+/// part (which carries a `filename`) is skipped.
+fn multipart_text_fields(request: &wiremock::Request) -> Vec<(String, String)> {
+    let content_type = request.headers["content-type"].to_str().unwrap();
+    let boundary = content_type.split("boundary=").nth(1).unwrap();
+    let body = String::from_utf8_lossy(&request.body);
+    body.split(&format!("--{boundary}"))
+        .filter_map(|part| {
+            let (headers, value) = part.split_once("\r\n\r\n")?;
+            if headers.contains("filename=") {
+                return None;
+            }
+            let name = headers.split("name=\"").nth(1)?.split('"').next()?;
+            Some((name.to_string(), value.trim_end_matches("\r\n").to_string()))
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn files_upload_sends_tags_and_metadata_parts() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(file_response("payload.bin")))
+        .mount(&server)
+        .await;
+
+    files
+        .upload(
+            FileUpload::from_bytes(b"hello".to_vec(), "payload.bin")
+                .with_metadata(HashMap::from([("source".into(), json!("sdk"))]))
+                .with_tags(["customer:acme", "draft"]),
+        )
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let fields = multipart_text_fields(&requests[0]);
+    let tags: Vec<&str> = fields
+        .iter()
+        .filter(|(name, _)| name == "tags")
+        .map(|(_, value)| value.as_str())
+        .collect();
+    assert_eq!(tags, ["customer:acme", "draft"]);
+    let metadata: Vec<serde_json::Value> = fields
+        .iter()
+        .filter(|(name, _)| name == "metadata")
+        .map(|(_, value)| serde_json::from_str(value).unwrap())
+        .collect();
+    assert_eq!(metadata, [json!({"source": "sdk"})]);
+}
+
+#[tokio::test]
+async fn files_upload_omits_unset_tags_and_metadata() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(file_response("payload.bin")))
+        .mount(&server)
+        .await;
+
+    files
+        .upload(FileUpload::from_bytes(b"hello".to_vec(), "payload.bin"))
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let names: Vec<String> = multipart_text_fields(&requests[0])
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(names, ["name"]);
 }
 
 #[tokio::test]

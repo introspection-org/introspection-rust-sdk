@@ -643,12 +643,19 @@ pub struct FileUpdate {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct FileCreateText {
     pub name: String,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Tags stamped on the file when this request creates it; a new version
+    /// keeps the file's existing tags — change them with
+    /// [`Files::update`](crate::api::Files::update).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
