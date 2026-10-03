@@ -89,6 +89,7 @@ futures = "0.3"
 httpdate = "1.0.3"
 
 [dev-dependencies]
+ring = "0.17"
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 # In-memory span / log exporters for the in-crate tests. As a dev-dependency
 # they are available under every feature set, so `cargo test --features otel`

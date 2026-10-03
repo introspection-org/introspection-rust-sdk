@@ -7,7 +7,7 @@ use futures::stream::Stream;
 use futures::StreamExt;
 
 use crate::agui::Event;
-use crate::api::error::ApiResult;
+use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::resumable::{stream_resumable, StreamOptions};
@@ -80,15 +80,39 @@ impl RunHandle {
     }
 
     /// Convenience: concatenate the assistant's streamed text — the `delta`
-    /// of every [`Event::TextMessageContent`] — into a single string. Returns
-    /// an error on the first transport / decode failure.
+    /// of every [`Event::TextMessageContent`] — into a single string. A
+    /// [`Event::MessagesSnapshot`] (a reconnect behind the replay buffer)
+    /// replaces the text read so far with its assistant content. Returns
+    /// an error on run failure, lost output, or exhausted recovery.
     pub async fn text(&self) -> ApiResult<String> {
         let mut out = String::new();
         let stream = self.stream().await?;
         tokio::pin!(stream);
         while let Some(ev) = stream.next().await {
-            if let Event::TextMessageContent(e) = ev? {
-                out.push_str(&e.delta);
+            match ev? {
+                // A snapshot carries the whole run so far, so it replaces what was read.
+                Event::MessagesSnapshot(e) => {
+                    out = e
+                        .messages
+                        .iter()
+                        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+                        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                        .collect();
+                }
+                Event::TextMessageContent(e) => out.push_str(&e.delta),
+                Event::TextMessageChunk(e) => out.push_str(e.delta.as_deref().unwrap_or_default()),
+                Event::RunError(e) => {
+                    return Err(IntrospectionAPIError::RunFailed {
+                        message: e.message,
+                        code: e.code,
+                    })
+                }
+                Event::Custom(e) if e.name == "resume_gap" => {
+                    return Err(IntrospectionAPIError::StreamIncomplete(
+                        "The replay buffer lost output; read the conversation transcript".into(),
+                    ))
+                }
+                _ => {}
             }
         }
         Ok(out)
@@ -161,14 +185,10 @@ impl TaskRuns {
     /// `GET /v1/tasks/{id}/runs/{rid}/stream` — async iterable of typed
     /// AG-UI [`Event`]s.
     ///
-    /// The stream resumes **transparently** across a mid-turn disconnect
-    /// (gateway idle-timeout, load-balancer recycle, network blip): it
-    /// re-attaches with the SSE-standard `Last-Event-ID` so the server replays
-    /// the frames the client missed, yielding a single gap-free sequence
-    /// (INT-252, see [`crate::api::resumable`]). It ends when the turn finishes
-    /// and yields a terminal `Err` only once recovery is exhausted — no
-    /// consumer-visible change from a plain stream. Use [`Self::stream_with`]
-    /// to tune the recovery bounds or opt into reconnect events.
+    /// Reconnects with a content cursor, starting at zero. Nonterminal EOF
+    /// checks the specific run's status. Replay gaps remain visible as CUSTOM
+    /// events; [`RunHandle::text`] rejects them. Use [`Self::stream_with`] to
+    /// tune recovery bounds or opt into reconnect events.
     pub async fn stream(
         &self,
         task_id: &str,
