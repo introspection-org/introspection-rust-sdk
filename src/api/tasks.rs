@@ -186,8 +186,9 @@ impl TaskRuns {
     /// AG-UI [`Event`]s.
     ///
     /// Reconnects with a content cursor, starting at zero. Nonterminal EOF
-    /// checks the specific run's status. Replay gaps remain visible as CUSTOM
-    /// events; [`RunHandle::text`] rejects them. Use [`Self::stream_with`] to
+    /// checks the specific run's status. A reconnect behind the replay buffer
+    /// yields one `MESSAGES_SNAPSHOT`; a `410` ends the stream as
+    /// [`IntrospectionAPIError::StreamIncomplete`]. Use [`Self::stream_with`] to
     /// tune recovery bounds or opt into reconnect events.
     pub async fn stream(
         &self,
