@@ -126,22 +126,22 @@ pub use api::{
     GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, HavingTerm,
     IdRef, IntrospectionAPIError, IntrospectionAttributes, IntrospectionConversation,
     IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime, JudgeGoalComponent,
-    JudgementEvent, JudgementPayload, MetricFilter, MetricSpec, Metrics, MetricsConfig,
-    MetricsQuery, MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm,
-    Paginated, PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload,
-    PatternEvent, PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit,
-    RepositoryCommitDetail, RepositoryCommitFile, RepositoryCommitFileStatus,
-    RepositoryCommitPerson, RepositoryContent, RepositoryDirectory, RepositoryEntry,
-    RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryMergeCommit,
-    RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
-    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunHandle, RunRequest, RunnerContext,
-    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode,
-    ShareCreate, ShareListParams, ShareResourceType, Shares, SortDirection, SpanAttributes,
-    SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse,
-    TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
-    TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns,
-    TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory,
-    TypedEvent, UploadSource,
+    JudgementEvent, JudgementPayload, Member, MemberCreateParams, MemberListParams, MemberType,
+    MemberUpdateParams, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
+    MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
+    PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
+    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
+    RepositoryCommitFile, RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent,
+    RepositoryDirectory, RepositoryEntry, RepositoryEntryType, RepositoryFile,
+    RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider,
+    RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
+    RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity,
+    RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams,
+    ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions,
+    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
+    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate,
+    TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
@@ -159,8 +159,8 @@ pub use resources::annotations::{
     AnnotationTarget, ProjectLabel, ProjectLabelCreate, ProjectLabelListParams, ProjectLabelUpdate,
 };
 pub use resources::{
-    Annotations, Connections, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes,
-    Repositories, RepositoryContents, RuntimeHandle, Runtimes,
+    Annotations, Connections, Connectors, ExperimentHandle, Experiments, Members, ProjectLabels,
+    Recipes, Repositories, RepositoryContents, RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

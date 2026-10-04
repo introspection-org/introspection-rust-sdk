@@ -56,7 +56,8 @@ use introspection_sdk::api::schemas::{
     ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
     Dimension, Event, EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent,
     FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
-    IntrospectionEventName, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
+    IntrospectionEventName, Member, MemberCreateParams, MemberListParams, MemberType,
+    MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
     PaginationParams, RecipeListParams, Repository, RepositoryListParams, RepositoryProvider,
     RepositoryProvisioningStatus, ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate,
     ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions,
@@ -479,6 +480,57 @@ fn sdk_surface_matches_the_published_reference() {
         signing_secret: Some("signing".into()),
     };
 
+    let member_list = MemberListParams {
+        pagination: PaginationParams {
+            limit: Some(1),
+            next: Some("cursor".into()),
+        },
+        member_type: Some(MemberType::Customer),
+        connector_id: Some(Uuid::nil()),
+        application_idp_id: Some(Uuid::nil()),
+        tag: Some("customer:acme".into()),
+        metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+        ids: Some(vec![Uuid::nil()]),
+        external_user_ids: Some(vec!["user:abc".into()]),
+        filters: None,
+    };
+
+    let member_create = MemberCreateParams {
+        email: "ada@example.com".into(),
+        name: "Ada Lovelace".into(),
+        role: Some("member".into()),
+        tags: Some(vec!["team:support".into()]),
+        metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+    };
+
+    let member_update = MemberUpdateParams {
+        name: Some("Ada Lovelace".into()),
+        image_url: Some("https://example.com/ada.png".into()),
+        role: Some("admin".into()),
+        tags: Some(vec!["team:support".into()]),
+        metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+    };
+
+    let member = Member {
+        id: Uuid::nil(),
+        org_id: Uuid::nil(),
+        created_at: "2026-10-04T00:00:00Z".into(),
+        updated_at: "2026-10-04T00:00:00Z".into(),
+        email: Some("ada@example.com".into()),
+        name: Some("Ada Lovelace".into()),
+        external_user_id: Some("user:abc".into()),
+        image_url: Some("https://example.com/ada.png".into()),
+        role: "member".into(),
+        member_type: MemberType::Customer,
+        is_deactivated: false,
+        tags: vec!["team:support".into()],
+        metadata: HashMap::from([("plan".into(), "enterprise".into())]),
+        application_idp_id: Some(Uuid::nil()),
+        connector_id: Some(Uuid::nil()),
+        integration_id: Some(Uuid::nil()),
+        is_external_credential_agent: false,
+    };
+
     let connection_create = ConnectionCreateParams {
         subject_type: Some(ConnectionCreateSubjectType::App),
         scopes_granted: Some(vec!["chat:write".into()]),
@@ -499,6 +551,7 @@ fn sdk_surface_matches_the_published_reference() {
             anonymous_id: None,
             conversation_id: None,
             tags: Some(vec!["project:x".into()]),
+            metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
         }),
         binding: Some(ConnectorAuthorizeBinding::new(
             "production",
@@ -935,6 +988,69 @@ fn sdk_surface_matches_the_published_reference() {
             "ConnectorUpdate — PATCH /v1/connectors/{id} body",
             wire_fields(&connector_update),
             schema_properties(&cp_spec, "ConnectorUpdate"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "member list filters — GET /v1/members query parameters",
+            wire_fields(&member_list),
+            query_parameters(&cp_spec, "/v1/members", "get"),
+            // Project context for deployment-authenticated reads; an org
+            // credential carries its own scope.
+            &["project"],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            false,
+        ),
+        compare(
+            "MemberCreate — POST /v1/members body",
+            wire_fields(&member_create),
+            schema_properties(&cp_spec, "MemberCreate"),
+            // Declared by the shared member schema but never read by the
+            // invite route, which mints a business member from email + name.
+            &[
+                "external_user_id",
+                "image_url",
+                "member_type",
+                "is_deactivated",
+                "application_idp_id",
+                "connector_id",
+                "integration_id",
+            ],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "MemberUpdate — PATCH /v1/members/{id} body",
+            wire_fields(&member_update),
+            schema_properties(&cp_spec, "MemberUpdate"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "Member — the member read model",
+            wire_fields(&member),
+            schema_properties(&cp_spec, "Member"),
+            &[],
+            "declared here but not returned by the API (the SDK describes a response that no longer exists)",
+            "returned by the API but not surfaced by this SDK",
+            false,
+        ),
+        compare(
+            "RunnerIdentity — RunRequest.identity / ConnectAuthorizeRequest.identity",
+            wire_fields(&RunnerIdentity {
+                user_id: Some("u_demo".into()),
+                anonymous_id: Some("anon_demo".into()),
+                conversation_id: Some("conv_demo".into()),
+                tags: Some(vec!["project:x".into()]),
+                metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+            }),
+            schema_properties(&cp_spec, "RunnerIdentity"),
             &[],
             "sent but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",

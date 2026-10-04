@@ -2369,6 +2369,209 @@ pub enum ConnectionTokenResult {
     AuthorizationPending(ConnectionAuthorizationPending),
 }
 
+// ----- members (CP) ----------------------------------------------------------
+
+/// What kind of principal a member is — mirrors the CP `MemberType` enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberType {
+    /// A person at the business, who signs in to the console.
+    Business,
+    /// A system agent member or application service account.
+    Agent,
+    /// An end customer, minted by an identity assertion, a federated IdP or a
+    /// channel delivery.
+    Customer,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl MemberType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Business => "business",
+            Self::Agent => "agent",
+            Self::Customer => "customer",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for MemberType {
+    fn from(s: &str) -> Self {
+        match s {
+            "business" => Self::Business,
+            "agent" => Self::Agent,
+            "customer" => Self::Customer,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for MemberType {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for MemberType {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// A member — the CP read model returned by every `/v1/members` route.
+///
+/// `tags` and `metadata` are both `key:value`-shaped labels but differ in
+/// what they do: a tag is **access-bearing** (the member can read and write
+/// every file and task whose tags intersect its own), while metadata grants
+/// nothing and only narrows a list.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Member {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    /// Set for a business member; a customer member carries one only when a
+    /// brokered IdP supplied it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The identity a customer member is keyed on, tier-prefixed (e.g.
+    /// `user:abc`); the IdP subject for a business member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    /// `owner` / `admin` / `member` for a business member.
+    pub role: String,
+    pub member_type: MemberType,
+    #[serde(default)]
+    pub is_deactivated: bool,
+    /// Access-bearing: this member can read and write any file or task whose
+    /// tags intersect these.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Customer-defined `key: value` labels. Grants nothing; filter on them
+    /// with [`MemberListParams::metadata`].
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
+    /// The brokered IdP a customer member came through.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_idp_id: Option<Uuid>,
+    /// The connector whose verified delivery minted a customer member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector_id: Option<Uuid>,
+    /// The org's own provider install a channel customer member came through.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integration_id: Option<Uuid>,
+    /// Server-derived: whether this is one of the fixed agents an API key or
+    /// Application may act as.
+    #[serde(default)]
+    pub is_external_credential_agent: bool,
+}
+
+/// Filters supported by `GET /v1/members`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MemberListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_type: Option<MemberType>,
+    /// The customer members one connector's deliveries minted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector_id: Option<Uuid>,
+    /// The customer members one brokered IdP federated in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub application_idp_id: Option<Uuid>,
+    /// Members carrying this tag, e.g. `customer:acme` — who can reach the
+    /// rows tagged with it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Match members whose `metadata` holds every pair, each compared exactly
+    /// against the string value (at most 16 pairs). Values may contain `:`;
+    /// keys are letters, digits, `_` and `-`. Each pair is lowered to a
+    /// repeated `metadata=key:value` query parameter; the API answers 422 on a
+    /// malformed pair. An empty map sends no filter.
+    #[serde(
+        serialize_with = "serialize_metadata_filter",
+        skip_serializing_if = "metadata_filter_is_empty"
+    )]
+    pub metadata: Option<HashMap<String, String>>,
+    /// Resolve these member ids. Unions with `external_user_ids` rather than
+    /// intersecting; sent as repeated `id` parameters.
+    #[serde(rename = "id", skip_serializing_if = "Option::is_none")]
+    pub ids: Option<Vec<Uuid>>,
+    /// Resolve these tier-prefixed external keys, e.g. `user:abc`. Unions with
+    /// `ids`; sent as repeated `external_user_id` parameters.
+    #[serde(rename = "external_user_id", skip_serializing_if = "Option::is_none")]
+    pub external_user_ids: Option<Vec<String>>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// `POST /v1/members` body — invites a business member by email.
+///
+/// `email` and `name` are required, and `name` must be a full name (first and
+/// last). Build with [`Self::new`] and struct-update syntax for the rest.
+#[derive(Debug, Clone, Serialize)]
+pub struct MemberCreateParams {
+    pub email: String,
+    pub name: String,
+    /// Defaults to `"member"` server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Access-bearing, so setting any requires the `members:manage` scope
+    /// (403 otherwise). Same opaque, exact-match validation as every other
+    /// tag write.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    /// `key: value` labels (keys letters, digits, `_` and `-`; at most 64
+    /// entries; 422 otherwise). Grants nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+impl MemberCreateParams {
+    /// Create params with the required fields set and every optional field
+    /// unset. Combine with struct-update syntax.
+    pub fn new(email: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            email: email.into(),
+            name: name.into(),
+            role: None,
+            tags: None,
+            metadata: None,
+        }
+    }
+}
+
+/// `PATCH /v1/members/{id}` body. Only provided fields change.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MemberUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Replaces the tag list wholesale. `None` leaves tags untouched;
+    /// `Some(vec![])` clears them. Access-bearing: adding a tag grants this
+    /// member read and write over every file and task carrying it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    /// Replaces the metadata map wholesale. `None` leaves it untouched;
+    /// `Some(HashMap::new())` clears it. Grants nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
@@ -2391,6 +2594,14 @@ pub struct RunnerIdentity {
     /// opaque, exact-match validation as every other tag write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Metadata to set on the `customer` member this identity names. Unlike
+    /// `tags` it grants nothing, so it applies to an existing member too: the
+    /// keys are merged in, overwriting keys of the same name (including ones
+    /// an admin set) and keeping the rest. `None` or an empty map changes
+    /// nothing. Same bounds as [`MemberUpdateParams::metadata`]; not carried
+    /// on the access-token claims.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 /// Optional segment.io-style observability payload attached to a

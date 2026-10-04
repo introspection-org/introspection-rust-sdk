@@ -174,6 +174,51 @@ passthrough for a query parameter this SDK build predates: each pair goes on
 the wire verbatim (an array as a repeated key), so a new server-side filter
 is usable the day it ships, without waiting for a typed field here.
 
+## Label your customers
+
+Asserting an identity on `run` mints (or finds) the `customer` member for that
+end user. Attach `metadata` to it there, then read members back and filter by
+it:
+
+```rust
+use std::collections::HashMap;
+use futures::StreamExt;
+use introspection_sdk::{MemberListParams, MemberUpdateParams, RunRequest, RunnerIdentity};
+
+let runner = client.runtime("customer-agent").await?.run(RunRequest {
+    identity: Some(RunnerIdentity {
+        user_id: Some("u_123".into()),
+        metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+        ..Default::default()
+    }),
+    ..Default::default()
+}).await?;
+
+let mut members = client.members().list(&MemberListParams {
+    metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+    ..Default::default()
+});
+while let Some(member) = members.next().await {
+    let member = member?;
+    println!("{:?} {:?}", member.external_user_id, member.metadata);
+}
+
+client.members().update(member_id, &MemberUpdateParams {
+    metadata: Some(HashMap::new()), // replaces the whole map; empty clears it
+    ..Default::default()
+}).await?;
+```
+
+Metadata grants nothing. An assertion merges its keys into an existing
+member's metadata: asserted keys overwrite keys with the same name and other
+keys stay. An absent or empty map changes nothing. `tags` are different
+because they grant access. A member can read and write every file and task
+whose tags intersect its own, so a `RunnerIdentity` sets tags only on a member
+it creates, and setting tags through `members()` requires `members:manage`.
+The list filters are `tag` (one tag) and `metadata` (up to 16 pairs, all of
+which must match). The members routes are Control Plane routes, so they need
+an org credential with `members:read` / `members:write` / `members:manage`.
+
 ## Curate traces with human review
 
 Annotations are append-only events on an OTel trace/span. Each write changes
