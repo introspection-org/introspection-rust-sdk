@@ -526,13 +526,25 @@ pub(crate) async fn to_api_error(res: Response, status: StatusCode) -> Introspec
 }
 
 /// The DP's machine-readable error code, when the envelope carries one.
+/// The envelope's `code`, or for an RFC 6749 §5.2 token-endpoint error (a
+/// top-level `{"error", "error_description"}` body) its `error`, so a caller
+/// can branch on `invalid_grant` the way it branches on `runner_expired`.
 fn extract_code(value: &serde_json::Value) -> Option<String> {
-    value.as_object()?.get("code")?.as_str().map(str::to_string)
+    let obj = value.as_object()?;
+    obj.get("code")
+        .or_else(|| obj.get("error"))?
+        .as_str()
+        .map(str::to_string)
 }
 
 fn extract_message(value: &serde_json::Value) -> Option<String> {
     let obj = value.as_object()?;
-    let detail = obj.get("detail")?;
+    let Some(detail) = obj.get("detail") else {
+        return obj
+            .get("error_description")
+            .and_then(|d| d.as_str())
+            .map(str::to_string);
+    };
     if let Some(s) = detail.as_str() {
         return Some(s.to_string());
     }

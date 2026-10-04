@@ -488,6 +488,63 @@ match client.repositories().merge(repository.id, &merge).await? {
 }
 ```
 
+## Sign in
+
+Each [Application](https://docs.introspection.dev/sdk/authentication) type
+offers one way in. The type is chosen when the Application is created, the
+types are mutually exclusive, and the grants follow from the type:
+
+| `application_type` | For | Grants | Rust |
+| --- | --- | --- | --- |
+| `service_account` | Server-to-server (holds a client secret) | `client_credentials` | `service_account_token`, `IntrospectionClient::from_service_account` |
+| `jwks` | End users of your own IdP (Supabase, Auth0, Okta, ...) | token exchange of the IdP's JWT | `token_exchange` |
+| `spa` | Introspection-hosted login in a browser, optionally brokered | `authorization_code` + PKCE, `refresh_token` | `authorization_code_token` |
+| `native` | Mobile and desktop apps that draw their own sign-in screens | `email_code`, `device_code`, `refresh_token` | `EmailCodeAuth` |
+
+An app that needs two ways in registers two Applications. Every token's scopes
+are capped by its Application's `allowed_scopes`. A `service_account` token
+works on Control Plane routes; the end-user tokens (`jwks`, `spa`, `native`)
+belong to a `customer` member and are Data Plane credentials, so Control Plane
+routes such as `/v1/runtimes` answer them with `401`. The `native` type's
+`device_code` grant is not reachable with an Application yet.
+
+A `native` Application signs its users in with an emailed code:
+
+```rust
+use introspection_sdk::auth::{EmailCodeAuth, EmailCodeAuthConfig};
+use introspection_sdk::{TaskListParams, Tasks};
+
+let auth = EmailCodeAuth::new(
+    EmailCodeAuthConfig::builder()
+        .client_id("intro_app_...")
+        .project("acme")
+        .build()?,
+)?;
+
+auth.send_code("user@example.com").await?;
+let session = auth.verify_code("user@example.com", &code_the_user_typed).await?;
+
+let page = auth
+    .with_data_plane(|dp| async move {
+        Tasks::new(dp).list(&TaskListParams::default()).next_page().await
+    })
+    .await?;
+```
+
+- A returning user's code is six digits. A new user's first code is six
+  characters of `A-Z` and `0-9`, so accept letters in the code field.
+- `with_data_plane` refreshes the access token before it expires, and once more
+  after a `401`. Concurrent callers share one refresh. A refresh the server
+  rejects (`invalid_grant`) signs the user out; a network failure does not.
+- A sign-in that answers after a sign-out or a newer sign-in fails with
+  `IntrospectionAPIError::Superseded` and does not replace the current session.
+- `AuthSession` is serializable. Persist it from `auth.changes()` (each refresh
+  rotates the refresh token) and restore it with `auth.set_session`.
+- `sign_out` clears the local session first, then revokes it on the Control
+  Plane.
+
+See [`examples/api/native_email_code.rs`](examples/api/native_email_code.rs).
+
 ## Environment variables
 
 ```shell
@@ -508,42 +565,61 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 
 ## Stream recovery
 
-Run streams request replay from cursor `0`, including output produced before the
-first connection. Only a settling `RUN_FINISHED` or `RUN_ERROR` confirms completion;
-`RUN_FINISHED` with `result.reason = "stream_close"` is suppressed. A nonterminal
-EOF checks the specific run's status and reconnects within the recovery budget.
-Each new content cursor renews both the timeout window and the reconnect budget.
-Lifecycle events, heartbeats and duplicate content renew neither. The timeout is
-checked when recovery is needed; it does not interrupt an open connection.
+`stream()` and `text()` recover a run stream on their own; this is what they do.
 
-Every reconnect resumes from the last content cursor (`Last-Event-ID`). When
-that cursor is older than the server's replay buffer, the stream continues with
-one AG-UI `MESSAGES_SNAPSHOT` holding the run's messages so far; its id becomes
-the new cursor, and the text helper takes its assistant text in place of what it
-had read. When the server holds neither the frames nor a snapshot, it answers
-`410` and the stream ends with an incomplete-output error. Runtime images that
-predate the snapshot send `CUSTOM resume_gap` instead; raw streams pass it
-through. The text helper raises an incomplete-output error instead of returning
-partial text, including on `resume_gap`; it also raises on run failure or
-cancellation. If the status read
-says the run settled but the stream never confirmed completion, it raises an
-incomplete-output error. Recover final output from the conversation transcript
-when needed; the SDK does not automatically hydrate it or require an additional
-`conversations:read` scope just to stream. A long stream can therefore
-reconnect after its original timeout as long as content has continued to advance.
+**Cursor.** The first attach requests replay from cursor `0`, so output produced
+before the first connection is included. Every reconnect resumes from the last
+content cursor (`Last-Event-ID`). Only new content advances the cursor; lifecycle
+events, heartbeats and duplicate content do not.
 
-Use a concrete run ID when consuming one turn. `runs/current` is a moving alias: a
-reconnect or status read may resolve to the next turn if another run has started.
+**Completion.** Only a settling `RUN_FINISHED` or `RUN_ERROR` confirms that the
+run finished. A `RUN_FINISHED` with `result.reason = "stream_close"` only ends
+that attach, so the stream drops it. When a connection ends without a settling
+event, the stream reads that run's status
+(`GET /v1/tasks/{task_id}/runs/{run_id}`) before reconnecting:
+
+- A `failed` or `cancelled` run ends the stream with `RunFailed`.
+- A run that settled without its completion arriving on the stream ends it with
+  `StreamIncomplete`, rather than returning unverified partial output.
+- Any other status, or a failed status read, reconnects.
+
+**Budget.** Reconnects with no new content count against `max_reconnects`
+(default 5), and recovery stops once `timeout` (default 300 s) passes without
+new content. Each new content cursor resets both, so a long run keeps a full
+recovery window after every piece of output. The timeout is checked only when
+recovery is needed; it never interrupts an open, healthy connection. A run that
+is not attachable yet answers `429`, which the stream waits out with
+`Retry-After` as the floor. Tune all of this with `StreamOptions` through
+`stream_with`.
+
+**Past the replay buffer.** When the reconnect cursor is older than the
+runtime's replay buffer, the server answers with one AG-UI `MESSAGES_SNAPSHOT`
+holding the run's messages so far. Its id becomes the new cursor, and `text()`
+takes its assistant text in place of what it had read. When the server holds
+neither the frames nor a snapshot, it answers `410` and the stream ends with
+`StreamIncomplete`. Runtime images that predate the snapshot send
+`CUSTOM resume_gap` instead. Raw streams pass that event through, and `text()`
+fails with `StreamIncomplete` on it.
+
+**`text()`** concatenates the assistant's text. It fails with `RunFailed` on a
+`RUN_ERROR`, and passes through every error the stream yields, instead of
+returning partial text. The SDK does not read the conversation transcript to
+fill a gap, so streaming needs no `conversations:read` scope. When you need the
+final output after a `StreamIncomplete`, read it from the transcript.
+
+Use a concrete run ID when consuming one turn. `runs/current` is a moving alias:
+a reconnect or status read may resolve to the next turn if another run has started.
 
 The in-process fake sandbox (`mock://`) supplies replies through the conversation
-transcript, not SSE. Its attach-only `stream_close` cannot satisfy `.text()`; use
-transcript reads for fake-sandbox tests, or a real runtime for `.text()` tests.
+transcript, not SSE. Its attach-only `stream_close` cannot satisfy `text()`; use
+transcript reads for fake-sandbox tests, or a real runtime for `text()` tests.
 
 The shared `run-stream-contract.json` fixtures pin these behaviors across Swift,
 JavaScript, Rust and Python. Each test suite pins the fixture SHA-256; intentional
 contract changes must update all four copies and their expected hashes together.
 
-Rust exposes `IntrospectionAPIError::StreamIncomplete` and `IntrospectionAPIError::RunFailed`.
+Both errors are variants of `IntrospectionAPIError`: `StreamIncomplete` (code
+`stream_incomplete`) and `RunFailed`.
 
 ## License
 

@@ -67,6 +67,11 @@ pub enum IntrospectionAPIError {
         message: String,
         code: Option<String>,
     },
+
+    /// A sign-in or refresh answered after a sign-out or a newer sign-in, so
+    /// its session was dropped rather than replacing the current one.
+    #[error("superseded: {0}")]
+    Superseded(String),
 }
 
 impl IntrospectionAPIError {
