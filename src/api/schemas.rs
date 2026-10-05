@@ -2572,6 +2572,368 @@ pub struct MemberUpdateParams {
     pub metadata: Option<HashMap<String, String>>,
 }
 
+// ----- automations (DP) ------------------------------------------------------
+
+/// A string-backed wire enum with an `Other(String)` fallback, so a value the
+/// Data Plane adds after this SDK was built still decodes.
+macro_rules! open_wire_enum {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident => $wire:literal, )+
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub enum $name {
+            $( $(#[$vmeta])* $variant, )+
+            /// Forward-compatible escape hatch.
+            Other(String),
+        }
+
+        impl $name {
+            /// The on-the-wire value.
+            pub fn as_str(&self) -> &str {
+                match self {
+                    $( Self::$variant => $wire, )+
+                    Self::Other(value) => value,
+                }
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                match value {
+                    $( $wire => Self::$variant, )+
+                    other => Self::Other(other.to_string()),
+                }
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let value = String::deserialize(d)?;
+                Ok(Self::from(value.as_str()))
+            }
+        }
+    };
+}
+
+open_wire_enum! {
+    /// How an automation is triggered. Immutable after create.
+    pub enum AutomationTriggerType {
+        /// Fires on `cron_schedule` (or `metadata.cron_schedules`).
+        Cron => "cron",
+        /// Runs by hand, or once at a client-set `next_trigger_at` (a one-off
+        /// reminder).
+        Manual => "manual",
+    }
+}
+
+open_wire_enum! {
+    /// A platform automation kind. An automation a person created has no kind
+    /// (`Automation::kind` is `None`); any value marks a platform automation.
+    /// Immutable after create.
+    pub enum AutomationKind {
+        /// The project's default check-in. Runs as an agent task, so it carries
+        /// a `prompt`.
+        ProjectCheckIn => "project_check_in",
+        /// The project's synthesis job. Project-wide: takes no
+        /// `runtime_group_id`.
+        ObservationSynthesis => "observation_synthesis",
+        /// The clustering job for one runtime group.
+        ObservationClustering => "observation_clustering",
+    }
+}
+
+open_wire_enum! {
+    /// A built-in condition evaluated before an automation runs.
+    pub enum AutomationConditionType {
+        HasNewTasksSinceLastRun => "has_new_tasks_since_last_run",
+        LastRunIssuesResolved => "last_run_issues_resolved",
+        NoLiveTaskForAutomation => "no_live_task_for_automation",
+    }
+}
+
+open_wire_enum! {
+    /// Outcome of one automation execution attempt.
+    pub enum AutomationExecutionStatus {
+        Triggered => "triggered",
+        Cancelled => "cancelled",
+        Failed => "failed",
+        Skipped => "skipped",
+    }
+}
+
+open_wire_enum! {
+    /// Why a trigger ran nothing (`introspection.automation.skipped`).
+    pub enum AutomationSkipReason {
+        AutomationDeleted => "automation_deleted",
+        ExecutionBlocked => "execution_blocked",
+        ConditionsNotMet => "conditions_not_met",
+        NoProductionRuntime => "no_production_runtime",
+        SlackNotConfigured => "slack_not_configured",
+        TargetTaskDeleted => "target_task_deleted",
+        TargetTaskArchived => "target_task_archived",
+        TargetTaskUnavailable => "target_task_unavailable",
+        TargetTaskRefused => "target_task_refused",
+        /// The target task stayed mid-turn through every retry.
+        TargetBusy => "target_busy",
+    }
+}
+
+/// One condition stored in an automation's metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutomationCondition {
+    #[serde(rename = "type")]
+    pub condition_type: AutomationConditionType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+}
+
+impl AutomationCondition {
+    /// A condition with no runtime group.
+    pub fn new(condition_type: AutomationConditionType) -> Self {
+        Self {
+            condition_type,
+            runtime_group_id: None,
+        }
+    }
+}
+
+/// The typed shape of an automation's `metadata` object.
+///
+/// The runtime group is the top-level `runtime_group_id`; the API rejects it
+/// inside metadata, so there is no field for it here. Empty lists are not
+/// sent. On update the whole object replaces the stored one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AutomationMetadata {
+    /// Repositories a task-run automation clones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repositories: Vec<TaskRepoRequest>,
+    /// Several cron expressions; `cron_schedule` is the single-schedule form.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cron_schedules: Vec<String>,
+    /// IANA time zone the cron schedules are evaluated in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<AutomationCondition>,
+}
+
+/// A stored automation: a prompt run as an agent task, or platform work when
+/// `kind` is set. The read model of every `/v1/automations` route.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Automation {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub trigger_type: AutomationTriggerType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cron_schedule: Option<String>,
+    /// `None` for an automation a person created; a platform automation
+    /// carries its kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AutomationKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// The runtime group it runs on (or clusters); `None` for
+    /// [`AutomationKind::ObservationSynthesis`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    /// The existing task each firing posts the prompt into; `None` creates a
+    /// task per firing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    /// The person who created it; `None` on a platform automation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_member_id: Option<Uuid>,
+    /// Why the scheduler will not run this automation, when it will not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_blocked_reason: Option<String>,
+    /// Whether the caller may change it.
+    #[serde(default)]
+    pub can_manage: bool,
+    /// `operator` for one that runs as a task (a person's automation or
+    /// [`AutomationKind::ProjectCheckIn`]), `None` for one that runs on the
+    /// platform's own workers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_role: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Open-ended as stored; read the known fields with
+    /// [`Self::typed_metadata`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_triggered_at: Option<String>,
+    /// The next slot: derived from the schedule for a cron automation,
+    /// client-set for a one-off manual automation and cleared once that slot
+    /// fires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_trigger_at: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Automation {
+    /// `metadata` decoded into its typed shape, or `None` when it is absent
+    /// or does not fit.
+    pub fn typed_metadata(&self) -> Option<AutomationMetadata> {
+        let metadata = self.metadata.as_ref()?;
+        let object: serde_json::Map<String, serde_json::Value> = metadata
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        serde_json::from_value(serde_json::Value::Object(object)).ok()
+    }
+}
+
+/// `POST /v1/automations` body. Build with [`Self::new`] and struct-update
+/// syntax for the rest.
+///
+/// A one-off reminder is a [`AutomationTriggerType::Manual`] automation with a
+/// future `next_trigger_at`; a cron automation derives its own slots and must
+/// not send one.
+#[derive(Debug, Clone, Serialize)]
+pub struct AutomationCreateParams {
+    pub name: String,
+    pub trigger_type: AutomationTriggerType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Required for a cron automation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron_schedule: Option<String>,
+    /// Omit for a person's own automation, which then needs `prompt`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AutomationKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Required unless `kind` is [`AutomationKind::ObservationSynthesis`],
+    /// which must omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    /// An existing task each firing posts the prompt into. Only an automation
+    /// without a `kind` can set it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    /// RFC 3339 timestamp with an offset: a manual automation's one-off slot,
+    /// which must be in the future.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_trigger_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<AutomationMetadata>,
+    /// Defaults to `true` server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+impl AutomationCreateParams {
+    /// Create params with the required fields set and every optional field
+    /// unset. Combine with struct-update syntax.
+    pub fn new(name: impl Into<String>, trigger_type: AutomationTriggerType) -> Self {
+        Self {
+            name: name.into(),
+            trigger_type,
+            description: None,
+            cron_schedule: None,
+            kind: None,
+            prompt: None,
+            runtime_group_id: None,
+            task_id: None,
+            next_trigger_at: None,
+            metadata: None,
+            enabled: None,
+        }
+    }
+}
+
+/// `PATCH /v1/automations/{id}` body. Only set fields are sent and `None`
+/// leaves a field as it is, so nothing can be cleared. `kind` and
+/// `trigger_type` are immutable; `metadata` replaces the stored object.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AutomationUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron_schedule: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Moves an automation that runs as a task to another runtime group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    /// Schedules, moves or re-arms a manual automation's one-off slot (RFC
+    /// 3339 with an offset, in the future).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_trigger_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<AutomationMetadata>,
+    /// `false` pauses and keeps the slot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Filters supported by `GET /v1/automations`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AutomationListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AutomationKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// `true`: only automations with a next slot; `false`: only those without.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled: Option<bool>,
+    /// Only automations that post into this task. Not served until
+    /// introspection-cloud#3137 ships; a server without it ignores the
+    /// parameter and returns the unfiltered list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string. On a collision the passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// `POST /v1/automations/{id}/trigger` response. A `skipped` status carries
+/// its `reason` and records no event.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AutomationTriggerResponse {
+    pub status: AutomationExecutionStatus,
+    pub automation_id: Uuid,
+    /// The task created, or posted into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
@@ -3243,9 +3605,10 @@ impl ConversationListParams {
     }
 }
 
-// ----- events: typed seven-family read (`GET /v1/events`) --------------------
+// ----- events: typed family read (`GET /v1/events`) --------------------------
 
-/// The seven canonical platform event families served by `GET /v1/events`.
+/// The canonical platform event families served by `GET /v1/events` that
+/// this SDK types.
 ///
 /// The events read is a **closed, typed set**: `event_name` is required on
 /// every list read — exactly one family per request — so a response page is
@@ -3263,6 +3626,11 @@ pub enum IntrospectionEventName {
     Judgement,
     Pattern,
     PatternAssignment,
+    /// One automation trigger that ran.
+    AutomationTriggered,
+    /// One scheduled automation trigger that ran nothing. Project-owned, so
+    /// readable only with project-wide telemetry access.
+    AutomationSkipped,
     /// A family added after this SDK was released. Keeping the wire value
     /// makes the [`Event::Unknown`] response fallback reachable in practice.
     Unknown(String),
@@ -3279,6 +3647,8 @@ impl IntrospectionEventName {
             Self::Judgement => "introspection.judgement",
             Self::Pattern => "introspection.pattern",
             Self::PatternAssignment => "introspection.pattern.assignment",
+            Self::AutomationTriggered => "introspection.automation.triggered",
+            Self::AutomationSkipped => "introspection.automation.skipped",
             Self::Unknown(value) => value,
         }
     }
@@ -3301,6 +3671,8 @@ impl<'de> Deserialize<'de> for IntrospectionEventName {
             "introspection.judgement" => Self::Judgement,
             "introspection.pattern" => Self::Pattern,
             "introspection.pattern.assignment" => Self::PatternAssignment,
+            "introspection.automation.triggered" => Self::AutomationTriggered,
+            "introspection.automation.skipped" => Self::AutomationSkipped,
             _ => Self::Unknown(value),
         })
     }
@@ -3340,7 +3712,7 @@ pub struct TypedEvent<P> {
     pub experiment_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipe_git_commit_sha: Option<String>,
-    /// Family detail — one of the seven `*Payload` types, fixed by the
+    /// Family detail — one of the `*Payload` types, fixed by the
     /// [`Event`] variant.
     pub payload: P,
 }
@@ -3530,6 +3902,45 @@ pub struct JudgementPayload {
     pub experiment_arm_id: Option<Uuid>,
 }
 
+/// `introspection.automation.triggered` payload — one automation trigger
+/// that ran (stream family, owned by the task's member).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AutomationTriggeredPayload {
+    pub automation_id: Uuid,
+    pub automation_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    pub trigger_type: AutomationTriggerType,
+    /// The `next_trigger_at` a scheduled trigger claimed; `None` for a hand
+    /// trigger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
+    /// The task created, or posted into when `posted` is true.
+    pub task_id: Uuid,
+    pub posted: bool,
+    /// The task's member, who owns the event.
+    pub member_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    /// The person who triggered it by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triggered_by_member_id: Option<Uuid>,
+}
+
+/// `introspection.automation.skipped` payload — one scheduled automation
+/// trigger that ran nothing (stream family, project-owned).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AutomationSkippedPayload {
+    pub automation_id: Uuid,
+    pub trigger_type: AutomationTriggerType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
+    /// Set only when the automation targets an existing task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    pub reason: AutomationSkipReason,
+}
+
 /// Whole-event envelope + typed payload per family.
 pub type ObservationEvent = TypedEvent<ObservationPayload>;
 pub type PatternEvent = TypedEvent<PatternPayload>;
@@ -3538,14 +3949,16 @@ pub type ClusteringRunEvent = TypedEvent<ClusteringRunPayload>;
 pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
 pub type AnnotationEvent = TypedEvent<AnnotationPayload>;
 pub type JudgementEvent = TypedEvent<JudgementPayload>;
+pub type AutomationTriggeredEvent = TypedEvent<AutomationTriggeredPayload>;
+pub type AutomationSkippedEvent = TypedEvent<AutomationSkippedPayload>;
 
-/// One event from `GET /v1/events` — a discriminated union of the six
+/// One event from `GET /v1/events` — a discriminated union of the
 /// canonical platform families, tagged by the top-level `event_name`.
 ///
 /// Because `event_name` is required on the list read, a page is always
 /// homogeneous — every record matches the requested family. The hidden
 /// [`Event::Unknown`] fallback tolerates a family this SDK build doesn't know
-/// yet (a seventh family added server-side must not fail the whole page);
+/// yet (a family added server-side must not fail the whole page);
 /// match on it to skip or hand-parse such rows.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "event_name")]
@@ -3564,6 +3977,10 @@ pub enum Event {
     Pattern(PatternEvent),
     #[serde(rename = "introspection.pattern.assignment")]
     PatternAssignment(PatternAssignmentEvent),
+    #[serde(rename = "introspection.automation.triggered")]
+    AutomationTriggered(AutomationTriggeredEvent),
+    #[serde(rename = "introspection.automation.skipped")]
+    AutomationSkipped(AutomationSkippedEvent),
     /// Forward-compatible escape hatch: a row whose `event_name` this SDK
     /// build doesn't recognise. Carries the raw record verbatim.
     #[serde(untagged)]
@@ -3583,6 +4000,8 @@ impl Event {
             Self::Judgement(_) => Some(IntrospectionEventName::Judgement),
             Self::Pattern(_) => Some(IntrospectionEventName::Pattern),
             Self::PatternAssignment(_) => Some(IntrospectionEventName::PatternAssignment),
+            Self::AutomationTriggered(_) => Some(IntrospectionEventName::AutomationTriggered),
+            Self::AutomationSkipped(_) => Some(IntrospectionEventName::AutomationSkipped),
             Self::Unknown(_) => None,
         }
     }
@@ -3620,6 +4039,10 @@ pub struct EventListParams {
     pub trace_id: Option<String>,
     pub span_id: Option<String>,
     pub owner_key: Option<String>,
+    /// Automation triggers and skips of one automation.
+    pub automation_id: Option<Uuid>,
+    /// Automation triggers and skips: the task created or posted into.
+    pub task_id: Option<Uuid>,
     /// Escape hatch for a filter this SDK build predates: merged verbatim
     /// onto the query
     /// string. A filter outside the requested family's allow-map is a 422.
@@ -3655,6 +4078,8 @@ impl EventListParams {
             trace_id: None,
             span_id: None,
             owner_key: None,
+            automation_id: None,
+            task_id: None,
             filters: None,
         }
     }
@@ -3696,6 +4121,8 @@ impl EventListParams {
         put_str(&mut obj, "trace_id", self.trace_id.as_ref());
         put_str(&mut obj, "span_id", self.span_id.as_ref());
         put_str(&mut obj, "owner_key", self.owner_key.as_ref());
+        put_uuid(&mut obj, "automation_id", self.automation_id);
+        put_uuid(&mut obj, "task_id", self.task_id);
         if self
             .filters
             .as_ref()

@@ -193,8 +193,12 @@ pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, StreamOptions};
 pub use schemas::{
-    AgentInfo, AnnotationEvent, AnnotationPayload, Arm, ClientRegistrationMethod,
-    ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
+    AgentInfo, AnnotationEvent, AnnotationPayload, Arm, Automation, AutomationCondition,
+    AutomationConditionType, AutomationCreateParams, AutomationExecutionStatus, AutomationKind,
+    AutomationListParams, AutomationMetadata, AutomationSkipReason, AutomationSkippedEvent,
+    AutomationSkippedPayload, AutomationTriggerResponse, AutomationTriggerType,
+    AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams,
+    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
     ConnectionAuthorizationPending, ConnectionBrokerSubjectType, ConnectionCreateParams,
     ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
     ConnectionStatus, ConnectionSubjectType, ConnectionToken, ConnectionTokenParams,
