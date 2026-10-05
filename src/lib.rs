@@ -8,7 +8,7 @@
 //!    dependency. No feature flag required. [`auth`] mints the token it
 //!    takes when you have OAuth credentials rather than an API key.
 //! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
-//!    `track` / `feedback` / `identify` analytics events. Owns its own
+//!    `log_event` / `track` / `feedback` / `identify` analytics events. Owns its own
 //!    `SdkLoggerProvider`. Requires the `otel` Cargo feature.
 //! 3. `otel::IntrospectionSpanProcessor` — OTLP **trace** exporter
 //!    you attach to your own `SdkTracerProvider`. Requires the `otel`
@@ -34,7 +34,9 @@
 //!
 //! ```rust,no_run
 //! # #[cfg(feature = "otel")] {
-//! use introspection_sdk::otel::{FeedbackOptions, IntrospectionLogs, TrackOptions};
+//! use introspection_sdk::otel::{
+//!     FeedbackOptions, IntrospectionLogs, LogEventOptions, TrackOptions,
+//! };
 //!
 //! let logs = IntrospectionLogs::builder()
 //!     .token("your-token")
@@ -46,6 +48,15 @@
 //!     "Button Clicked",
 //!     Some(TrackOptions::new().with_property("button_id", "submit")),
 //! );
+//!
+//! // An app event under your own namespace; `track` is an alias of this.
+//! // Names under `introspection.` / `gen_ai.` are rejected with a typed error.
+//! logs.log_event(
+//!     "checkout.completed",
+//!     None,
+//!     LogEventOptions::new().with_event_id("checkout:o_1"),
+//! )
+//! .unwrap();
 //!
 //! {
 //!     let _user = logs.set_user_id("user_123");
@@ -175,7 +186,8 @@ pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
 pub use otel::{
     BaggageGuard, FeedbackOptions, IdentifyOptions, IntrospectionLogs, IntrospectionLogsConfig,
     IntrospectionLogsConfigBuilder, IntrospectionLogsError, IntrospectionSpanProcessor,
-    PropertyValue, SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
+    LogEventError, LogEventIdentity, LogEventOptions, LogEventSeverity, PropertyValue,
+    SpanProcessorAdvancedOptions, SpanProcessorConfig, SpanProcessorConfigBuilder,
     SpanProcessorError, SpanProcessorResult, TrackOptions,
 };
 
