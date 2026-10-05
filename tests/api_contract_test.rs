@@ -47,11 +47,15 @@
 use std::collections::{BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
-    AgentInfo, ClientRegistrationMethod, Connection, ConnectionBrokerSubjectType,
-    ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams, ConnectionStatus,
-    ConnectionSubjectType, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
-    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
-    ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
+    AgentInfo, Automation, AutomationCondition, AutomationConditionType, AutomationCreateParams,
+    AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
+    AutomationSkipReason, AutomationSkippedPayload, AutomationTriggerResponse,
+    AutomationTriggerType, AutomationTriggeredPayload, AutomationUpdateParams,
+    ClientRegistrationMethod, Connection, ConnectionBrokerSubjectType, ConnectionCreateParams,
+    ConnectionCreateSubjectType, ConnectionListParams, ConnectionStatus, ConnectionSubjectType,
+    ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscovery,
+    ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
     ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
     Dimension, Event, EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent,
@@ -198,6 +202,46 @@ fn compare(
     }
 
     Comparison { surface, problems }
+}
+
+/// [`compare`] for a surface that sends `sdk_only` before the reference
+/// declares it: those are left out of the comparison, and one the reference
+/// has since published is reported so the marker gets dropped.
+#[allow(clippy::too_many_arguments)]
+fn compare_ahead(
+    surface: &'static str,
+    mut sdk: BTreeSet<String>,
+    server: BTreeSet<String>,
+    sdk_only: &[&str],
+    exempt: &[&str],
+    extra_means: &str,
+    missing_means: &str,
+    missing_is_fatal: bool,
+) -> Comparison {
+    let published: BTreeSet<String> = sdk_only
+        .iter()
+        .filter(|f| server.contains(**f))
+        .map(|f| (*f).to_owned())
+        .collect();
+    for field in sdk_only {
+        sdk.remove(*field);
+    }
+    let mut comparison = compare(
+        surface,
+        sdk,
+        server,
+        exempt,
+        extra_means,
+        missing_means,
+        missing_is_fatal,
+    );
+    if !published.is_empty() {
+        comparison.problems.push(format!(
+            "  sent ahead of the API but now published (drop the not-yet-published marker):{}",
+            names(&published)
+        ));
+    }
+    comparison
 }
 
 #[test]
@@ -695,6 +739,8 @@ fn sdk_surface_matches_the_published_reference() {
         trace_id: Some("trace".into()),
         span_id: Some("span".into()),
         owner_key: Some("owner".into()),
+        automation_id: Some(Uuid::nil()),
+        task_id: Some(Uuid::nil()),
         // A declared param through the escape hatch, so the verbatim merge is
         // exercised rather than assumed.
         filters: Some(HashMap::from([(
@@ -702,6 +748,111 @@ fn sdk_surface_matches_the_published_reference() {
             Value::from("prod"),
         )])),
         ..EventListParams::new(IntrospectionEventName::Feedback)
+    };
+
+    let automation_metadata = AutomationMetadata {
+        repositories: vec![TaskRepoRequest {
+            repo: "owner/name".into(),
+            git_ref: Some("main".into()),
+            depth: Some(1),
+        }],
+        cron_schedules: vec!["0 * * * *".into()],
+        timezone: Some("UTC".into()),
+        conditions: vec![AutomationCondition {
+            condition_type: AutomationConditionType::HasNewTasksSinceLastRun,
+            runtime_group_id: Some(Uuid::nil()),
+        }],
+    };
+
+    let automation = Automation {
+        id: Uuid::nil(),
+        org_id: Uuid::nil(),
+        project_id: Uuid::nil(),
+        created_at: "2026-10-05T00:00:00Z".into(),
+        updated_at: "2026-10-05T00:00:00Z".into(),
+        name: "n".into(),
+        description: Some("d".into()),
+        enabled: true,
+        trigger_type: AutomationTriggerType::Cron,
+        cron_schedule: Some("0 * * * *".into()),
+        kind: Some(AutomationKind::ProjectCheckIn),
+        prompt: Some("p".into()),
+        runtime_group_id: Some(Uuid::nil()),
+        task_id: Some(Uuid::nil()),
+        created_by_member_id: Some(Uuid::nil()),
+        execution_blocked_reason: Some("blocked".into()),
+        can_manage: true,
+        owner_role: Some("operator".into()),
+        tags: vec!["customer:acme".into()],
+        metadata: Some(HashMap::new()),
+        last_triggered_at: Some("2026-10-05T00:00:00Z".into()),
+        next_trigger_at: Some("2026-10-06T00:00:00Z".into()),
+    };
+
+    let automation_create = AutomationCreateParams {
+        name: "n".into(),
+        trigger_type: AutomationTriggerType::Manual,
+        description: Some("d".into()),
+        cron_schedule: Some("0 * * * *".into()),
+        kind: Some(AutomationKind::ObservationSynthesis),
+        prompt: Some("p".into()),
+        runtime_group_id: Some(Uuid::nil()),
+        task_id: Some(Uuid::nil()),
+        next_trigger_at: Some("2026-10-06T00:00:00Z".into()),
+        metadata: Some(automation_metadata.clone()),
+        enabled: Some(true),
+    };
+
+    let automation_update = AutomationUpdateParams {
+        name: Some("n".into()),
+        description: Some("d".into()),
+        cron_schedule: Some("0 * * * *".into()),
+        prompt: Some("p".into()),
+        runtime_group_id: Some(Uuid::nil()),
+        task_id: Some(Uuid::nil()),
+        next_trigger_at: Some("2026-10-06T00:00:00Z".into()),
+        metadata: Some(automation_metadata),
+        enabled: Some(false),
+    };
+
+    let automation_list = AutomationListParams {
+        pagination: PaginationParams {
+            limit: Some(1),
+            next: Some("cursor".into()),
+        },
+        kind: Some(AutomationKind::ObservationClustering),
+        enabled: Some(true),
+        scheduled: Some(true),
+        task_id: Some(Uuid::nil()),
+        filters: None,
+    };
+
+    let automation_trigger = AutomationTriggerResponse {
+        status: AutomationExecutionStatus::Triggered,
+        automation_id: Uuid::nil(),
+        task_id: Some(Uuid::nil()),
+        reason: Some("r".into()),
+    };
+
+    let automation_triggered = AutomationTriggeredPayload {
+        automation_id: Uuid::nil(),
+        automation_name: "n".into(),
+        prompt: Some("p".into()),
+        trigger_type: AutomationTriggerType::Cron,
+        slot: Some("2026-10-05T00:00:00Z".into()),
+        task_id: Uuid::nil(),
+        posted: true,
+        member_id: Uuid::nil(),
+        runtime_group_id: Some(Uuid::nil()),
+        triggered_by_member_id: Some(Uuid::nil()),
+    };
+
+    let automation_skipped = AutomationSkippedPayload {
+        automation_id: Uuid::nil(),
+        trigger_type: AutomationTriggerType::Cron,
+        slot: Some("2026-10-05T00:00:00Z".into()),
+        task_id: Some(Uuid::nil()),
+        reason: AutomationSkipReason::TargetBusy,
     };
 
     let metrics = MetricsQuery {
@@ -1162,6 +1313,73 @@ fn sdk_surface_matches_the_published_reference() {
             "sent as a query parameter the API does not accept",
             "accepted by the API and reachable only through the verbatim `filters` map",
             false,
+        ),
+        compare(
+            "Automation — the automation read model",
+            wire_fields(&automation),
+            schema_properties(&spec, "Automation"),
+            // introspection-cloud#3154 drops it from the API; drop this
+            // exemption once the published reference does.
+            &["agent_member_id"],
+            "declared here but not returned by the API (the SDK describes a response that no longer exists)",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "AutomationCreate — POST /v1/automations body",
+            wire_fields(&automation_create),
+            schema_properties(&spec, "AutomationCreate"),
+            &[],
+            "sent here but not accepted by the API (rejected with a 422 — the create body forbids undeclared fields)",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "AutomationUpdate — PATCH /v1/automations/{id} body",
+            wire_fields(&automation_update),
+            schema_properties(&spec, "AutomationUpdate"),
+            &[],
+            "sent here but not accepted by the API (rejected with a 422 — the update body forbids undeclared fields)",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "AutomationTriggerResponse — POST /v1/automations/{id}/trigger response",
+            wire_fields(&automation_trigger),
+            schema_properties(&spec, "AutomationTriggerResponse"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare_ahead(
+            "automation list filters — GET /v1/automations query parameters",
+            wire_fields(&automation_list),
+            query_parameters(&spec, "/v1/automations", "get"),
+            // Sent before the API publishes it (introspection-cloud#3137).
+            &["task_id"],
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
+        ),
+        compare(
+            "AutomationTriggered — introspection.automation.triggered payload",
+            wire_fields(&automation_triggered),
+            schema_properties(&spec, "AutomationTriggered"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "AutomationSkipped — introspection.automation.skipped payload",
+            wire_fields(&automation_skipped),
+            schema_properties(&spec, "AutomationSkipped"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
         ),
         compare(
             "MetricsQuery — POST /v1/metrics body",

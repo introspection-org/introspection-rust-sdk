@@ -1,4 +1,4 @@
-//! CP-side resources reachable from [`crate::IntrospectionClient`].
+//! Resources reachable from [`crate::IntrospectionClient`].
 //!
 //! - [`Runtimes`] — read and resolve `/v1/runtimes`; obtain a
 //!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()`.
@@ -20,18 +20,25 @@
 //! - [`Members`] — `/v1/members` list, read, invite and update: the customer
 //!   members an integrator's identity assertions mint, and the `tags` and
 //!   `metadata` it labels them with.
+//! - [`Automations`] — Data Plane `/v1/automations` CRUD plus `trigger()`:
+//!   scheduled prompts, one-off reminders, and platform work.
 //!
-//! Read and lifecycle only, with three exceptions: connectors are full CRUD,
-//! members can be invited and relabelled, and a repository's branches can be
-//! merged.
+//! Read and lifecycle only, with four exceptions: connectors and automations
+//! are full CRUD, members can be invited and relabelled, and a repository's
+//! branches can be merged.
 //! A connector is not an authoring artifact but the B2B2C seam an integrator
 //! drives from their own backend — creating one and minting install links for
-//! their customers is runner-plane work, not operator work. Authoring the rest
+//! their customers is runner-plane work, not operator work. Automations are
+//! in scope because introspection-cloud#3137 opens them to members: a person
+//! schedules follow-ups into their own task, which is product work rather
+//! than project administration (the routes are administrator-only until it
+//! ships). Authoring the rest
 //! — creating, editing, or deleting runtimes, recipes and experiments, and
 //! administering projects, repositories, keys, and bindings — lives in the
 //! CLI, not here.
 
 pub mod annotations;
+pub mod automations;
 pub mod connectors;
 pub mod experiments;
 pub mod members;
@@ -40,6 +47,7 @@ pub mod repositories;
 pub mod runtimes;
 
 pub use annotations::{Annotations, ProjectLabels};
+pub use automations::Automations;
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
 pub use members::Members;

@@ -21,8 +21,8 @@ use crate::api::http::{HttpClient, HttpConfig};
 use crate::api::telemetry::Events;
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Connectors, ExperimentHandle, Experiments, Members, ProjectLabels, Recipes,
-    Repositories, RuntimeHandle, Runtimes,
+    Annotations, Automations, Connectors, ExperimentHandle, Experiments, Members, ProjectLabels,
+    Recipes, Repositories, RuntimeHandle, Runtimes,
 };
 use crate::types::{self, ClientConfig};
 
@@ -63,6 +63,7 @@ pub struct IntrospectionClient {
     repositories: Repositories,
     connectors: Connectors,
     members: Members,
+    automations: Automations,
     annotations: Annotations,
     project_labels: ProjectLabels,
     events: Events,
@@ -140,6 +141,7 @@ impl IntrospectionClient {
             members: Members::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             project_labels: ProjectLabels::new(dp_http.clone()),
+            automations: Automations::new(dp_http.clone()),
             events: Events::new(dp_http),
         })
     }
@@ -185,6 +187,13 @@ impl IntrospectionClient {
     /// and `metadata` labels on a member.
     pub fn members(&self) -> &Members {
         &self.members
+    }
+
+    /// Data Plane `/v1/automations` CRUD and `trigger()`. Administrator-only
+    /// today; introspection-cloud#3137 opens it to members for their own
+    /// task-targeted automations.
+    pub fn automations(&self) -> &Automations {
+        &self.automations
     }
 
     /// Look up an active runtime by runtime group slug or ID. The server infers the

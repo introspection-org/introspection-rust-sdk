@@ -105,8 +105,12 @@ pub mod types;
 
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    AgentInfo, AnnotationEvent, AnnotationPayload, Arm, ClientRegistrationMethod,
-    ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
+    AgentInfo, AnnotationEvent, AnnotationPayload, Arm, Automation, AutomationCondition,
+    AutomationConditionType, AutomationCreateParams, AutomationExecutionStatus, AutomationKind,
+    AutomationListParams, AutomationMetadata, AutomationSkipReason, AutomationSkippedEvent,
+    AutomationSkippedPayload, AutomationTriggerResponse, AutomationTriggerType,
+    AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams,
+    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
     ConnectionAuthorizationPending, ConnectionBrokerSubjectType, ConnectionCreateParams,
     ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
     ConnectionStatus, ConnectionSubjectType, ConnectionToken, ConnectionTokenParams,
@@ -159,8 +163,8 @@ pub use resources::annotations::{
     AnnotationTarget, ProjectLabel, ProjectLabelCreate, ProjectLabelListParams, ProjectLabelUpdate,
 };
 pub use resources::{
-    Annotations, Connections, Connectors, ExperimentHandle, Experiments, Members, ProjectLabels,
-    Recipes, Repositories, RepositoryContents, RuntimeHandle, Runtimes,
+    Annotations, Automations, Connections, Connectors, ExperimentHandle, Experiments, Members,
+    ProjectLabels, Recipes, Repositories, RepositoryContents, RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
