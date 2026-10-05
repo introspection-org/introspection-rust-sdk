@@ -21,8 +21,8 @@ use crate::api::http::{HttpClient, HttpConfig};
 use crate::api::telemetry::Events;
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Connectors, ExperimentHandle, Experiments, ProjectLabels, Recipes, Repositories,
-    RuntimeHandle, Runtimes,
+    Annotations, Connectors, ExperimentHandle, Experiments, Members, ProjectLabels, Recipes,
+    Repositories, RuntimeHandle, Runtimes,
 };
 use crate::types::{self, ClientConfig};
 
@@ -62,6 +62,7 @@ pub struct IntrospectionClient {
     recipes: Recipes,
     repositories: Repositories,
     connectors: Connectors,
+    members: Members,
     annotations: Annotations,
     project_labels: ProjectLabels,
     events: Events,
@@ -136,6 +137,7 @@ impl IntrospectionClient {
             recipes: Recipes::new(cp_http.clone()),
             repositories: Repositories::new(cp_http.clone(), dp_http.clone()),
             connectors: Connectors::new(cp_http.clone()),
+            members: Members::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             project_labels: ProjectLabels::new(dp_http.clone()),
             events: Events::new(dp_http),
@@ -177,6 +179,12 @@ impl IntrospectionClient {
     /// the consent URL a Business hands its customer.
     pub fn connectors(&self) -> &Connectors {
         &self.connectors
+    }
+
+    /// `/v1/members` list, read, invite and update — including the `tags`
+    /// and `metadata` labels on a member.
+    pub fn members(&self) -> &Members {
+        &self.members
     }
 
     /// Look up an active runtime by runtime group slug or ID. The server infers the

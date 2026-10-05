@@ -17,9 +17,13 @@
 //!   under `.connections`, plus `authorize()`, which mints the consent URL
 //!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer
 //!   so their workspace connects to an agent.
+//! - [`Members`] — `/v1/members` list, read, invite and update: the customer
+//!   members an integrator's identity assertions mint, and the `tags` and
+//!   `metadata` it labels them with.
 //!
-//! Read and lifecycle only, with two exceptions: connectors are full CRUD, and
-//! a repository's branches can be merged.
+//! Read and lifecycle only, with three exceptions: connectors are full CRUD,
+//! members can be invited and relabelled, and a repository's branches can be
+//! merged.
 //! A connector is not an authoring artifact but the B2B2C seam an integrator
 //! drives from their own backend — creating one and minting install links for
 //! their customers is runner-plane work, not operator work. Authoring the rest
@@ -30,6 +34,7 @@
 pub mod annotations;
 pub mod connectors;
 pub mod experiments;
+pub mod members;
 pub mod recipes;
 pub mod repositories;
 pub mod runtimes;
@@ -37,6 +42,7 @@ pub mod runtimes;
 pub use annotations::{Annotations, ProjectLabels};
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
+pub use members::Members;
 pub use recipes::Recipes;
 pub use repositories::{Repositories, RepositoryContents};
 pub use runtimes::{RuntimeHandle, Runtimes};
