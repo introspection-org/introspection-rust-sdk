@@ -2,7 +2,8 @@
 //! Introspection SDK.
 //!
 //! Owns its own [`SdkLoggerProvider`] and exposes the
-//! `track(...)` / `feedback(...)` / `identify(...)` analytics surface
+//! `log_event(...)` / `track(...)` / `feedback(...)` / `identify(...)`
+//! analytics surface
 //! plus `set_user_id` / `set_anonymous_id` / `set_conversation_id` /
 //! `set_previous_response_id` / `set_agent` baggage guards.
 //!
@@ -28,7 +29,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use opentelemetry::logs::{LogRecord as _, Logger, LoggerProvider, Severity};
+use opentelemetry::logs::{LogRecord as _, Logger, LoggerProvider};
 use opentelemetry::{baggage::BaggageExt, Context, InstrumentationScope, Key, KeyValue};
 use opentelemetry_otlp::{LogExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{logs::SdkLoggerProvider, Resource};
@@ -36,7 +37,9 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 
 use crate::otel::types::{
-    self, generate_event_id, FeedbackOptions, IdentifyOptions, PropertyValue, TrackOptions,
+    self, generate_event_id, reserved_event_name_prefix, FeedbackOptions, IdentifyOptions,
+    LogEventError, LogEventIdentity, LogEventOptions, LogEventSeverity, PropertyValue,
+    TrackOptions,
 };
 
 /// Errors that can be returned by [`IntrospectionLogs`].
@@ -76,7 +79,7 @@ fn sdk_scope() -> InstrumentationScope {
 }
 
 /// Independent OTLP Logs exporter — owns its own [`SdkLoggerProvider`]
-/// and emits `track` / `feedback` / `identify` events with
+/// and emits `log_event` / `track` / `feedback` / `identify` events with
 /// OpenTelemetry baggage-managed context.
 ///
 /// Construct via [`IntrospectionLogs::builder`].
@@ -328,6 +331,7 @@ impl IntrospectionLogs {
     }
 
     /// Build attributes for a log record.
+    #[allow(clippy::too_many_arguments)]
     fn build_attributes(
         &self,
         event_name: &str,
@@ -336,9 +340,14 @@ impl IntrospectionLogs {
         conversation_id: Option<&str>,
         previous_response_id: Option<&str>,
         event_id: Option<&str>,
+        identity: Option<&LogEventIdentity>,
     ) -> Vec<(Key, opentelemetry::logs::AnyValue)> {
         let cx = Context::current();
-        let (user_id, anonymous_id) = Self::get_identity_from_context(&cx);
+        let (ctx_user_id, ctx_anonymous_id) = Self::get_identity_from_context(&cx);
+        let user_id = identity.and_then(|i| i.user_id.clone()).or(ctx_user_id);
+        let anonymous_id = identity
+            .and_then(|i| i.anonymous_id.clone())
+            .or(ctx_anonymous_id);
         let (ctx_conversation_id, ctx_previous_response_id, agent_name, agent_id) =
             Self::get_gen_ai_from_context(&cx);
 
@@ -404,31 +413,112 @@ impl IntrospectionLogs {
         attributes
     }
 
-    /// Emit a log record via OpenTelemetry.
+    /// Emit an INFO log record stamped now.
     fn emit(&self, attributes: Vec<(Key, opentelemetry::logs::AnyValue)>) {
+        self.emit_at(attributes, SystemTime::now(), LogEventSeverity::Info);
+    }
+
+    /// Emit a log record via OpenTelemetry.
+    fn emit_at(
+        &self,
+        attributes: Vec<(Key, opentelemetry::logs::AnyValue)>,
+        timestamp: SystemTime,
+        severity: LogEventSeverity,
+    ) {
         let mut record = self.logger.create_log_record();
-        record.set_timestamp(SystemTime::now());
-        record.set_severity_number(Severity::Info);
-        record.set_severity_text(types::severity::INFO);
+        record.set_timestamp(timestamp);
+        record.set_severity_number(severity.to_otel());
+        record.set_severity_text(severity.as_str());
         for (key, value) in attributes {
             record.add_attribute(key, value);
         }
         self.logger.emit(record);
     }
 
-    /// Track a custom event.
+    /// Log an app event under any custom name, e.g. `"ark.feed.entry"`.
+    ///
+    /// `attributes` land under `properties.*`, which is where the platform's
+    /// `introspection.track` read projection finds them; read the events back
+    /// from `runner.events()` with `event_name=introspection.track`. Identity
+    /// and gen_ai context are taken from the active baggage unless
+    /// [`LogEventOptions::identity`] overrides them, field by field. A
+    /// property whose value is JSON `null` is omitted.
+    ///
+    /// Pass a stable [`LogEventOptions::event_id`] when delivery may repeat:
+    /// consumers dedupe on it, so re-sending the same id is safe.
+    ///
+    /// # Errors
+    ///
+    /// [`LogEventError::EmptyName`] for `""`, and
+    /// [`LogEventError::ReservedName`] for a name under one of
+    /// [`types::RESERVED_EVENT_NAME_PREFIXES`] (`introspection.`, `gen_ai.`).
+    /// Nothing is emitted in either case.
+    ///
+    /// ```rust,no_run
+    /// use std::collections::HashMap;
+    /// use introspection_sdk::otel::{IntrospectionLogs, LogEventOptions, PropertyValue};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let logs = IntrospectionLogs::builder().service_name("ark").build()?;
+    /// logs.log_event(
+    ///     "checkout.completed",
+    ///     Some(HashMap::from([
+    ///         ("order_id".to_string(), PropertyValue::from("o_1")),
+    ///         ("total".to_string(), PropertyValue::from(42)),
+    ///     ])),
+    ///     LogEventOptions::new().with_event_id("checkout:o_1"),
+    /// )?;
+    /// logs.shutdown()?;
+    /// # Ok(()) }
+    /// ```
+    pub fn log_event(
+        &self,
+        name: &str,
+        attributes: Option<HashMap<String, PropertyValue>>,
+        options: LogEventOptions,
+    ) -> std::result::Result<(), LogEventError> {
+        if name.is_empty() {
+            return Err(LogEventError::EmptyName);
+        }
+        if let Some(prefix) = reserved_event_name_prefix(name) {
+            return Err(LogEventError::ReservedName {
+                name: name.to_string(),
+                prefix,
+            });
+        }
+        let record_attributes = self.build_attributes(
+            name,
+            attributes.as_ref(),
+            None,
+            None,
+            None,
+            options.event_id.as_deref(),
+            options.identity.as_ref(),
+        );
+        self.emit_at(
+            record_attributes,
+            options.timestamp.unwrap_or_else(SystemTime::now),
+            options.severity,
+        );
+        debug!("Logged event: {}", name);
+        Ok(())
+    }
+
+    /// Track a custom event. A thin alias of [`Self::log_event`] kept for the
+    /// Segment-style call shape.
+    ///
+    /// A name [`Self::log_event`] rejects (empty, or under `introspection.` /
+    /// `gen_ai.`) is dropped with a `warn!`, since this signature has no error
+    /// to return; call [`Self::log_event`] to handle the rejection.
     pub fn track(&self, event_name: &str, options: Option<TrackOptions>) {
         let opts = options.unwrap_or_default();
-        let attributes = self.build_attributes(
-            event_name,
-            Some(&opts.properties),
-            None,
-            None,
-            None,
-            opts.event_id.as_deref(),
-        );
-        self.emit(attributes);
-        debug!("Tracked: {}", event_name);
+        let log_options = LogEventOptions {
+            event_id: opts.event_id,
+            ..LogEventOptions::default()
+        };
+        if let Err(e) = self.log_event(event_name, Some(opts.properties), log_options) {
+            warn!("track: event dropped: {e}");
+        }
     }
 
     /// Track feedback on a message or response.
@@ -452,6 +542,7 @@ impl IntrospectionLogs {
             options.conversation_id.as_deref(),
             options.previous_response_id.as_deref(),
             options.event_id.as_deref(),
+            None,
         );
         self.emit(attributes);
         debug!("Feedback: {}", name);
@@ -477,6 +568,7 @@ impl IntrospectionLogs {
             None,
             None,
             opts.event_id.as_deref(),
+            None,
         );
         self.emit(attributes);
         debug!("Identified: {}", user_id);
@@ -869,6 +961,276 @@ mod tests {
         assert!(records[0][types::attr::CONVERSATION_ID].contains("conv_7"));
         assert!(records[0][types::attr::AGENT_NAME].contains("planner"));
         assert!(records[0][types::attr::AGENT_ID].contains("ag_1"));
+    }
+
+    mod log_event {
+        use super::*;
+        use opentelemetry::logs::{AnyValue, Severity};
+        use opentelemetry_sdk::logs::InMemoryLogExporter;
+        use std::time::{Duration, UNIX_EPOCH};
+
+        fn logs() -> (IntrospectionLogs, InMemoryLogExporter) {
+            let exporter = InMemoryLogExporter::default();
+            let logs = IntrospectionLogs::with_exporter(exporter.clone(), "unit-tests");
+            (logs, exporter)
+        }
+
+        fn props(pairs: &[(&str, PropertyValue)]) -> Option<HashMap<String, PropertyValue>> {
+            Some(
+                pairs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect(),
+            )
+        }
+
+        fn attr(attrs: &HashMap<String, String>, key: &str) -> String {
+            attrs
+                .get(key)
+                .unwrap_or_else(|| panic!("missing {key} in {attrs:?}"))
+                .clone()
+        }
+
+        #[test]
+        fn emits_the_custom_name_with_attributes_under_properties() {
+            let (logs, exporter) = logs();
+            logs.log_event(
+                "ark.feed.entry",
+                props(&[
+                    ("entry_id", "e_1".into()),
+                    ("score", 0.9.into()),
+                    ("tags", serde_json::json!(["a", "b"]).into()),
+                    ("skipped", serde_json::Value::Null.into()),
+                ]),
+                LogEventOptions::new(),
+            )
+            .unwrap();
+
+            let out = exporter.get_emitted_logs().unwrap();
+            assert_eq!(out.len(), 1);
+            let record = &out[0].record;
+            let attrs: HashMap<String, AnyValue> = record
+                .attributes_iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect();
+            assert_eq!(
+                attrs[types::attr::EVENT_NAME],
+                AnyValue::String("ark.feed.entry".into())
+            );
+            assert_eq!(attrs["properties.entry_id"], AnyValue::String("e_1".into()));
+            assert_eq!(attrs["properties.score"], AnyValue::Double(0.9));
+            assert_eq!(
+                attrs["properties.tags"],
+                AnyValue::String(r#"["a","b"]"#.into())
+            );
+            assert!(!attrs.contains_key("properties.skipped"));
+            assert!(
+                matches!(&attrs[types::attr::EVENT_ID], AnyValue::String(id) if id.as_str().starts_with("intro_event_"))
+            );
+            assert_eq!(record.severity_number(), Some(Severity::Info));
+            assert_eq!(record.severity_text(), Some("INFO"));
+        }
+
+        #[test]
+        fn passes_a_caller_supplied_event_id_through_for_dedup() {
+            let (logs, exporter) = logs();
+            for _ in 0..2 {
+                logs.log_event(
+                    "ark.feed.entry",
+                    props(&[("entry_id", "e_1".into())]),
+                    LogEventOptions::new().with_event_id("feed-entry:e_1"),
+                )
+                .unwrap();
+            }
+            let ids: Vec<String> = emitted(&exporter)
+                .iter()
+                .map(|a| attr(a, types::attr::EVENT_ID))
+                .collect();
+            assert_eq!(ids.len(), 2);
+            assert!(
+                ids.iter().all(|id| id.contains("feed-entry:e_1")),
+                "{ids:?}"
+            );
+        }
+
+        #[test]
+        fn honours_timestamp_and_severity() {
+            let (logs, exporter) = logs();
+            let at = UNIX_EPOCH + Duration::from_millis(1_767_323_045_678);
+            logs.log_event(
+                "ark.sync.failed",
+                None,
+                LogEventOptions::new()
+                    .with_timestamp(at)
+                    .with_severity(LogEventSeverity::Error),
+            )
+            .unwrap();
+            let out = exporter.get_emitted_logs().unwrap();
+            let record = &out[0].record;
+            assert_eq!(record.timestamp(), Some(at));
+            assert_eq!(record.severity_number(), Some(Severity::Error));
+            assert_eq!(record.severity_text(), Some("ERROR"));
+        }
+
+        #[test]
+        fn maps_every_severity() {
+            let (logs, exporter) = logs();
+            for severity in [
+                LogEventSeverity::Debug,
+                LogEventSeverity::Info,
+                LogEventSeverity::Warn,
+                LogEventSeverity::Error,
+            ] {
+                logs.log_event(
+                    "ark.s",
+                    None,
+                    LogEventOptions::new().with_severity(severity),
+                )
+                .unwrap();
+            }
+            let got: Vec<_> = exporter
+                .get_emitted_logs()
+                .unwrap()
+                .iter()
+                .map(|l| (l.record.severity_number(), l.record.severity_text()))
+                .collect();
+            assert_eq!(
+                got,
+                vec![
+                    (Some(Severity::Debug), Some("DEBUG")),
+                    (Some(Severity::Info), Some("INFO")),
+                    (Some(Severity::Warn), Some("WARN")),
+                    (Some(Severity::Error), Some("ERROR")),
+                ]
+            );
+        }
+
+        #[test]
+        fn lets_the_identity_option_override_the_context_field_by_field() {
+            let (logs, exporter) = logs();
+            {
+                let _user = logs.set_user_id("ctx_user");
+                logs.log_event(
+                    "ark.a",
+                    None,
+                    LogEventOptions::new().with_identity(
+                        LogEventIdentity::new()
+                            .with_user_id("explicit_user")
+                            .with_anonymous_id("anon_1"),
+                    ),
+                )
+                .unwrap();
+                logs.log_event(
+                    "ark.b",
+                    None,
+                    LogEventOptions::new()
+                        .with_identity(LogEventIdentity::new().with_anonymous_id("anon_2")),
+                )
+                .unwrap();
+            }
+            let records = emitted(&exporter);
+            assert!(attr(&records[0], types::attr::USER_ID).contains("explicit_user"));
+            assert!(attr(&records[0], types::attr::ANONYMOUS_ID).contains("anon_1"));
+            // An omitted field still falls back to the scoped identity.
+            assert!(attr(&records[1], types::attr::USER_ID).contains("ctx_user"));
+            assert!(attr(&records[1], types::attr::ANONYMOUS_ID).contains("anon_2"));
+        }
+
+        #[test]
+        fn rejects_reserved_names() {
+            let (logs, exporter) = logs();
+            for (name, prefix) in [
+                ("introspection.track", "introspection."),
+                ("introspection.feedback", "introspection."),
+                ("gen_ai.client.inference", "gen_ai."),
+            ] {
+                let err = logs
+                    .log_event(name, None, LogEventOptions::new())
+                    .unwrap_err();
+                assert_eq!(
+                    err,
+                    LogEventError::ReservedName {
+                        name: name.to_string(),
+                        prefix,
+                    }
+                );
+                assert!(err.to_string().contains("reserved"), "{err}");
+            }
+            assert!(exporter.get_emitted_logs().unwrap().is_empty());
+        }
+
+        #[test]
+        fn rejects_an_empty_name() {
+            let (logs, exporter) = logs();
+            let err = logs
+                .log_event("", None, LogEventOptions::new())
+                .unwrap_err();
+            assert_eq!(err, LogEventError::EmptyName);
+            assert!(err.to_string().contains("non-empty"));
+            assert!(exporter.get_emitted_logs().unwrap().is_empty());
+        }
+
+        #[test]
+        fn allows_names_that_merely_contain_a_reserved_word() {
+            let (logs, exporter) = logs();
+            logs.log_event("my.introspection.event", None, LogEventOptions::new())
+                .unwrap();
+            logs.log_event("gen_ai_usage", None, LogEventOptions::new())
+                .unwrap();
+            assert_eq!(exporter.get_emitted_logs().unwrap().len(), 2);
+        }
+
+        #[test]
+        fn names_the_reserved_prefixes() {
+            assert_eq!(
+                types::RESERVED_EVENT_NAME_PREFIXES,
+                ["introspection.", "gen_ai."]
+            );
+        }
+
+        #[test]
+        fn track_emits_what_log_event_emits() {
+            let (logs, exporter) = logs();
+            logs.track(
+                "Button Clicked",
+                Some(
+                    TrackOptions::new()
+                        .with_property("buttonId", "submit")
+                        .with_event_id("e1"),
+                ),
+            );
+            logs.log_event(
+                "Button Clicked",
+                props(&[("buttonId", "submit".into())]),
+                LogEventOptions::new().with_event_id("e1"),
+            )
+            .unwrap();
+
+            let out = exporter.get_emitted_logs().unwrap();
+            assert_eq!(out.len(), 2);
+            let shape = |i: usize| {
+                let r = &out[i].record;
+                let mut attrs: Vec<(String, String)> = r
+                    .attributes_iter()
+                    .map(|(k, v)| (k.to_string(), format!("{v:?}")))
+                    .collect();
+                attrs.sort();
+                (attrs, r.severity_number(), r.severity_text())
+            };
+            assert_eq!(shape(0), shape(1));
+            let attrs = &emitted(&exporter)[0];
+            assert!(attr(attrs, types::attr::EVENT_NAME).contains("Button Clicked"));
+            assert!(attr(attrs, types::attr::EVENT_ID).contains("e1"));
+            assert!(attr(attrs, "properties.buttonId").contains("submit"));
+        }
+
+        #[test]
+        fn track_drops_a_reserved_name() {
+            let (logs, exporter) = logs();
+            logs.track("introspection.feedback", None);
+            logs.track("", None);
+            assert!(exporter.get_emitted_logs().unwrap().is_empty());
+        }
     }
 
     #[test]

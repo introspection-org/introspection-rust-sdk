@@ -60,6 +60,188 @@ impl TrackOptions {
     }
 }
 
+/// Event-name prefixes owned by the platform (`introspection.*`) and by the
+/// OpenTelemetry GenAI semantic conventions (`gen_ai.*`).
+///
+/// A custom event under either would be read as that family rather than as an
+/// app event, so [`crate::otel::IntrospectionLogs::log_event`] rejects them.
+pub const RESERVED_EVENT_NAME_PREFIXES: [&str; 2] = ["introspection.", "gen_ai."];
+
+/// The reserved prefix `name` falls under, if any.
+///
+/// ```rust
+/// use introspection_sdk::otel::reserved_event_name_prefix;
+///
+/// assert_eq!(reserved_event_name_prefix("gen_ai.client.inference"), Some("gen_ai."));
+/// assert_eq!(reserved_event_name_prefix("my.introspection.event"), None);
+/// ```
+pub fn reserved_event_name_prefix(name: &str) -> Option<&'static str> {
+    RESERVED_EVENT_NAME_PREFIXES
+        .into_iter()
+        .find(|prefix| name.starts_with(prefix))
+}
+
+/// Why [`crate::otel::IntrospectionLogs::log_event`] refused an event name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LogEventError {
+    /// The name was the empty string.
+    EmptyName,
+
+    /// The name falls under one of [`RESERVED_EVENT_NAME_PREFIXES`].
+    ReservedName {
+        /// The rejected name.
+        name: String,
+        /// The reserved prefix it starts with.
+        prefix: &'static str,
+    },
+}
+
+impl std::fmt::Display for LogEventError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyName => f.write_str("log_event: event name must be a non-empty string"),
+            Self::ReservedName { name, prefix } => write!(
+                f,
+                "log_event: event name \"{name}\" is in the reserved \"{prefix}*\" namespace, \
+                 which belongs to the platform and OpenTelemetry; use your own prefix, \
+                 e.g. \"myapp.{}\"",
+                &name[prefix.len()..]
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LogEventError {}
+
+/// Severity of a record emitted by
+/// [`crate::otel::IntrospectionLogs::log_event`]. Default: [`Self::Info`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum LogEventSeverity {
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogEventSeverity {
+    /// The OTLP `severity_text`: `"DEBUG"`, `"INFO"`, `"WARN"` or `"ERROR"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Debug => "DEBUG",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+        }
+    }
+
+    pub(crate) fn to_otel(self) -> opentelemetry::logs::Severity {
+        use opentelemetry::logs::Severity;
+        match self {
+            Self::Debug => Severity::Debug,
+            Self::Info => Severity::Info,
+            Self::Warn => Severity::Warn,
+            Self::Error => Severity::Error,
+        }
+    }
+}
+
+/// Identity known at a [`crate::otel::IntrospectionLogs::log_event`] call
+/// site.
+///
+/// Each field set here replaces the one scoped on the baggage context; an
+/// omitted field still falls back to it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LogEventIdentity {
+    /// Overrides `identity.user.id`.
+    pub user_id: Option<String>,
+    /// Overrides `identity.anonymous.id`.
+    pub anonymous_id: Option<String>,
+}
+
+impl LogEventIdentity {
+    /// An identity that overrides nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Override the user id.
+    pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
+        self
+    }
+
+    /// Override the anonymous id.
+    pub fn with_anonymous_id(mut self, anonymous_id: impl Into<String>) -> Self {
+        self.anonymous_id = Some(anonymous_id.into());
+        self
+    }
+}
+
+/// Options for [`crate::otel::IntrospectionLogs::log_event`].
+///
+/// ```rust
+/// use std::time::{Duration, UNIX_EPOCH};
+/// use introspection_sdk::otel::{LogEventIdentity, LogEventOptions, LogEventSeverity};
+///
+/// let options = LogEventOptions::new()
+///     .with_event_id("feed-entry:e_1")
+///     .with_timestamp(UNIX_EPOCH + Duration::from_secs(1_767_225_600))
+///     .with_identity(LogEventIdentity::new().with_user_id("user_42"))
+///     .with_severity(LogEventSeverity::Warn);
+/// # let _ = options;
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct LogEventOptions {
+    /// Caller-supplied event id (auto-generated if `None`).
+    ///
+    /// Consumers dedupe on it: re-sending an event with the same id — after a
+    /// retry, a crash, or a replayed job — is how a reader recognises the
+    /// copy, so derive it from something stable (e.g. `feed-entry:{id}`) when
+    /// delivery may repeat.
+    pub event_id: Option<String>,
+    /// When the event happened. Default: now.
+    pub timestamp: Option<SystemTime>,
+    /// Identity known at the call site, overriding the context field by field.
+    pub identity: Option<LogEventIdentity>,
+    /// Log severity. Default: [`LogEventSeverity::Info`].
+    pub severity: LogEventSeverity,
+}
+
+impl LogEventOptions {
+    /// Options with every field defaulted.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set a stable event id consumers can dedupe on.
+    pub fn with_event_id(mut self, event_id: impl Into<String>) -> Self {
+        self.event_id = Some(event_id.into());
+        self
+    }
+
+    /// Set when the event happened.
+    pub fn with_timestamp(mut self, timestamp: SystemTime) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
+
+    /// Override the identity scoped on the context.
+    pub fn with_identity(mut self, identity: LogEventIdentity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    /// Set the severity.
+    pub fn with_severity(mut self, severity: LogEventSeverity) -> Self {
+        self.severity = severity;
+        self
+    }
+}
+
 /// Options for the `feedback` method on [`crate::otel::IntrospectionLogs`].
 ///
 /// # Example
@@ -380,14 +562,6 @@ pub mod defaults {
     /// analytics events five times longer before sending them, in batches
     /// five times the size.
     pub const MAX_BATCH_SIZE: usize = 100;
-}
-
-/// Log severity text constants.
-///
-/// Crate-internal: the severity this SDK emits is fixed, not a knob callers
-/// need to reach.
-pub(crate) mod severity {
-    pub const INFO: &str = "INFO";
 }
 
 /// Logger names for OpenTelemetry instrumentation scope.

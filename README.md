@@ -129,12 +129,119 @@ logs.track("case_closed", Some(TrackOptions::new().with_property("source", "web"
 logs.shutdown()?;
 ```
 
-`feedback` records how a result landed, `track` records a product event, and
+`feedback` records how a result landed, `track` records a product event
+(see [Logging custom events](#logging-custom-events) for `log_event`), and
 `identify` attaches who it was. To export your own spans, attach
 `IntrospectionSpanProcessor` to an `SdkTracerProvider`; spans in the
 OpenTelemetry GenAI semantic conventions are exported as they are.
 
 See [Product signals](https://docs.introspection.dev/sdk/rust/product-signals) for the full surface.
+
+## Logging custom events
+
+`log_event(name, attributes, options)` records an app event under a name you
+choose — `ark.feed.entry`, `checkout.completed` — so the platform stores it and
+you can read it back by name. `track` is a thin alias of it. Attributes are
+stored under `properties.*`, exactly as `track` stores them.
+
+```rust
+use std::collections::HashMap;
+use introspection_sdk::otel::{
+    IntrospectionLogs, LogEventIdentity, LogEventOptions, LogEventSeverity, PropertyValue,
+};
+
+let logs = IntrospectionLogs::builder().service_name("ark").build()?; // INTROSPECTION_TOKEN
+
+logs.log_event(
+    "ark.feed.entry",
+    Some(HashMap::from([
+        ("entry_id".to_string(), PropertyValue::from(entry.id.as_str())),
+        ("source".to_string(), PropertyValue::from("rss")),
+        ("score".to_string(), PropertyValue::from(0.92)),
+    ])),
+    LogEventOptions::new()
+        .with_event_id(format!("feed-entry:{}", entry.id)) // stable id: consumers dedupe on it
+        .with_timestamp(entry.published_at)                 // SystemTime; default now
+        .with_identity(LogEventIdentity::new().with_user_id(&entry.owner_id)) // overrides the scoped identity
+        .with_severity(LogEventSeverity::Info),             // Debug | Info | Warn | Error
+)?;
+
+logs.shutdown()?; // flushes
+```
+
+- **Names.** Use your own namespace. Names starting with `introspection.`
+  (platform events) or `gen_ai.` (OpenTelemetry GenAI conventions) are
+  reserved: `log_event` returns `LogEventError::ReservedName` for them and
+  `LogEventError::EmptyName` for `""`, and emits nothing. The prefixes are
+  exported as `RESERVED_EVENT_NAME_PREFIXES`. `track` delegates to `log_event`,
+  so it drops those names too, with a warning, since it returns no error.
+- **Idempotency.** Without an event id each call gets a fresh one. When
+  delivery can repeat (retries, replayed jobs, an agent re-running a step),
+  pass an id derived from the thing being recorded: re-sending the same id is
+  how consumers recognise and drop the duplicate.
+- **Identity and context.** User / anonymous id and `gen_ai.conversation.id` /
+  agent come from the active baggage guards (`set_user_id`,
+  `set_conversation_id`, `set_agent`); `LogEventIdentity` overrides per field.
+
+### From a recipe or agent sandbox
+
+A Runtime sandbox is started with `INTROSPECTION_TOKEN` and
+`INTROSPECTION_BASE_OTEL_URL` in its environment, so a tool or agent step needs
+no configuration — build the logger from the environment and flush before the
+step returns:
+
+```rust
+use std::collections::HashMap;
+use introspection_sdk::otel::{IntrospectionLogs, LogEventOptions, PropertyValue};
+
+fn record_feed_entries(entries: &[FeedEntry]) -> Result<(), Box<dyn std::error::Error>> {
+    // Token and collector URL come from the sandbox environment.
+    let events = IntrospectionLogs::builder().service_name("ark-recipe").build()?;
+    for entry in entries {
+        events.log_event(
+            "ark.feed.entry",
+            Some(HashMap::from([
+                ("entry_id".to_string(), PropertyValue::from(entry.id.as_str())),
+                ("title".to_string(), PropertyValue::from(entry.title.as_str())),
+                ("url".to_string(), PropertyValue::from(entry.url.as_str())),
+            ])),
+            LogEventOptions::new().with_event_id(format!("ark.feed.entry:{}", entry.id)),
+        )?;
+    }
+    events.shutdown()?; // the sandbox may be torn down after the step
+    Ok(())
+}
+```
+
+### Reading custom events back
+
+Custom events are served by `/v1/events` under the `introspection.track`
+family, whose `payload` carries the original `name` and the `properties`. This
+SDK build has no typed variant for that family, so request it by its wire name
+and read the row from `Event::Unknown`:
+
+```rust
+use introspection_sdk::{Event, EventListParams, IntrospectionEventName};
+
+let mut pages = runner.events().list(&EventListParams {
+    lookback: Some("24h".into()),
+    ..EventListParams::new(IntrospectionEventName::Unknown("introspection.track".into()))
+})?;
+
+while let Some(page) = pages.next_page().await? {
+    for event in &page.records {
+        let Event::Unknown(row) = event else { continue };
+        if row["payload"]["name"] != "ark.feed.entry" {
+            continue;
+        }
+        println!("{} {}", row["timestamp"], row["payload"]["properties"]["entry_id"]);
+    }
+}
+```
+
+Filtering by `name` server-side is not available yet — it arrives with a
+pending platform change. Until then, filter on `payload.name` client-side as
+above.
 
 ## Read what happened
 

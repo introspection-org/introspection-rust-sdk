@@ -11,7 +11,8 @@
 //! mix-and-match:
 //!
 //! * `IntrospectionLogs` — owns an `opentelemetry_sdk::logs::SdkLoggerProvider`
-//!   and exports `track` / `feedback` / `identify` events over OTLP HTTP.
+//!   and exports `log_event` / `track` / `feedback` / `identify` events over
+//!   OTLP HTTP.
 //! * `IntrospectionSpanProcessor` — an `opentelemetry_sdk::trace::SpanProcessor`
 //!   you attach to your own `SdkTracerProvider` to forward spans over OTLP HTTP.
 //!
@@ -53,6 +54,7 @@ pub use span_processor::{
 };
 #[cfg(feature = "otel")]
 pub use types::{
-    attr, baggage, defaults, event_name, generate_event_id, new_conversation_id, FeedbackOptions,
-    IdentifyOptions, PropertyValue, TrackOptions,
+    attr, baggage, defaults, event_name, generate_event_id, new_conversation_id,
+    reserved_event_name_prefix, FeedbackOptions, IdentifyOptions, LogEventError, LogEventIdentity,
+    LogEventOptions, LogEventSeverity, PropertyValue, TrackOptions, RESERVED_EVENT_NAME_PREFIXES,
 };
