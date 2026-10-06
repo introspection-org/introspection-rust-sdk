@@ -98,6 +98,43 @@ ending the stream.
 See [Tasks and streaming](https://docs.introspection.dev/sdk/rust/tasks-and-streaming) for reconnects,
 interrupts, and cancellation.
 
+## The same Data Plane calls on a client or a runner
+
+`IntrospectionClient` and `Runner` expose one Data Plane surface, enforced by
+the `DataPlaneResources` trait: `tasks()` (with `.runs`), `files()`,
+`shares()`, `conversations()`, `events()`, `metrics()`, `automations()`,
+`issues()` and `connections()`. On the client they act with the client's token; on a runner, with
+its session token. Both carry the methods inherently, so a call needs no
+import, and generic code can take either:
+
+```rust
+use futures::StreamExt;
+use introspection_sdk::{DataPlaneResources, IssueListParams, IssueStatus};
+
+async fn open_issue_titles(dp: &impl DataPlaneResources) -> Vec<String> {
+    let mut issues = dp.issues().list(&IssueListParams {
+        status: vec![IssueStatus::Open],
+        ..Default::default()
+    });
+    let mut titles = Vec::new();
+    while let Some(Ok(issue)) = issues.next().await {
+        titles.push(issue.title);
+    }
+    titles
+}
+
+open_issue_titles(&client).await;
+open_issue_titles(&runner).await;
+```
+
+The token's scopes decide which calls succeed. A runner a member opens for
+themself (no asserted `identity`, no explicit `scope`) carries
+`automations:read` / `automations:write`, `connections:read` /
+`connections:write` / `connections:delete` and `issues:read` / `issues:write`
+on top of the sandbox set (tasks, files, shares, conversations, events,
+metrics). A runner opened for an asserted end customer carries the sandbox set,
+or what its `RunRequest::scope` asks for.
+
 ## Record feedback
 
 Enable the `otel` feature, then attach the outcome to the conversation the
@@ -376,11 +413,83 @@ automation carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
 A scheduled firing that ran nothing is recorded as an
 `introspection.automation.skipped` event with an `AutomationSkipReason`.
 
-These are Data Plane routes (`automations:read` / `automations:write`). The API
-serves them to administrators only today and answers 403 to anyone else.
-introspection-cloud#3137 opens them to members for their own automations that
-post into one of their own tasks. The `task_id` list filter arrives with that
+`runner.automations()` is the same API on the runner's token. These are Data
+Plane routes (`automations:read` / `automations:write`), which a runner a
+member opens for themself carries. The API serves them to administrators only
+today and answers 403 to anyone else. introspection-cloud#3137 opens them to
+members for their own automations that post into one of their own tasks. The `task_id` list filter arrives with that
 change, so it is not served yet.
+
+## Connect a member's apps
+
+`connections()` is the apps (Gmail, Slack, …) members connected for
+themselves; the agent acts with them in that member's sessions. Creating one
+returns a connect page to hand the member. On a runner, `runtime` defaults to
+the runner's runtime group; on the client, set it:
+
+```rust
+use futures::StreamExt;
+use introspection_sdk::{MemberConnectionCreate, MemberConnectionListParams};
+
+let page = runner.connections().create(&MemberConnectionCreate::new("gmail")).await?;
+println!("open {} within {}s", page.authorize_url, page.expires_in);
+
+let page = client.connections().create(&MemberConnectionCreate {
+    runtime: Some("customer-agent".into()),
+    ..MemberConnectionCreate::new("gmail")
+}).await?;
+
+let mut connections = runner.connections().list(&MemberConnectionListParams {
+    app: Some("gmail".into()),
+    ..Default::default()
+});
+while let Some(connection) = connections.next().await {
+    let connection = connection?;
+    if !connection.healthy {
+        runner.connections().delete(connection.id).await?;
+    }
+}
+```
+
+A caller who is not an administrator only ever lists, reads and removes their
+own connections; an administrator can narrow the list with `member_id`. These
+are Data Plane routes gated on `connections:read`, `connections:write` and
+`connections:delete`. They are distinct from `client.connectors()`, whose
+connections an integrator administers for the project.
+
+## Track issues
+
+An issue is a project pursuit with a living brief, a fixed worker task, and
+the human requests raised on it:
+
+```rust
+use introspection_sdk::{
+    IssueCreate, IssueListParams, IssueOwner, IssuePriority, IssueStatus, IssueUpdate,
+};
+
+let issue = runner.issues().create(&IssueCreate {
+    priority: Some(IssuePriority::High),
+    tags: vec!["customer:acme".into()],
+    ..IssueCreate::new("Checkout retries double-charge", "Customers on retry see two charges.", task_id)
+}).await?;
+
+// Edits are made against the revision you read; a stale one answers 409.
+let issue = runner.issues().update(issue.id, &IssueUpdate {
+    status: Some(IssueStatus::Closed),
+    ..IssueUpdate::new(issue.revision)
+}).await?;
+
+let mut mine = runner.issues().list(&IssueListParams {
+    owner: vec![IssueOwner::Me],
+    status: vec![IssueStatus::Open, IssueStatus::Waiting],
+    ..Default::default()
+});
+```
+
+`update_request` creates or changes one human request on an issue
+(`PATCH /v1/issues/{id}` with `{"request": ...}`). List filters that take a
+list are sent as repeated keys and ORed; every filter only narrows. These are
+Data Plane routes gated on `issues:read`, `issues:write` and `issues:delete`.
 
 ## Curate traces with human review
 

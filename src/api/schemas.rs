@@ -2934,6 +2934,355 @@ pub struct AutomationTriggerResponse {
     pub reason: Option<String>,
 }
 
+// ----- member connections (DP) -----------------------------------------------
+
+/// An app (Gmail, Slack, …) a member connected for themself, which the agent
+/// acts with in that member's sessions. Distinct from a connector's
+/// [`Connection`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MemberConnection {
+    pub id: Uuid,
+    /// The member who connected the app.
+    pub member_id: Uuid,
+    /// Provider application slug, e.g. `"gmail"`.
+    pub app: String,
+    /// The provider account connected, when the provider names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+    /// `false` when the connection needs reconnecting.
+    pub healthy: bool,
+    pub created_at: String,
+}
+
+/// Filters supported by `GET /v1/connections`. A caller who is not an
+/// administrator only ever gets their own connections, whatever `member_id`
+/// says.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MemberConnectionListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    /// Provider application slug, e.g. `"gmail"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string. On a collision the passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Body of `POST /v1/connections`. Build with [`MemberConnectionCreate::new`].
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MemberConnectionCreate {
+    /// Provider application slug, e.g. `"gmail"`.
+    pub app: String,
+    /// Runtime slug or runtime group id whose sessions use the connection.
+    /// Required on the client; on a runner, `None` means the runner's own
+    /// runtime group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<StringOrUuid>,
+}
+
+impl MemberConnectionCreate {
+    pub fn new(app: impl Into<String>) -> Self {
+        Self {
+            app: app.into(),
+            runtime: None,
+        }
+    }
+}
+
+/// Response of `POST /v1/connections`: a connect page for one app, which ends
+/// on a page saying the app is connected. Mint a new one per hand-off.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectPage {
+    pub authorize_url: String,
+    /// Seconds the URL stays valid.
+    pub expires_in: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
+// ----- issues (DP) -----------------------------------------------------------
+
+open_wire_enum! {
+    /// Status of an issue.
+    pub enum IssueStatus {
+        Open => "open",
+        /// Blocked on an open human request.
+        Waiting => "waiting",
+        Closed => "closed",
+        Cancelled => "cancelled",
+    }
+}
+
+open_wire_enum! {
+    /// Priority of an issue.
+    pub enum IssuePriority {
+        Low => "low",
+        Medium => "medium",
+        High => "high",
+        Urgent => "urgent",
+    }
+}
+
+open_wire_enum! {
+    /// `GET /v1/issues?owner=` — whose issues to list.
+    pub enum IssueOwner {
+        /// Project-owned (Operator) issues.
+        Project => "project",
+        /// The caller's own private issues.
+        Me => "me",
+    }
+}
+
+/// A file cited as evidence on an issue.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct IssueFile {
+    pub file_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    /// The events the file was cited from (at most 100).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_event_ids: Vec<Uuid>,
+}
+
+/// A telemetry event cited as evidence on an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IssueEventReference {
+    pub event_id: Uuid,
+}
+
+/// A span cited as evidence on an issue: a 32-hex trace id and a 16-hex span
+/// id.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IssueSpanReference {
+    pub trace_id: String,
+    pub span_id: String,
+}
+
+/// An HTTP(S) link cited as evidence on an issue. The URL may not carry
+/// credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IssueLink {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// One open human request on an issue, oldest first.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueOpenRequest {
+    pub id: Uuid,
+    pub question: String,
+    pub assignee_id: Uuid,
+    pub created_at: String,
+}
+
+/// An issue: a project pursuit with a living brief and a fixed worker task.
+/// Its history is the `introspection.issue` activity stream.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Issue {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    /// Project-scoped display ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_index: Option<i64>,
+    pub title: String,
+    pub description: String,
+    pub priority: IssuePriority,
+    pub status: IssueStatus,
+    /// Pass back as [`IssueUpdate::expected_revision`] to edit the brief.
+    pub revision: u64,
+    /// The fixed worker task used by the issue chat and Slack replies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<TaskStatus>,
+    /// Owning member of a private issue; `None` for a project-owned
+    /// (Operator) issue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    /// When the issue last entered `closed` or `cancelled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<String>,
+    /// Access-bearing tags, conventionally `key:value`.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Caller-defined attributes: string, number, bool or null values.
+    #[serde(default)]
+    pub metadata: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub files: Vec<IssueFile>,
+    #[serde(default)]
+    pub links: Vec<IssueLink>,
+    #[serde(default)]
+    pub events: Vec<IssueEventReference>,
+    #[serde(default)]
+    pub spans: Vec<IssueSpanReference>,
+    #[serde(default)]
+    pub open_requests: Vec<IssueOpenRequest>,
+}
+
+/// Body of `POST /v1/issues`. Build with [`IssueCreate::new`]; empty lists
+/// and maps are not sent.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct IssueCreate {
+    /// Nonblank, at most 500 characters.
+    pub title: String,
+    /// Nonblank, at most 50,000 characters.
+    pub description: String,
+    /// The fixed worker task used by the issue chat and Slack replies.
+    pub task_id: Uuid,
+    /// Defaults to `medium` server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<IssuePriority>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub metadata: HashMap<String, serde_json::Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<IssueFile>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<IssueLink>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<IssueEventReference>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub spans: Vec<IssueSpanReference>,
+}
+
+impl IssueCreate {
+    pub fn new(title: impl Into<String>, description: impl Into<String>, task_id: Uuid) -> Self {
+        Self {
+            title: title.into(),
+            description: description.into(),
+            task_id,
+            ..Default::default()
+        }
+    }
+}
+
+/// Body of `PATCH /v1/issues/{id}` that edits the brief. Only the fields set
+/// are sent; a list or map that is set replaces the stored one wholesale
+/// (empty clears it).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct IssueUpdate {
+    /// The [`Issue::revision`] this edit is based on; a stale one answers 409.
+    pub expected_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<IssuePriority>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IssueStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<IssueFile>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<IssueLink>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events: Option<Vec<IssueEventReference>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spans: Option<Vec<IssueSpanReference>>,
+}
+
+impl IssueUpdate {
+    pub fn new(expected_revision: u64) -> Self {
+        Self {
+            expected_revision,
+            ..Default::default()
+        }
+    }
+}
+
+open_wire_enum! {
+    /// Status of a human request on an issue.
+    pub enum IssueRequestStatus {
+        Open => "open",
+        Resolved => "resolved",
+        Cancelled => "cancelled",
+    }
+}
+
+/// Create or change one human request on an issue, sent as
+/// `PATCH /v1/issues/{id}` with body `{"request": ...}`.
+///
+/// `expected_revision: 0` creates the request with the caller-minted `id`,
+/// and needs `question` and `assignee_id`. Closing it (`resolved` /
+/// `cancelled`) needs a `resolution`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct IssueRequestUpdate {
+    pub id: Uuid,
+    pub expected_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IssueRequestStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+}
+
+/// Filters supported by `GET /v1/issues`. Every filter only narrows; a list
+/// filter is sent as a repeated key and its values are ORed. Rows come newest
+/// activity first (`closed_at` for a closed or cancelled issue, else
+/// `updated_at`).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct IssueListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_total: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub status: Vec<IssueStatus>,
+    /// Omit for every issue the caller may read.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub owner: Vec<IssueOwner>,
+    /// `true`: has an open request assigned to the caller; `false`: has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_to_me: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_open_requests: Option<bool>,
+    /// Status of the issue's worker task.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub task_status: Vec<TaskStatus>,
+    /// Excludes these worker task statuses; an issue without a live task is
+    /// kept.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exclude_task_status: Vec<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_index: Option<i64>,
+    /// One `key:value` tag, e.g. `customer:acme`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Match issues whose `metadata` holds every pair, compared as strings
+    /// (at most 16 pairs). Sent as repeated `metadata=key:value`.
+    #[serde(
+        serialize_with = "serialize_metadata_filter",
+        skip_serializing_if = "metadata_filter_is_empty"
+    )]
+    pub metadata: Option<HashMap<String, String>>,
+    /// Case-insensitive substring of the title (at most 200 characters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string. On a collision the passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
@@ -3102,10 +3451,10 @@ pub struct RunnerSpec {
     pub runtime_context: RunnerContext,
 }
 
-// ----- telemetry: conversations / events / metrics (DP, runner-scoped) -------
+// ----- telemetry: conversations / events / metrics (DP) ----------------------
 //
-// These are Data-Plane telemetry reads — they hang off the [`crate::Runner`]
-// (DP bearer + `events:read`), never the CP-scoped top-level client. The
+// These are Data-Plane telemetry reads (`events:read`), served through
+// [`crate::DataPlaneResources`] on the client and the runner alike. The
 // stores are append-only (`otel_traces` → `/v1/conversations`, `otel_logs` →
 // `/v1/events`); all aggregation goes through the bounded `POST /v1/metrics`
 // contract. Records carry open telemetry attributes, so the typed structs keep

@@ -25,6 +25,7 @@ use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpe
 use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
+use crate::resources::{Automations, Issues, MemberConnections};
 use crate::types::defaults;
 
 /// How a [`Runner`] was opened. Captured so [`Runner::refresh`] can
@@ -155,23 +156,47 @@ impl Runner {
     }
 
     /// `runner.conversations.*` — Data-Plane telemetry reads over
-    /// `GET /v1/conversations` (append-only `otel_traces`). Runner-scoped (DP
-    /// bearer + `events:read`). Cheap clone.
+    /// `GET /v1/conversations` (append-only `otel_traces`). Needs `events:read`.
+    /// Cheap clone.
     pub fn conversations(&self) -> Conversations {
         Conversations::new(self.dp_http())
     }
 
     /// `runner.events.*` — Data-Plane telemetry reads over `GET /v1/events`
     /// (append-only `otel_logs`; typed seven-family read, `event_name`
-    /// required). Runner-scoped (DP bearer + `events:read`). Cheap clone.
+    /// required). Needs `events:read`. Cheap clone.
     pub fn events(&self) -> Events {
         Events::new(self.dp_http())
     }
 
     /// `runner.metrics.*` — the bounded `POST /v1/metrics` analytics surface.
-    /// Runner-scoped (DP bearer + `events:read`). Cheap clone.
+    /// Needs `events:read`. Cheap clone.
     pub fn metrics(&self) -> Metrics {
         Metrics::new(self.dp_http())
+    }
+
+    /// `runner.automations.*` — Data Plane `/v1/automations` on the runner's
+    /// token. A runner a member opens for themself carries
+    /// `automations:read` / `automations:write`. Cheap clone.
+    pub fn automations(&self) -> Automations {
+        Automations::new(self.dp_http())
+    }
+
+    /// `runner.issues.*` — Data Plane `/v1/issues` on the runner's token. A
+    /// runner a member opens for themself carries `issues:read` /
+    /// `issues:write`. Cheap clone.
+    pub fn issues(&self) -> Issues {
+        Issues::new(self.dp_http())
+    }
+
+    /// `runner.connections.*` — Data Plane `/v1/connections` on the runner's
+    /// token. A runner a member opens for themself carries
+    /// `connections:read` / `connections:write` / `connections:delete`;
+    /// [`MemberConnections::create`] defaults `runtime` to this runner's
+    /// runtime group. Cheap clone.
+    pub fn connections(&self) -> MemberConnections {
+        let state = self.read_state();
+        MemberConnections::new(state.dp_http.clone(), state.context.runtime_group_id)
     }
 
     /// Resolved runtime context (runtime / arm / recipe pin / identity

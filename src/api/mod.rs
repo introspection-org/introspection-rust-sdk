@@ -14,6 +14,10 @@
 //!   [`Conversation`] resource; item reads return OTel GenAI spans
 //!   ([`GenAiSpan`]).
 //!
+//! These, with [`crate::Automations`], [`crate::Issues`] and
+//! [`crate::MemberConnections`], make up [`crate::DataPlaneResources`], which both
+//! [`crate::IntrospectionClient`] and [`crate::Runner`] implement.
+//!
 //! Everything maps 1:1 to existing DP routes; no new HTTP surface area.
 //! Auth reuses the same `INTROSPECTION_TOKEN` bearer used by the OTLP
 //! exporter — the SDK is shape-agnostic about API key (`intro_…`) vs
@@ -198,12 +202,12 @@ pub use schemas::{
     AutomationListParams, AutomationMetadata, AutomationSkipReason, AutomationSkippedEvent,
     AutomationSkippedPayload, AutomationTriggerResponse, AutomationTriggerType,
     AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams,
-    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
-    ConnectionAuthorizationPending, ConnectionBrokerSubjectType, ConnectionCreateParams,
-    ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
-    ConnectionStatus, ConnectionSubjectType, ConnectionToken, ConnectionTokenParams,
-    ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthMode,
-    ConnectorAuthorization, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, ConnectPage,
+    Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
+    ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams,
+    ConnectionMissionConstraints, ConnectionStatus, ConnectionSubjectType, ConnectionToken,
+    ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
+    ConnectorAuthMode, ConnectorAuthorization, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
     ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
     ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
     ContentsQuery, Conversation, ConversationAgent, ConversationCost, ConversationExportParams,
@@ -213,23 +217,27 @@ pub use schemas::{
     ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard,
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileCreateText,
     FileListParams, FileType, FileUpdate, FileVersionListParams, HavingTerm,
-    IntrospectionEventName, JudgeGoalComponent, JudgementEvent, JudgementPayload, Member,
-    MemberCreateParams, MemberListParams, MemberType, MemberUpdateParams, MetricFilter, MetricSpec,
-    MetricsConfig, MetricsQuery, MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm,
-    Paginated, PaginationParams, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
-    PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
-    RepositoryCommitFile, RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent,
-    RepositoryDirectory, RepositoryEntry, RepositoryEntryType, RepositoryFile,
-    RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider,
-    RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
-    RunCallerPage, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec,
-    Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams, ShareResourceType,
-    SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest,
-    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate,
-    TelemetryGoalComponent, TimeDimension, Trajectory, TrajectoryAssistantRecord,
-    TrajectoryMetaRecord, TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall,
-    TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
+    IntrospectionEventName, Issue, IssueCreate, IssueEventReference, IssueFile, IssueLink,
+    IssueListParams, IssueOpenRequest, IssueOwner, IssuePriority, IssueRequestStatus,
+    IssueRequestUpdate, IssueSpanReference, IssueStatus, IssueUpdate, JudgeGoalComponent,
+    JudgementEvent, JudgementPayload, Member, MemberConnection, MemberConnectionCreate,
+    MemberConnectionListParams, MemberCreateParams, MemberListParams, MemberType,
+    MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, MetricsResponse,
+    ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
+    PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload, Recipe,
+    RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail, RepositoryCommitFile,
+    RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent, RepositoryDirectory,
+    RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams,
+    RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus,
+    ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest,
+    RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams,
+    RuntimeLlmMode, ShareCreate, ShareListParams, ShareResourceType, SortDirection, SseEvent,
+    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
+    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate,
+    TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent,
+    TimeDimension, Trajectory, TrajectoryAssistantRecord, TrajectoryMetaRecord,
+    TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall, TrajectoryToolRecord,
+    TrajectoryUserRecord, TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::parse_sse_response;

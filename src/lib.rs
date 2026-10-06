@@ -105,6 +105,7 @@ pub mod agui;
 pub mod api;
 pub mod auth;
 pub mod client;
+pub mod data_plane;
 pub mod dev_target;
 // Always compiled — `otel::messages` carries the gen_ai semantic-convention
 // message vocabulary that the REST-only conversations read returns. The OTLP
@@ -121,12 +122,12 @@ pub use api::{
     AutomationListParams, AutomationMetadata, AutomationSkipReason, AutomationSkippedEvent,
     AutomationSkippedPayload, AutomationTriggerResponse, AutomationTriggerType,
     AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams,
-    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
-    ConnectionAuthorizationPending, ConnectionBrokerSubjectType, ConnectionCreateParams,
-    ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
-    ConnectionStatus, ConnectionSubjectType, ConnectionToken, ConnectionTokenParams,
-    ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthMode,
-    ConnectorAuthorization, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, ConnectPage,
+    Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
+    ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams,
+    ConnectionMissionConstraints, ConnectionStatus, ConnectionSubjectType, ConnectionToken,
+    ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
+    ConnectorAuthMode, ConnectorAuthorization, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
     ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
     ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
     ContentsQuery, Conversation, ConversationAgent, ConversationCost, ConversationExportFormat,
@@ -140,9 +141,12 @@ pub use api::{
     FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput, GenAiOutput, GenAiRequest,
     GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, HavingTerm,
     IdRef, IntrospectionAPIError, IntrospectionAttributes, IntrospectionConversation,
-    IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime, JudgeGoalComponent,
-    JudgementEvent, JudgementPayload, Member, MemberCreateParams, MemberListParams, MemberType,
-    MemberUpdateParams, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
+    IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime, Issue, IssueCreate,
+    IssueEventReference, IssueFile, IssueLink, IssueListParams, IssueOpenRequest, IssueOwner,
+    IssuePriority, IssueRequestStatus, IssueRequestUpdate, IssueSpanReference, IssueStatus,
+    IssueUpdate, JudgeGoalComponent, JudgementEvent, JudgementPayload, Member, MemberConnection,
+    MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams, MemberListParams,
+    MemberType, MemberUpdateParams, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
     MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
     PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
     PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
@@ -169,13 +173,15 @@ pub use auth::{
     OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
+pub use data_plane::DataPlaneResources;
 pub use resources::annotations::{
     AnnotationEventOptions, AnnotationListParams, AnnotationMutation, AnnotationState,
     AnnotationTarget, ProjectLabel, ProjectLabelCreate, ProjectLabelListParams, ProjectLabelUpdate,
 };
 pub use resources::{
-    Annotations, Automations, Connections, Connectors, ExperimentHandle, Experiments, Members,
-    ProjectLabels, Recipes, Repositories, RepositoryContents, RuntimeHandle, Runtimes,
+    Annotations, Automations, Connections, Connectors, ExperimentHandle, Experiments, Issues,
+    MemberConnections, Members, ProjectLabels, Recipes, Repositories, RepositoryContents,
+    RuntimeHandle, Runtimes,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

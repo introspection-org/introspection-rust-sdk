@@ -1,5 +1,5 @@
-//! `client.automations()` (DP) — scheduled prompts and platform work on a
-//! project.
+//! `automations()` (DP) — scheduled prompts and platform work on a project,
+//! on the client or a [`Runner`](crate::Runner).
 //!
 //! An automation either runs a prompt as an agent task (a person's own
 //! automation, [`Automation::kind`] `None`) or runs platform work (a
@@ -12,10 +12,11 @@
 //! [`crate::Events`] with the `automation_id` and `task_id` filters.
 //!
 //! These are Data Plane routes, gated on `automations:read` /
-//! `automations:write`. The API serves them to administrators only today and
-//! answers 403 to anyone else. introspection-cloud#3137 opens them to members
-//! for their own automations that post into one of their own tasks; until it
-//! ships, `AutomationListParams::task_id` is not served either.
+//! `automations:write`; a runner a member opens for themself carries both.
+//! The API serves them to administrators only today and answers 403 to anyone
+//! else. introspection-cloud#3137 opens them to members for their own
+//! automations that post into one of their own tasks; until it ships,
+//! `AutomationListParams::task_id` is not served either.
 //!
 //! [`AutomationKind`]: crate::AutomationKind
 //! [`AutomationTriggerType::Manual`]: crate::AutomationTriggerType::Manual
@@ -34,7 +35,7 @@ use crate::api::schemas::{
     AutomationUpdateParams,
 };
 
-/// `client.automations()` namespace. Holds a DP-bound HTTP client.
+/// `automations()` namespace. Holds a DP-bound HTTP client.
 #[derive(Clone)]
 pub struct Automations {
     http: Arc<HttpClient>,
