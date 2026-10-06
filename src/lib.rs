@@ -4,9 +4,11 @@
 //! independent surfaces, mix-and-match as needed:
 //!
 //! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
-//!    `Runner`, `tasks`, `files`, `shares`, and runner telemetry reads). Always available, no OpenTelemetry
-//!    dependency. No feature flag required. [`auth`] mints the token it
-//!    takes when you have OAuth credentials rather than an API key.
+//!    `Runner`, `tasks`, `files`, `shares`, `automations`, and telemetry
+//!    reads). Always available, no OpenTelemetry dependency. No feature flag
+//!    required. [`auth`] mints the token it takes when you have OAuth
+//!    credentials rather than an API key, and [`EmailCodeAuth`] signs a
+//!    `native` app's end users in with an emailed code.
 //! 2. `otel::IntrospectionLogs` — OTLP **logs** exporter for
 //!    `log_event` / `track` / `feedback` / `identify` analytics events. Owns its own
 //!    `SdkLoggerProvider`. Requires the `otel` Cargo feature.
@@ -169,8 +171,9 @@ pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // discoverable name at the crate root (`Event` alone would be ambiguous).
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
 pub use auth::{
-    authorization_code_token, service_account_token, token_exchange, AuthorizationCodeParams,
-    OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
+    authorization_code_token, service_account_token, token_exchange, AuthChangeEvent, AuthSession,
+    AuthState, AuthorizationCodeParams, EmailCodeAuth, EmailCodeAuthConfig, OAuthToken,
+    ServiceAccountTokenParams, TokenExchangeParams,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
 pub use data_plane::DataPlaneResources;

@@ -1,10 +1,12 @@
 //! [`DataPlaneResources`] is one surface on two holders: the same generic
 //! function drives every Data Plane namespace through an
-//! [`IntrospectionClient`] and through a [`Runner`], and each reaches the Data
-//! Plane with its own credential.
+//! [`IntrospectionClient`], through a [`Runner`] and through the Data Plane
+//! client [`EmailCodeAuth`] hands out, and each reaches the Data Plane with its
+//! own credential.
 
 use futures::StreamExt;
 use introspection_sdk::api::RunRequest;
+use introspection_sdk::auth::{AuthSession, EmailCodeAuth, EmailCodeAuthConfig, OAuthToken};
 use introspection_sdk::{
     AdvancedOptions, AutomationListParams, ClientConfig, ConversationListParams,
     DataPlaneResources, EventListParams, FileListParams, IntrospectionClient,
@@ -177,4 +179,55 @@ async fn a_runner_serves_every_data_plane_namespace_on_its_session_token() {
     mount_data_plane(&dp, "runner-jwt").await;
 
     drive_every_namespace(&runner(&cp, &dp).await).await;
+}
+
+fn signed_in(cp: &MockServer, dp: &MockServer) -> EmailCodeAuth {
+    let auth = EmailCodeAuth::new(
+        EmailCodeAuthConfig::builder()
+            .client_id("intro_app_native")
+            .project("acme")
+            .base_api_url(cp.uri())
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
+    let token: OAuthToken = serde_json::from_value(json!({
+        "access_token": "member-at",
+        "token_type": "Bearer",
+        "expires_in": 900,
+        "refresh_token": "member-rt",
+        "dp_url": dp.uri(),
+    }))
+    .unwrap();
+    auth.set_session(AuthSession::from_token(
+        &token,
+        std::time::SystemTime::now(),
+        None,
+    ));
+    auth
+}
+
+#[tokio::test]
+async fn email_code_with_data_plane_serves_every_namespace_on_the_member_token() {
+    let cp = MockServer::start().await;
+    let dp = MockServer::start().await;
+    mount_data_plane(&dp, "member-at").await;
+
+    signed_in(&cp, &dp)
+        .with_data_plane(|dp| async move {
+            drive_every_namespace(&dp).await;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn email_code_client_serves_every_namespace_on_the_member_token() {
+    let cp = MockServer::start().await;
+    let dp = MockServer::start().await;
+    mount_data_plane(&dp, "member-at").await;
+
+    let client = signed_in(&cp, &dp).client(None).await.unwrap();
+    drive_every_namespace(&client).await;
 }
