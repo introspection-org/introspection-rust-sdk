@@ -1,7 +1,78 @@
-//! Resume run streams from content cursors, including output before the first attach.
-//! Only a settling RUN_FINISHED or RUN_ERROR confirms completion. Nonterminal EOF
-//! checks the run-scoped status and retries within the recovery budget. Replay
-//! gaps remain visible to consumers; RunHandle::text rejects incomplete output.
+//! Resumable run streams: what [`TaskRuns::stream`] and [`RunHandle::text`]
+//! do to recover a run stream on their own.
+//!
+//! # Cursor
+//!
+//! The first attach requests replay from cursor `0`, so output produced
+//! before the first connection is included. Every reconnect resumes from the
+//! last content cursor (`Last-Event-ID`). Only new content advances the
+//! cursor; lifecycle events, heartbeats and duplicate content do not.
+//!
+//! # Completion
+//!
+//! Only a settling `RUN_FINISHED` or `RUN_ERROR` confirms that the run
+//! finished. A `RUN_FINISHED` with `result.reason = "stream_close"` only ends
+//! that attach, so the stream drops it. When a connection ends without a
+//! settling event, the stream reads that run's status
+//! (`GET /v1/tasks/{task_id}/runs/{run_id}`) before reconnecting:
+//!
+//! - A `failed` or `cancelled` run ends the stream with
+//!   [`IntrospectionAPIError::RunFailed`].
+//! - A run that settled without its completion arriving on the stream ends it
+//!   with [`IntrospectionAPIError::StreamIncomplete`] (code
+//!   `stream_incomplete`), rather than returning unverified partial output.
+//! - Any other status, or a failed status read, reconnects.
+//!
+//! # Budget
+//!
+//! Reconnects with no new content count against
+//! [`StreamOptions::max_reconnects`] (default 5), and recovery stops once
+//! [`StreamOptions::timeout`] (default 300 s) passes without new content.
+//! Each new content cursor resets both, so a long run keeps a full recovery
+//! window after every piece of output. The timeout is checked only when
+//! recovery is needed; it never interrupts an open, healthy connection. A run
+//! that is not attachable yet answers `429`, which the stream waits out with
+//! `Retry-After` as the floor. Tune all of this with [`StreamOptions`]
+//! through [`TaskRuns::stream_with`].
+//!
+//! # Past the replay buffer
+//!
+//! When the reconnect cursor is older than the runtime's replay buffer, the
+//! server answers with one AG-UI `MESSAGES_SNAPSHOT` holding the run's
+//! messages so far. Its id becomes the new cursor, and [`RunHandle::text`]
+//! takes its assistant text in place of what it had read. When the server
+//! holds neither the frames nor a snapshot, it answers `410` and the stream
+//! ends with [`IntrospectionAPIError::StreamIncomplete`]. Runtime images that
+//! predate the snapshot send `CUSTOM resume_gap` instead. Raw streams pass
+//! that event through, and [`RunHandle::text`] fails with `StreamIncomplete`
+//! on it.
+//!
+//! # `text()`
+//!
+//! [`RunHandle::text`] concatenates the assistant's text. It fails with
+//! `RunFailed` on a `RUN_ERROR`, and passes through every error the stream
+//! yields, instead of returning partial text. The SDK does not read the
+//! conversation transcript to fill a gap, so streaming needs no
+//! `conversations:read` scope. When you need the final output after a
+//! `StreamIncomplete`, read it from the transcript.
+//!
+//! Use a concrete run ID when consuming one turn. `runs/current` is a moving
+//! alias: a reconnect or status read may resolve to the next turn if another
+//! run has started.
+//!
+//! The in-process fake sandbox (`mock://`) supplies replies through the
+//! conversation transcript, not SSE. Its attach-only `stream_close` cannot
+//! satisfy `text()`; use transcript reads for fake-sandbox tests, or a real
+//! runtime for `text()` tests.
+//!
+//! The shared `run-stream-contract.json` fixtures pin these behaviors across
+//! Swift, JavaScript, Rust and Python. Each test suite pins the fixture
+//! SHA-256; intentional contract changes must update all four copies and
+//! their expected hashes together.
+//!
+//! [`TaskRuns::stream`]: crate::api::TaskRuns::stream
+//! [`TaskRuns::stream_with`]: crate::api::TaskRuns::stream_with
+//! [`RunHandle::text`]: crate::RunHandle::text
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
