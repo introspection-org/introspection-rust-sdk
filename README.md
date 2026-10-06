@@ -98,6 +98,39 @@ ending the stream.
 See [Tasks and streaming](https://docs.introspection.dev/sdk/rust/tasks-and-streaming) for reconnects,
 interrupts, and cancellation.
 
+## The same Data Plane calls on a client or a runner
+
+`IntrospectionClient` and `Runner` expose one Data Plane surface, enforced by
+the `DataPlaneResources` trait: `tasks()` (with `.runs`), `files()`,
+`shares()`, `conversations()`, `events()`, `metrics()`, `automations()` and
+`connections()`. On the client they act with the client's token; on a runner, with
+its session token. Both carry the methods inherently, so a call needs no
+import, and generic code can take either:
+
+```rust
+use futures::StreamExt;
+use introspection_sdk::{DataPlaneResources, MemberConnectionListParams};
+
+async fn connected_apps(dp: &impl DataPlaneResources) -> Vec<String> {
+    let mut connections = dp.connections().list(&MemberConnectionListParams::default());
+    let mut apps = Vec::new();
+    while let Some(Ok(connection)) = connections.next().await {
+        apps.push(connection.app);
+    }
+    apps
+}
+
+connected_apps(&client).await;
+connected_apps(&runner).await;
+```
+
+The token's scopes decide which calls succeed. A runner a member opens for
+themself (no asserted `identity`, no explicit `scope`) carries
+`automations:read` / `automations:write` and `connections:read` /
+`connections:write` / `connections:delete` on top of the sandbox set (tasks, files, shares, conversations, events,
+metrics). A runner opened for an asserted end customer carries the sandbox set,
+or what its `RunRequest::scope` asks for.
+
 ## Record feedback
 
 Enable the `otel` feature, then attach the outcome to the conversation the
@@ -376,11 +409,49 @@ automation carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
 A scheduled firing that ran nothing is recorded as an
 `introspection.automation.skipped` event with an `AutomationSkipReason`.
 
-These are Data Plane routes (`automations:read` / `automations:write`). The API
-serves them to administrators only today and answers 403 to anyone else.
-introspection-cloud#3137 opens them to members for their own automations that
-post into one of their own tasks. The `task_id` list filter arrives with that
+`runner.automations()` is the same API on the runner's token. These are Data
+Plane routes (`automations:read` / `automations:write`), which a runner a
+member opens for themself carries. The API serves them to administrators only
+today and answers 403 to anyone else. introspection-cloud#3137 opens them to
+members for their own automations that post into one of their own tasks. The `task_id` list filter arrives with that
 change, so it is not served yet.
+
+## Connect a member's apps
+
+`connections()` is the apps (Gmail, Slack, …) members connected for
+themselves; the agent acts with them in that member's sessions. Creating one
+returns a connect page to hand the member. On a runner, `runtime` defaults to
+the runner's runtime group; on the client, set it:
+
+```rust
+use futures::StreamExt;
+use introspection_sdk::{MemberConnectionCreate, MemberConnectionListParams};
+
+let page = runner.connections().create(&MemberConnectionCreate::new("gmail")).await?;
+println!("open {} within {}s", page.authorize_url, page.expires_in);
+
+let page = client.connections().create(&MemberConnectionCreate {
+    runtime: Some("customer-agent".into()),
+    ..MemberConnectionCreate::new("gmail")
+}).await?;
+
+let mut connections = runner.connections().list(&MemberConnectionListParams {
+    app: Some("gmail".into()),
+    ..Default::default()
+});
+while let Some(connection) = connections.next().await {
+    let connection = connection?;
+    if !connection.healthy {
+        runner.connections().delete(connection.id).await?;
+    }
+}
+```
+
+A caller who is not an administrator only ever lists, reads and removes their
+own connections; an administrator can narrow the list with `member_id`. These
+are Data Plane routes gated on `connections:read`, `connections:write` and
+`connections:delete`. They are distinct from `client.connectors()`, whose
+connections an integrator administers for the project.
 
 ## Curate traces with human review
 
@@ -512,7 +583,7 @@ A `native` Application signs its users in with an emailed code:
 
 ```rust
 use introspection_sdk::auth::{EmailCodeAuth, EmailCodeAuthConfig};
-use introspection_sdk::{TaskListParams, Tasks};
+use introspection_sdk::{DataPlaneResources, TaskListParams};
 
 let auth = EmailCodeAuth::new(
     EmailCodeAuthConfig::builder()
@@ -526,10 +597,14 @@ let session = auth.verify_code("user@example.com", &code_the_user_typed).await?;
 
 let page = auth
     .with_data_plane(|dp| async move {
-        Tasks::new(dp).list(&TaskListParams::default()).next_page().await
+        dp.tasks().list(&TaskListParams::default()).next_page().await
     })
     .await?;
 ```
+
+- The client `with_data_plane` hands `op` implements `DataPlaneResources`, so
+  every Data Plane namespace (`tasks()`, `connections()`, …) works
+  on it. It has no runtime context, so `connections().create` needs `runtime`.
 
 - A returning user's code is six digits. A new user's first code is six
   characters of `A-Z` and `0-9`, so accept letters in the code field.

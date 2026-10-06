@@ -1,10 +1,8 @@
-//! `runner.conversations` / `runner.events` / `runner.metrics` — Data-Plane
-//! telemetry reads.
+//! `conversations()` / `events()` / `metrics()` — Data-Plane telemetry reads.
 //!
-//! These are **Data-Plane-scoped**: they hang off the [`crate::Runner`] (DP
-//! bearer + `events:read`); [`crate::IntrospectionClient::events`] reads
-//! events with a project token against the client's Data Plane URL. Two
-//! append-only stores back the reads —
+//! These are **Data-Plane-scoped** (DP bearer + `events:read`), part of
+//! [`crate::DataPlaneResources`] on both the [`crate::Runner`] and the
+//! [`crate::IntrospectionClient`]. Two append-only stores back the reads —
 //! `otel_traces` → [`Conversations`] (`GET /v1/conversations`) and `otel_logs`
 //! → [`Events`] (`GET /v1/events`) — while all aggregation goes through the
 //! bounded [`Metrics`] surface (`POST /v1/metrics`).

@@ -14,6 +14,10 @@
 //!   [`Conversation`] resource; item reads return OTel GenAI spans
 //!   ([`GenAiSpan`]).
 //!
+//! These, with [`crate::Automations`] and
+//! [`crate::MemberConnections`], make up [`crate::DataPlaneResources`], which both
+//! [`crate::IntrospectionClient`] and [`crate::Runner`] implement.
+//!
 //! Everything maps 1:1 to existing DP routes; no new HTTP surface area.
 //! Auth reuses the same `INTROSPECTION_TOKEN` bearer used by the OTLP
 //! exporter — the SDK is shape-agnostic about API key (`intro_…`) vs
@@ -198,12 +202,12 @@ pub use schemas::{
     AutomationListParams, AutomationMetadata, AutomationSkipReason, AutomationSkippedEvent,
     AutomationSkippedPayload, AutomationTriggerResponse, AutomationTriggerType,
     AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams,
-    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, Connection,
-    ConnectionAuthorizationPending, ConnectionBrokerSubjectType, ConnectionCreateParams,
-    ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
-    ConnectionStatus, ConnectionSubjectType, ConnectionToken, ConnectionTokenParams,
-    ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthMode,
-    ConnectorAuthorization, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload, CommitsQuery, ConnectPage,
+    Connection, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
+    ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams,
+    ConnectionMissionConstraints, ConnectionStatus, ConnectionSubjectType, ConnectionToken,
+    ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
+    ConnectorAuthMode, ConnectorAuthorization, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
     ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
     ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
     ContentsQuery, Conversation, ConversationAgent, ConversationCost, ConversationExportParams,
@@ -214,9 +218,10 @@ pub use schemas::{
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileCreateText,
     FileListParams, FileType, FileUpdate, FileVersionListParams, HavingTerm,
     IntrospectionEventName, JudgeGoalComponent, JudgementEvent, JudgementPayload, Member,
-    MemberCreateParams, MemberListParams, MemberType, MemberUpdateParams, MetricFilter, MetricSpec,
-    MetricsConfig, MetricsQuery, MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm,
-    Paginated, PaginationParams, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
+    MemberConnection, MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams,
+    MemberListParams, MemberType, MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig,
+    MetricsQuery, MetricsResponse, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
+    PaginationParams, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
     PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
     RepositoryCommitFile, RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent,
     RepositoryDirectory, RepositoryEntry, RepositoryEntryType, RepositoryFile,

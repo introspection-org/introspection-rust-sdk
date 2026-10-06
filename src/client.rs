@@ -3,7 +3,9 @@
 //! Always available with no OpenTelemetry dependency. Exposes
 //! `client.runtimes()` / `client.experiments()` / `client.runtimes().handle(id)` /
 //! `client.experiment(id, project)` accessors over the Introspection
-//! DP REST API.
+//! DP REST API, and the Data Plane namespaces of
+//! [`crate::DataPlaneResources`] (`tasks()`, `files()`, `connections()`, …) on the
+//! client's own credential.
 //!
 //! For analytics events (`track` / `feedback` / `identify`), construct
 //! an `crate::otel::IntrospectionLogs` separately — see the `otel`
@@ -17,12 +19,15 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::api::files::Files;
 use crate::api::http::{HttpClient, HttpConfig};
-use crate::api::telemetry::Events;
+use crate::api::shares::Shares;
+use crate::api::tasks::Tasks;
+use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Automations, Connectors, ExperimentHandle, Experiments, Members, ProjectLabels,
-    Recipes, Repositories, RuntimeHandle, Runtimes,
+    Annotations, Automations, Connectors, ExperimentHandle, Experiments, MemberConnections,
+    Members, ProjectLabels, Recipes, Repositories, RuntimeHandle, Runtimes,
 };
 use crate::types::{self, ClientConfig};
 
@@ -63,10 +68,9 @@ pub struct IntrospectionClient {
     repositories: Repositories,
     connectors: Connectors,
     members: Members,
-    automations: Automations,
     annotations: Annotations,
     project_labels: ProjectLabels,
-    events: Events,
+    dp_http: Arc<HttpClient>,
 }
 
 impl IntrospectionClient {
@@ -141,8 +145,7 @@ impl IntrospectionClient {
             members: Members::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             project_labels: ProjectLabels::new(dp_http.clone()),
-            automations: Automations::new(dp_http.clone()),
-            events: Events::new(dp_http),
+            dp_http,
         })
     }
 
@@ -172,11 +175,6 @@ impl IntrospectionClient {
         &self.project_labels
     }
 
-    /// Direct Data Plane event reads using this client's project token.
-    pub fn events(&self) -> &Events {
-        &self.events
-    }
-
     /// `/v1/connectors` CRUD, its nested `connections`, and `authorize()` —
     /// the consent URL a Business hands its customer.
     pub fn connectors(&self) -> &Connectors {
@@ -189,11 +187,47 @@ impl IntrospectionClient {
         &self.members
     }
 
-    /// Data Plane `/v1/automations` CRUD and `trigger()`. Administrator-only
-    /// today; introspection-cloud#3137 opens it to members for their own
-    /// task-targeted automations.
-    pub fn automations(&self) -> &Automations {
-        &self.automations
+    /// Data Plane `/v1/tasks`, with each task's runs under `.runs`.
+    pub fn tasks(&self) -> Tasks {
+        Tasks::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `/v1/files`.
+    pub fn files(&self) -> Files {
+        Files::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `/v1/shares`: read grants for files and conversations.
+    pub fn shares(&self) -> Shares {
+        Shares::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `GET /v1/conversations`.
+    pub fn conversations(&self) -> Conversations {
+        Conversations::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `GET /v1/events`.
+    pub fn events(&self) -> Events {
+        Events::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `POST /v1/metrics`.
+    pub fn metrics(&self) -> Metrics {
+        Metrics::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `/v1/automations` CRUD and `trigger()`.
+    pub fn automations(&self) -> Automations {
+        Automations::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `/v1/connections` CRUD: the apps members connected for
+    /// themselves. On the client, [`MemberConnections::create`] needs an
+    /// explicit `runtime`. Distinct from [`Self::connectors`]' connector
+    /// connections.
+    pub fn connections(&self) -> MemberConnections {
+        MemberConnections::new(self.dp_http.clone(), None)
     }
 
     /// Look up an active runtime by runtime group slug or ID. The server infers the
@@ -315,5 +349,6 @@ mod tests {
         let _ = client.runtimes();
         let _ = client.experiments();
         let _ = client.recipes();
+        let _ = client.connections();
     }
 }

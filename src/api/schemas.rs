@@ -2936,6 +2936,76 @@ pub struct AutomationTriggerResponse {
     pub reason: Option<String>,
 }
 
+// ----- member connections (DP) -----------------------------------------------
+
+/// An app (Gmail, Slack, …) a member connected for themself, which the agent
+/// acts with in that member's sessions. Distinct from a connector's
+/// [`Connection`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MemberConnection {
+    pub id: Uuid,
+    /// The member who connected the app.
+    pub member_id: Uuid,
+    /// Provider application slug, e.g. `"gmail"`.
+    pub app: String,
+    /// The provider account connected, when the provider names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+    /// `false` when the connection needs reconnecting.
+    pub healthy: bool,
+    pub created_at: String,
+}
+
+/// Filters supported by `GET /v1/connections`. A caller who is not an
+/// administrator only ever gets their own connections, whatever `member_id`
+/// says.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MemberConnectionListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    /// Provider application slug, e.g. `"gmail"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string. On a collision the passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Body of `POST /v1/connections`. Build with [`MemberConnectionCreate::new`].
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MemberConnectionCreate {
+    /// Provider application slug, e.g. `"gmail"`.
+    pub app: String,
+    /// Runtime slug or runtime group id whose sessions use the connection.
+    /// Required on the client; on a runner, `None` means the runner's own
+    /// runtime group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<StringOrUuid>,
+}
+
+impl MemberConnectionCreate {
+    pub fn new(app: impl Into<String>) -> Self {
+        Self {
+            app: app.into(),
+            runtime: None,
+        }
+    }
+}
+
+/// Response of `POST /v1/connections`: a connect page for one app, which ends
+/// on a page saying the app is connected. Mint a new one per hand-off.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectPage {
+    pub authorize_url: String,
+    /// Seconds the URL stays valid.
+    pub expires_in: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
@@ -3104,10 +3174,10 @@ pub struct RunnerSpec {
     pub runtime_context: RunnerContext,
 }
 
-// ----- telemetry: conversations / events / metrics (DP, runner-scoped) -------
+// ----- telemetry: conversations / events / metrics (DP) ----------------------
 //
-// These are Data-Plane telemetry reads — they hang off the [`crate::Runner`]
-// (DP bearer + `events:read`), never the CP-scoped top-level client. The
+// These are Data-Plane telemetry reads (`events:read`), served through
+// [`crate::DataPlaneResources`] on the client and the runner alike. The
 // stores are append-only (`otel_traces` → `/v1/conversations`, `otel_logs` →
 // `/v1/events`); all aggregation goes through the bounded `POST /v1/metrics`
 // contract. Records carry open telemetry attributes, so the typed structs keep

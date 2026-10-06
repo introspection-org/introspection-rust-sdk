@@ -226,7 +226,7 @@ struct Inner {
 ///
 /// ```rust,no_run
 /// use introspection_sdk::auth::{EmailCodeAuth, EmailCodeAuthConfig};
-/// use introspection_sdk::{TaskListParams, Tasks};
+/// use introspection_sdk::{DataPlaneResources, TaskListParams};
 ///
 /// # async fn main_() -> Result<(), Box<dyn std::error::Error>> {
 /// let auth = EmailCodeAuth::new(
@@ -243,7 +243,7 @@ struct Inner {
 ///
 /// let page = auth
 ///     .with_data_plane(|dp| async move {
-///         Tasks::new(dp).list(&TaskListParams::default()).next_page().await
+///         dp.tasks().list(&TaskListParams::default()).next_page().await
 ///     })
 ///     .await?;
 /// # let _ = page; Ok(()) }
@@ -462,15 +462,18 @@ impl EmailCodeAuth {
     /// A Data Plane client authenticated as the signed-in member, with a
     /// token refreshed first when it is about to expire.
     ///
-    /// Hand it to a Data Plane namespace (`Tasks::new`, `Files::new`,
-    /// `Events::new`, `Automations::new`, …). The token inside is fixed, so
-    /// prefer [`Self::with_data_plane`], which also recovers from a `401`.
+    /// It implements [`crate::DataPlaneResources`], so `dp.tasks()`,
+    /// `dp.connections()` and the rest work on it directly. The
+    /// token inside is fixed, so prefer [`Self::with_data_plane`], which also
+    /// recovers from a `401`.
     pub async fn data_plane(&self) -> ApiResult<Arc<HttpClient>> {
         Ok(self.data_plane_with_token().await?.0)
     }
 
     /// Run `op` against the Data Plane as the signed-in member. When it
     /// fails with `401`, refresh the session and run it once more.
+    ///
+    /// `op` receives a client that implements [`crate::DataPlaneResources`].
     pub async fn with_data_plane<T, F, Fut>(&self, op: F) -> ApiResult<T>
     where
         F: Fn(Arc<HttpClient>) -> Fut,
@@ -489,10 +492,12 @@ impl EmailCodeAuth {
     /// An [`IntrospectionClient`] holding the current access token, with the
     /// Data Plane URL defaulted to the session's.
     ///
-    /// Only its Data Plane namespaces (`events`, `project_labels`,
-    /// `automations`) accept a native token; Control Plane calls answer
-    /// `401`. The token is not refreshed inside the client: build a new one
-    /// after [`Self::refresh`], or use [`Self::with_data_plane`].
+    /// Only its Data Plane namespaces accept a native token: the
+    /// [`crate::DataPlaneResources`] set (`tasks`, `files`, `shares`,
+    /// `conversations`, `events`, `metrics`, `automations`,
+    /// `connections`) and `project_labels`. Control Plane calls answer `401`.
+    /// The token is not refreshed inside the client: build a new one after
+    /// [`Self::refresh`], or use [`Self::with_data_plane`].
     pub async fn client(
         &self,
         advanced: Option<AdvancedOptions>,
