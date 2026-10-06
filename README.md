@@ -102,36 +102,32 @@ interrupts, and cancellation.
 
 `IntrospectionClient` and `Runner` expose one Data Plane surface, enforced by
 the `DataPlaneResources` trait: `tasks()` (with `.runs`), `files()`,
-`shares()`, `conversations()`, `events()`, `metrics()`, `automations()`,
-`issues()` and `connections()`. On the client they act with the client's token; on a runner, with
+`shares()`, `conversations()`, `events()`, `metrics()`, `automations()` and
+`connections()`. On the client they act with the client's token; on a runner, with
 its session token. Both carry the methods inherently, so a call needs no
 import, and generic code can take either:
 
 ```rust
 use futures::StreamExt;
-use introspection_sdk::{DataPlaneResources, IssueListParams, IssueStatus};
+use introspection_sdk::{DataPlaneResources, MemberConnectionListParams};
 
-async fn open_issue_titles(dp: &impl DataPlaneResources) -> Vec<String> {
-    let mut issues = dp.issues().list(&IssueListParams {
-        status: vec![IssueStatus::Open],
-        ..Default::default()
-    });
-    let mut titles = Vec::new();
-    while let Some(Ok(issue)) = issues.next().await {
-        titles.push(issue.title);
+async fn connected_apps(dp: &impl DataPlaneResources) -> Vec<String> {
+    let mut connections = dp.connections().list(&MemberConnectionListParams::default());
+    let mut apps = Vec::new();
+    while let Some(Ok(connection)) = connections.next().await {
+        apps.push(connection.app);
     }
-    titles
+    apps
 }
 
-open_issue_titles(&client).await;
-open_issue_titles(&runner).await;
+connected_apps(&client).await;
+connected_apps(&runner).await;
 ```
 
 The token's scopes decide which calls succeed. A runner a member opens for
 themself (no asserted `identity`, no explicit `scope`) carries
-`automations:read` / `automations:write`, `connections:read` /
-`connections:write` / `connections:delete` and `issues:read` / `issues:write`
-on top of the sandbox set (tasks, files, shares, conversations, events,
+`automations:read` / `automations:write` and `connections:read` /
+`connections:write` / `connections:delete` on top of the sandbox set (tasks, files, shares, conversations, events,
 metrics). A runner opened for an asserted end customer carries the sandbox set,
 or what its `RunRequest::scope` asks for.
 
@@ -457,40 +453,6 @@ are Data Plane routes gated on `connections:read`, `connections:write` and
 `connections:delete`. They are distinct from `client.connectors()`, whose
 connections an integrator administers for the project.
 
-## Track issues
-
-An issue is a project pursuit with a living brief, a fixed worker task, and
-the human requests raised on it:
-
-```rust
-use introspection_sdk::{
-    IssueCreate, IssueListParams, IssueOwner, IssuePriority, IssueStatus, IssueUpdate,
-};
-
-let issue = runner.issues().create(&IssueCreate {
-    priority: Some(IssuePriority::High),
-    tags: vec!["customer:acme".into()],
-    ..IssueCreate::new("Checkout retries double-charge", "Customers on retry see two charges.", task_id)
-}).await?;
-
-// Edits are made against the revision you read; a stale one answers 409.
-let issue = runner.issues().update(issue.id, &IssueUpdate {
-    status: Some(IssueStatus::Closed),
-    ..IssueUpdate::new(issue.revision)
-}).await?;
-
-let mut mine = runner.issues().list(&IssueListParams {
-    owner: vec![IssueOwner::Me],
-    status: vec![IssueStatus::Open, IssueStatus::Waiting],
-    ..Default::default()
-});
-```
-
-`update_request` creates or changes one human request on an issue
-(`PATCH /v1/issues/{id}` with `{"request": ...}`). List filters that take a
-list are sent as repeated keys and ORed; every filter only narrows. These are
-Data Plane routes gated on `issues:read`, `issues:write` and `issues:delete`.
-
 ## Curate traces with human review
 
 Annotations are append-only events on an OTel trace/span. Each write changes
@@ -641,7 +603,7 @@ let page = auth
 ```
 
 - The client `with_data_plane` hands `op` implements `DataPlaneResources`, so
-  every Data Plane namespace (`tasks()`, `issues()`, `connections()`, …) works
+  every Data Plane namespace (`tasks()`, `connections()`, …) works
   on it. It has no runtime context, so `connections().create` needs `runtime`.
 
 - A returning user's code is six digits. A new user's first code is six

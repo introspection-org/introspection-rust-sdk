@@ -25,7 +25,7 @@ use crate::api::schemas::{RunRequest, RunnerContext, RunnerDeployment, RunnerSpe
 use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
-use crate::resources::{Automations, Issues, MemberConnections};
+use crate::resources::{Automations, MemberConnections};
 use crate::types::defaults;
 
 /// How a [`Runner`] was opened. Captured so [`Runner::refresh`] can
@@ -180,13 +180,6 @@ impl Runner {
     /// `automations:read` / `automations:write`. Cheap clone.
     pub fn automations(&self) -> Automations {
         Automations::new(self.dp_http())
-    }
-
-    /// `runner.issues.*` — Data Plane `/v1/issues` on the runner's token. A
-    /// runner a member opens for themself carries `issues:read` /
-    /// `issues:write`. Cheap clone.
-    pub fn issues(&self) -> Issues {
-        Issues::new(self.dp_http())
     }
 
     /// `runner.connections.*` — Data Plane `/v1/connections` on the runner's

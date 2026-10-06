@@ -10,8 +10,8 @@ use introspection_sdk::auth::{AuthSession, EmailCodeAuth, EmailCodeAuthConfig, O
 use introspection_sdk::{
     AdvancedOptions, AutomationListParams, ClientConfig, ConversationListParams,
     DataPlaneResources, EventListParams, FileListParams, IntrospectionClient,
-    IntrospectionEventName, IssueListParams, MemberConnectionListParams, MetricSpec, MetricsQuery,
-    Runner, ShareListParams, TaskListParams,
+    IntrospectionEventName, MemberConnectionListParams, MetricSpec, MetricsQuery, Runner,
+    ShareListParams, TaskListParams,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -35,7 +35,6 @@ async fn mount_data_plane(dp: &MockServer, bearer: &str) {
         "/v1/conversations",
         "/v1/events",
         "/v1/automations",
-        "/v1/issues",
         "/v1/connections",
     ] {
         Mock::given(method("GET"))
@@ -106,12 +105,6 @@ async fn drive_every_namespace(dp: &impl DataPlaneResources) {
     assert!(dp
         .automations()
         .list(&AutomationListParams::default())
-        .next()
-        .await
-        .is_none());
-    assert!(dp
-        .issues()
-        .list(&IssueListParams::default())
         .next()
         .await
         .is_none());

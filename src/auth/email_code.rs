@@ -463,7 +463,7 @@ impl EmailCodeAuth {
     /// token refreshed first when it is about to expire.
     ///
     /// It implements [`crate::DataPlaneResources`], so `dp.tasks()`,
-    /// `dp.issues()`, `dp.connections()` and the rest work on it directly. The
+    /// `dp.connections()` and the rest work on it directly. The
     /// token inside is fixed, so prefer [`Self::with_data_plane`], which also
     /// recovers from a `401`.
     pub async fn data_plane(&self) -> ApiResult<Arc<HttpClient>> {
@@ -494,7 +494,7 @@ impl EmailCodeAuth {
     ///
     /// Only its Data Plane namespaces accept a native token: the
     /// [`crate::DataPlaneResources`] set (`tasks`, `files`, `shares`,
-    /// `conversations`, `events`, `metrics`, `automations`, `issues`,
+    /// `conversations`, `events`, `metrics`, `automations`,
     /// `connections`) and `project_labels`. Control Plane calls answer `401`.
     /// The token is not refreshed inside the client: build a new one after
     /// [`Self::refresh`], or use [`Self::with_data_plane`].

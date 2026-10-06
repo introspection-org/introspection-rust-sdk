@@ -143,12 +143,10 @@ pub use api::{
     FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput, GenAiOutput, GenAiRequest,
     GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, HavingTerm,
     IdRef, IntrospectionAPIError, IntrospectionAttributes, IntrospectionConversation,
-    IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime, Issue, IssueCreate,
-    IssueEventReference, IssueFile, IssueLink, IssueListParams, IssueOpenRequest, IssueOwner,
-    IssuePriority, IssueRequestStatus, IssueRequestUpdate, IssueSpanReference, IssueStatus,
-    IssueUpdate, JudgeGoalComponent, JudgementEvent, JudgementPayload, Member, MemberConnection,
-    MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams, MemberListParams,
-    MemberType, MemberUpdateParams, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
+    IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime, JudgeGoalComponent,
+    JudgementEvent, JudgementPayload, Member, MemberConnection, MemberConnectionCreate,
+    MemberConnectionListParams, MemberCreateParams, MemberListParams, MemberType,
+    MemberUpdateParams, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
     MetricsResponse, NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated,
     PaginationParams, Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
     PatternPayload, Recipe, RecipeListParams, Repository, RepositoryCommit, RepositoryCommitDetail,
@@ -182,7 +180,7 @@ pub use resources::annotations::{
     AnnotationTarget, ProjectLabel, ProjectLabelCreate, ProjectLabelListParams, ProjectLabelUpdate,
 };
 pub use resources::{
-    Annotations, Automations, Connections, Connectors, ExperimentHandle, Experiments, Issues,
+    Annotations, Automations, Connections, Connectors, ExperimentHandle, Experiments,
     MemberConnections, Members, ProjectLabels, Recipes, Repositories, RepositoryContents,
     RuntimeHandle, Runtimes,
 };

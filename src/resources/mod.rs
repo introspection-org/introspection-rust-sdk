@@ -24,15 +24,13 @@
 //!   scheduled prompts, one-off reminders, and platform work.
 //! - [`MemberConnections`] — Data Plane `/v1/connections` CRUD: the apps
 //!   members connected for themselves.
-//! - [`Issues`] — Data Plane `/v1/issues` CRUD: project pursuits and the
-//!   human requests raised on them.
 //!
-//! The Data Plane namespaces here (automations, connections and issues) are
+//! The Data Plane namespaces here (automations and connections) are
 //! reached through [`crate::DataPlaneResources`], which the client and the
 //! runner both implement.
 //!
-//! Read and lifecycle only, with three exceptions: connectors, automations,
-//! connections and issues are full CRUD, members can be invited and relabelled, and a
+//! Read and lifecycle only, with three exceptions: connectors, automations
+//! and connections are full CRUD, members can be invited and relabelled, and a
 //! repository's branches can be merged.
 //! A connector is not an authoring artifact but the B2B2C seam an integrator
 //! drives from their own backend — creating one and minting install links for
@@ -50,7 +48,6 @@ pub mod automations;
 pub mod connections;
 pub mod connectors;
 pub mod experiments;
-pub mod issues;
 pub mod members;
 pub mod recipes;
 pub mod repositories;
@@ -61,7 +58,6 @@ pub use automations::Automations;
 pub use connections::MemberConnections;
 pub use connectors::{Connections, Connectors};
 pub use experiments::{ExperimentHandle, Experiments};
-pub use issues::Issues;
 pub use members::Members;
 pub use recipes::Recipes;
 pub use repositories::{Repositories, RepositoryContents};

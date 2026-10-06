@@ -4,7 +4,7 @@
 //! `client.runtimes()` / `client.experiments()` / `client.runtimes().handle(id)` /
 //! `client.experiment(id, project)` accessors over the Introspection
 //! DP REST API, and the Data Plane namespaces of
-//! [`crate::DataPlaneResources`] (`tasks()`, `files()`, `issues()`, …) on the
+//! [`crate::DataPlaneResources`] (`tasks()`, `files()`, `connections()`, …) on the
 //! client's own credential.
 //!
 //! For analytics events (`track` / `feedback` / `identify`), construct
@@ -26,7 +26,7 @@ use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Automations, Connectors, ExperimentHandle, Experiments, Issues, MemberConnections,
+    Annotations, Automations, Connectors, ExperimentHandle, Experiments, MemberConnections,
     Members, ProjectLabels, Recipes, Repositories, RuntimeHandle, Runtimes,
 };
 use crate::types::{self, ClientConfig};
@@ -222,11 +222,6 @@ impl IntrospectionClient {
         Automations::new(self.dp_http.clone())
     }
 
-    /// Data Plane `/v1/issues` CRUD.
-    pub fn issues(&self) -> Issues {
-        Issues::new(self.dp_http.clone())
-    }
-
     /// Data Plane `/v1/connections` CRUD: the apps members connected for
     /// themselves. On the client, [`MemberConnections::create`] needs an
     /// explicit `runtime`. Distinct from [`Self::connectors`]' connector
@@ -354,7 +349,6 @@ mod tests {
         let _ = client.runtimes();
         let _ = client.experiments();
         let _ = client.recipes();
-        let _ = client.issues();
         let _ = client.connections();
     }
 }

@@ -3,18 +3,18 @@
 //! Plane client [`EmailCodeAuth::with_data_plane`] hands out implements too.
 //!
 //! Each accessor returns a cheap handle over the holder's Data Plane HTTP
-//! client, so the same call reads the same on either: `client.issues()` acts
-//! on the client's credential, `runner.issues()` on the runner's session
+//! client, so the same call reads the same on either: `client.tasks()` acts
+//! on the client's credential, `runner.tasks()` on the runner's session
 //! token. Both types also carry these as inherent methods, so calling them
 //! needs no import; the trait is what keeps the two sets from drifting, and
 //! what generic code takes (`fn f(dp: &impl DataPlaneResources)`).
 //!
 //! Which routes a call may reach is decided by the credential's scopes, not by
 //! the type. A runner a member opens for themself carries `automations:read` /
-//! `automations:write`, `connections:read` / `connections:write` /
-//! `connections:delete` and `issues:read` / `issues:write` on top of the
-//! sandbox set; a runner opened for an asserted end customer carries only the
-//! sandbox set, or what its `RunRequest::scope` asks for.
+//! `automations:write` and `connections:read` / `connections:write` /
+//! `connections:delete` on top of the sandbox set; a runner opened for an
+//! asserted end customer carries only the sandbox set, or what its
+//! `RunRequest::scope` asks for.
 
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::client::IntrospectionClient;
-use crate::resources::{Automations, Issues, MemberConnections};
+use crate::resources::{Automations, MemberConnections};
 use crate::runner::Runner;
 
 #[cfg(doc)]
@@ -47,8 +47,6 @@ pub trait DataPlaneResources {
     fn metrics(&self) -> Metrics;
     /// `/v1/automations`.
     fn automations(&self) -> Automations;
-    /// `/v1/issues`.
-    fn issues(&self) -> Issues;
     /// `/v1/connections` — the apps members connected for themselves. On a
     /// runner, `create` defaults `runtime` to the runner's runtime group.
     fn connections(&self) -> MemberConnections;
@@ -77,9 +75,6 @@ macro_rules! delegate_data_plane {
             }
             fn automations(&self) -> Automations {
                 <$ty>::automations(self)
-            }
-            fn issues(&self) -> Issues {
-                <$ty>::issues(self)
             }
             fn connections(&self) -> MemberConnections {
                 <$ty>::connections(self)
@@ -116,9 +111,6 @@ impl DataPlaneResources for Arc<HttpClient> {
     }
     fn automations(&self) -> Automations {
         Automations::new(self.clone())
-    }
-    fn issues(&self) -> Issues {
-        Issues::new(self.clone())
     }
     fn connections(&self) -> MemberConnections {
         MemberConnections::new(self.clone(), None)
