@@ -253,6 +253,7 @@ fn sdk_surface_matches_the_published_reference() {
     // Every field populated, so `skip_serializing_if` cannot hide one. No
     // `..Default::default()` anywhere: a new field must fail to compile here.
     let create = TaskCreate {
+        runtime_id: Some(Uuid::nil()),
         title: Some("t".into()),
         prompt: Some("p".into()),
         agent_name: Some("agent".into()),
@@ -898,10 +899,7 @@ fn sdk_surface_matches_the_published_reference() {
             "TaskCreate — POST /v1/tasks body",
             wire_fields(&create),
             schema_properties(&spec, "TaskCreate"),
-            // Runner-bound client: the credential's claim is authoritative for
-            // runtime selection and the API ignores a body `runtime_id` from
-            // such a caller, so exposing it would do nothing.
-            &["runtime_id"],
+            &[],
             "sent here but not accepted by the API (rejected with a 422 — the create body forbids undeclared fields)",
             "accepted by the API but unavailable to callers of this SDK",
             true,

@@ -2,8 +2,9 @@
 //! telemetry reads.
 //!
 //! These are **Data-Plane-scoped**: they hang off the [`crate::Runner`] (DP
-//! bearer + `events:read`), never the CP-scoped top-level
-//! [`crate::IntrospectionClient`]. Two append-only stores back the reads —
+//! bearer + `events:read`); [`crate::IntrospectionClient::events`] reads
+//! events with a project token against the client's Data Plane URL. Two
+//! append-only stores back the reads —
 //! `otel_traces` → [`Conversations`] (`GET /v1/conversations`) and `otel_logs`
 //! → [`Events`] (`GET /v1/events`) — while all aggregation goes through the
 //! bounded [`Metrics`] surface (`POST /v1/metrics`).
@@ -311,7 +312,7 @@ impl Events {
     /// `GET /v1/events` — cursor paginator (JSON).
     ///
     /// [`EventListParams::event_name`] is **required** (compile-enforced) —
-    /// exactly one of the seven canonical families per request, so every page
+    /// exactly one canonical family per request, so every page
     /// is homogeneous and each record deserializes into the matching typed
     /// [`Event`] variant (envelope + nested typed payload). Rows whose
     /// `event_name` this SDK build doesn't recognise surface as

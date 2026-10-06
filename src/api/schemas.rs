@@ -347,12 +347,14 @@ pub struct TaskRepoRequest {
 }
 
 /// POST /v1/tasks body. All fields optional — the DP fills in defaults.
-///
-/// Note there is no `runtime_id`: this client is runner-bound, and a runner
-/// credential's JWT claim is authoritative for runtime selection, so the
-/// field is only meaningful to browser/session callers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TaskCreate {
+    /// The runtime to run on, for a caller whose credential names none: a
+    /// member token such as a native email-code session. A runner
+    /// credential's claim is authoritative and the API ignores this. Only a
+    /// runtime id is accepted, not a group or slug.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3614,9 +3616,13 @@ impl ConversationListParams {
 /// every list read — exactly one family per request — so a response page is
 /// always homogeneous and fully typeable (JSON discriminated member; Arrow
 /// typed payload struct column). Legacy verb-suffixed names on historical
-/// rows are normalized to these canonical names server-side; anything outside
-/// the set (`gen_ai.*`, customer / `track()` events) is not returned and
-/// remains aggregable via `POST /v1/metrics`.
+/// rows are normalized to these canonical names server-side; raw `gen_ai.*`
+/// rows are not returned and remain aggregable via `POST /v1/metrics`.
+///
+/// The platform serves further families this SDK build does not type yet
+/// (`introspection.track`, `introspection.issue`,
+/// `introspection.repository.*`): request one with [`Self::Unknown`] and read
+/// its rows as [`Event::Unknown`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntrospectionEventName {
     Annotation,
@@ -5263,7 +5269,7 @@ mod tests {
 
     #[test]
     fn unknown_event_family_does_not_fail_the_page() {
-        // A seventh family added server-side after this SDK build must not
+        // A family added server-side after this SDK build must not
         // fail the whole page — it falls into `Event::Unknown` verbatim.
         let payload = json!({
             "records": [
