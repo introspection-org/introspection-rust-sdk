@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.24.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.23.0...v0.24.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* `RuntimeHandle::id()` returns `Option<Uuid>` (`None` for a slug handle), and `RunnerSource::Runtime` carries `runtime: StringOrUuid` in place of `runtime_id: Uuid`.
+
+### Features
+
+* open a runner by Runtime slug without listing; library-specific User-Agent ([#109](https://github.com/introspection-org/introspection-rust-sdk/issues/109)) ([5154acb](https://github.com/introspection-org/introspection-rust-sdk/commit/5154acbb6afc791ebbc8433a300bf6378bdd6d85))
+
 ## [0.23.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.22.0...v0.23.0) (2026-10-06)
 
 
