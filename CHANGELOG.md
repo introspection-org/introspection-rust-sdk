@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.23.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.22.0...v0.23.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **connections:** IntrospectionClient::events() and ::automations() return an owned handle (Events, Automations) instead of a reference, matching Runner. Method calls are unaffected; code that names the &Events / &Automations type must drop the reference.
+* IntrospectionAPIError gains a variant and TaskCreate gains a field, so exhaustive matches and struct literals need updating.
+* **automations:** `IntrospectionEventName` and `Event` have new variants (`AutomationTriggered`, `AutomationSkipped`), so exhaustive matches need arms for them, and `EventListParams` has new fields `automation_id` and `task_id` (literals built with `..EventListParams::new(..)` are unaffected).
+* **members:** RunnerIdentity has a new field `metadata` (exhaustive struct literals need it; `RunnerIdentity { .., ..Default::default() }` is unaffected).
+* **streaming:** reject incomplete output and resume nonterminal closes ([#102](https://github.com/introspection-org/introspection-rust-sdk/issues/102))
+* **files:** FileListParams has a new field `metadata` (exhaustive struct literals need it; `FileListParams { .., ..Default::default() }` is unaffected).
+* **files:** FileCreateText and FileUpload have new fields `tags` and `metadata` (exhaustive struct literals need them; `FileCreateText { .., ..Default::default() }` and the FileUpload constructors are unaffected).
+
+### Features
+
+* **automations:** add automations resource and automation event families ([#106](https://github.com/introspection-org/introspection-rust-sdk/issues/106)) ([89e8dc6](https://github.com/introspection-org/introspection-rust-sdk/commit/89e8dc6657c5a0e6852f550f4f4e6c179c808613))
+* **connections:** one Data Plane surface on client and runner, with connections ([#108](https://github.com/introspection-org/introspection-rust-sdk/issues/108)) ([4950f5b](https://github.com/introspection-org/introspection-rust-sdk/commit/4950f5b5a76cb7868d66bd3dc7ee88832491e34a))
+* **files:** accept tags and metadata on file create ([#100](https://github.com/introspection-org/introspection-rust-sdk/issues/100)) ([f65cbf2](https://github.com/introspection-org/introspection-rust-sdk/commit/f65cbf2438f890b2b7c0f5e246925eb0b215621d))
+* **files:** filter file lists by metadata ([#103](https://github.com/introspection-org/introspection-rust-sdk/issues/103)) ([563366a](https://github.com/introspection-org/introspection-rust-sdk/commit/563366a58e27f116a39675346a9bec5ba7ed6325))
+* **members:** member tags and metadata, and identity-asserted metadata ([#105](https://github.com/introspection-org/introspection-rust-sdk/issues/105)) ([a48b07d](https://github.com/introspection-org/introspection-rust-sdk/commit/a48b07de55dc63bea848b06d77d0cfadf2906884))
+* native email-code sign-in, OAuth error mapping and TaskCreate.runtime_id ([#104](https://github.com/introspection-org/introspection-rust-sdk/issues/104)) ([0c2151e](https://github.com/introspection-org/introspection-rust-sdk/commit/0c2151ee24357bdcb88852c3094c0bf46e413957))
+* **otel:** add log_event for custom events; track delegates to it ([#107](https://github.com/introspection-org/introspection-rust-sdk/issues/107)) ([177e015](https://github.com/introspection-org/introspection-rust-sdk/commit/177e0155af561935fae9f414a97add8c2329c64c))
+
+
+### Bug Fixes
+
+* **streaming:** reject incomplete output and resume nonterminal closes ([#102](https://github.com/introspection-org/introspection-rust-sdk/issues/102)) ([2aab7e5](https://github.com/introspection-org/introspection-rust-sdk/commit/2aab7e5e1e0b3b67dc4669795d8407ac78c0625e))
+
 ## [0.22.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.21.0...v0.22.0) (2026-09-29)
 
 
