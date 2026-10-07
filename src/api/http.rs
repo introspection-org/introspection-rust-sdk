@@ -64,14 +64,8 @@ impl HttpConfig {
         // `entry`, not `insert`: additional_headers is applied above, and an
         // unconditional insert silently discarded a caller-supplied
         // User-Agent.
-        // `introspection-sdk/<version>`, the same string the OTLP exporters
-        // in this crate send.
-        // It used to be language-tagged, which duplicated in a non-standard
-        // place what the crate name and version already say.
-        h.entry(reqwest::header::USER_AGENT).or_insert_with(|| {
-            HeaderValue::from_str(&format!("introspection-sdk/{}", crate::VERSION))
-                .expect("static user agent is valid")
-        });
+        h.entry(reqwest::header::USER_AGENT)
+            .or_insert_with(|| HeaderValue::from_static(crate::USER_AGENT));
         Ok(h)
     }
 }

@@ -84,36 +84,66 @@ impl Runtimes {
     pub fn handle(&self, runtime_id: Uuid) -> RuntimeHandle {
         RuntimeHandle::new(self.http.clone(), runtime_id)
     }
+
+    /// Build a [`RuntimeHandle`] for a Runtime slug, without a request.
+    ///
+    /// `.run(...)` posts the slug to `POST /v1/runtimes/{slug}/run`, which
+    /// resolves it in the caller's project, so a credential refused
+    /// `GET /v1/runtimes` (a `customer` signed in by email code) can still
+    /// open a runner. [`Runner::refresh`] posts the same path.
+    pub fn by_slug(&self, slug: &str) -> RuntimeHandle {
+        RuntimeHandle {
+            http: self.http.clone(),
+            runtime: StringOrUuid::from(slug),
+        }
+    }
 }
 
-/// Handle returned by `client.runtimes().handle(id)`. Opens a [`Runner`] via
-/// [`Self::run`]. Runtime lifecycle and version selection are managed by the
-/// CLI and platform.
+/// Handle returned by `client.runtimes().handle(id)`,
+/// `client.runtimes().by_slug(slug)` and `client.runtime(..)`. Opens a
+/// [`Runner`] via [`Self::run`]. Runtime lifecycle and version selection are
+/// managed by the CLI and platform.
 #[derive(Clone)]
 pub struct RuntimeHandle {
     http: Arc<HttpClient>,
-    runtime_id: Uuid,
+    runtime: StringOrUuid,
 }
 
 impl RuntimeHandle {
     #[doc(hidden)]
     pub fn new(http: Arc<HttpClient>, runtime_id: Uuid) -> Self {
-        Self { http, runtime_id }
+        Self {
+            http,
+            runtime: StringOrUuid::from(runtime_id),
+        }
     }
 
-    pub fn id(&self) -> Uuid {
-        self.runtime_id
+    /// The concrete Runtime id, or `None` for a handle built from a slug,
+    /// which the Control Plane resolves on each `run`.
+    pub fn id(&self) -> Option<Uuid> {
+        match &self.runtime {
+            StringOrUuid::Uuid(id) => Some(*id),
+            StringOrUuid::String(_) => None,
+        }
     }
 
-    /// `POST /v1/runtimes/{id}/run` — open a [`Runner`] for this runtime.
+    /// `POST /v1/runtimes/{id or slug}/run` — open a [`Runner`] for this
+    /// runtime.
     pub async fn run(&self, ctx: RunRequest) -> ApiResult<Runner> {
-        let path = format!("/v1/runtimes/{}/run", self.runtime_id);
+        let path = run_path(&self.runtime);
         let spec: RunnerSpec = self.http.post_json(&path, &ctx).await?;
         let source = RunnerSource::Runtime {
             cp_http: self.http.clone(),
-            runtime_id: self.runtime_id,
+            runtime: self.runtime.clone(),
             ctx,
         };
         Runner::from_spec(spec, source)
     }
+}
+
+pub(crate) fn run_path(runtime: &StringOrUuid) -> String {
+    format!(
+        "/v1/runtimes/{}/run",
+        crate::api::encoding::encode(&runtime.to_string())
+    )
 }

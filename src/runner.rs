@@ -34,7 +34,9 @@ use crate::types::defaults;
 pub enum RunnerSource {
     Runtime {
         cp_http: Arc<HttpClient>,
-        runtime_id: Uuid,
+        /// The Runtime id, or the slug `/run` resolves in the caller's
+        /// project.
+        runtime: StringOrUuid,
         ctx: RunRequest,
     },
     Experiment {
@@ -50,10 +52,10 @@ impl RunnerSource {
         match self {
             Self::Runtime {
                 cp_http,
-                runtime_id,
+                runtime,
                 ctx,
             } => {
-                let path = format!("/v1/runtimes/{}/run", runtime_id);
+                let path = crate::resources::runtimes::run_path(runtime);
                 cp_http.post_json(&path, ctx).await
             }
             Self::Experiment {

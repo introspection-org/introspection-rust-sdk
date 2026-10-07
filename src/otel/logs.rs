@@ -207,10 +207,7 @@ impl IntrospectionLogs {
             })?
         } else {
             let mut headers = HashMap::from([
-                (
-                    "User-Agent".to_string(),
-                    format!("introspection-sdk/{}", crate::VERSION),
-                ),
+                ("User-Agent".to_string(), crate::USER_AGENT.to_string()),
                 ("Authorization".to_string(), format!("Bearer {}", token)),
             ]);
             if let Some(additional_headers) = &config.additional_headers {

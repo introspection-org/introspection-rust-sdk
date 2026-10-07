@@ -66,6 +66,14 @@ while let Some(event) = events.next().await {
 }
 ```
 
+`client.runtime("customer-agent")` makes no request for a slug: `.run(..)` is a
+single `POST /v1/runtimes/customer-agent/run`, which the Control Plane resolves
+in the project the token is scoped to, so a credential that may not list
+runtimes (a customer signed in by email code) can still open a runner, and
+`runner.refresh()` posts the same path. A UUID is a runtime group ID and is
+resolved with `GET /v1/runtimes` first; `client.runtimes().handle(runtime_id)`
+posts a known runtime ID directly.
+
 Or wait for the finished answer instead of streaming:
 
 ```rust

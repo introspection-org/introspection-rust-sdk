@@ -127,10 +127,9 @@ async fn a_non_json_error_body_still_carries_the_retry_floor() {
 }
 
 #[tokio::test]
-async fn every_request_names_the_sdk_and_its_release() {
-    // The same `introspection-sdk/<version>` string the OTLP exporters in
-    // this crate send. It used to be
-    // language-tagged here and nowhere else.
+async fn every_request_names_this_library_and_its_release() {
+    // The same string the OTLP exporters in this crate send. The version is
+    // the one release-please writes to both `version.txt` and `Cargo.toml`.
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(ROUTE))
@@ -147,10 +146,9 @@ async fn every_request_names_the_sdk_and_its_release() {
         .expect("a User-Agent is sent")
         .to_str()
         .unwrap();
-    assert_eq!(
-        user_agent,
-        format!("introspection-sdk/{}", env!("CARGO_PKG_VERSION"))
-    );
+    let release = include_str!("../version.txt").trim();
+    assert_eq!(user_agent, format!("introspection-rust-sdk/{release}"));
+    assert_eq!(user_agent, introspection_sdk::USER_AGENT);
 }
 
 #[tokio::test]
