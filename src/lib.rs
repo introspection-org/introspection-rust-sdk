@@ -173,7 +173,7 @@ pub use auth::{
     AuthState, AuthorizationCodeParams, EmailCodeAuth, EmailCodeAuthConfig, OAuthToken,
     ServiceAccountTokenParams, TokenExchangeParams,
 };
-pub use client::{IntrospectionClient, IntrospectionError, Result, VERSION};
+pub use client::{IntrospectionClient, IntrospectionError, Result, USER_AGENT, VERSION};
 pub use data_plane::DataPlaneResources;
 pub use resources::annotations::{
     AnnotationEventOptions, AnnotationListParams, AnnotationMutation, AnnotationState,

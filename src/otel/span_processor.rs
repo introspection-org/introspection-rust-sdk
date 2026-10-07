@@ -14,7 +14,6 @@ use thiserror::Error;
 use tracing::{debug, info};
 
 use crate::otel::types;
-use crate::VERSION;
 
 /// Create a `reqwest::blocking::Client` on a dedicated thread.
 ///
@@ -349,10 +348,7 @@ impl IntrospectionSpanProcessor {
                 );
 
                 let mut headers = HashMap::new();
-                headers.insert(
-                    "User-Agent".to_string(),
-                    format!("introspection-sdk/{}", VERSION),
-                );
+                headers.insert("User-Agent".to_string(), crate::USER_AGENT.to_string());
                 headers.insert("Authorization".to_string(), format!("Bearer {}", token));
                 if let Some(additional) = advanced.additional_headers {
                     headers.extend(additional);

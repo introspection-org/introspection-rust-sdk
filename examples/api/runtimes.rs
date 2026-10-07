@@ -1,4 +1,4 @@
-//! End-to-end walkthrough — look up a runtime by runtime group slug, open a Runner,
+//! End-to-end walkthrough — open a Runner for a runtime by slug,
 //! spawn a task, stream its run, then upload a file.
 //!
 //! Run with:
@@ -24,7 +24,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runtime =
         std::env::var("INTROSPECTION_RUNTIME").unwrap_or_else(|_| "customer-agent".into());
 
-    // 1) Look up the runtime by runtime group slug or ID and open a Runner.
+    // 1) Open a Runner. A slug posts straight to `/v1/runtimes/{slug}/run`; a
+    //    runtime group ID is resolved with `GET /v1/runtimes` first.
     let runner = client
         .runtime(&runtime)
         .await?

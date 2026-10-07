@@ -1,7 +1,8 @@
 //! Resources reachable from [`crate::IntrospectionClient`].
 //!
 //! - [`Runtimes`] — read and resolve `/v1/runtimes`; obtain a
-//!   [`RuntimeHandle`] via `client.runtimes().handle(id)` for `.run()`.
+//!   [`RuntimeHandle`] via `client.runtimes().handle(id)` or
+//!   `client.runtimes().by_slug(slug)` for `.run()`.
 //! - [`Experiments`] — `/v1/experiments` CRUD plus run lifecycle
 //!   (`/start` / `/end` / `/cancel`); obtain an [`ExperimentHandle`]
 //!   via `client.experiment(id, project)` for `.run()`.

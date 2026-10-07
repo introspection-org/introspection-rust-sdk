@@ -34,6 +34,10 @@ use crate::types::{self, ClientConfig};
 /// SDK version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// `User-Agent` sent on REST calls and both OTLP streams: this library and its
+/// release.
+pub const USER_AGENT: &str = concat!("introspection-rust-sdk/", env!("CARGO_PKG_VERSION"));
+
 /// Errors that can occur in the Introspection client. HTTP failures bubble up
 /// as [`crate::IntrospectionAPIError`] from the underlying namespaces.
 #[derive(Error, Debug)]
@@ -230,14 +234,22 @@ impl IntrospectionClient {
         MemberConnections::new(self.dp_http.clone(), None)
     }
 
-    /// Look up an active runtime by runtime group slug or ID. The server infers the
-    /// project from the API token. Equivalent to
+    /// A handle for a runtime by slug or runtime group ID.
+    ///
+    /// A slug makes no request: the handle posts it to
+    /// `POST /v1/runtimes/{slug}/run`, which resolves it in the project the
+    /// token is scoped to, so a credential refused `GET /v1/runtimes` can
+    /// still open a runner (`client.runtimes().by_slug(slug)`). A UUID is a
+    /// runtime group ID, which `/run` does not take, so it is resolved with
     /// `client.runtimes().resolve(runtime)`.
     ///
     /// To build a handle for a concrete runtime UUID without a lookup, use
     /// `client.runtimes().handle(runtime_id)`.
     pub async fn runtime(&self, runtime: &str) -> crate::api::error::ApiResult<RuntimeHandle> {
-        self.runtimes().resolve(runtime).await
+        if uuid::Uuid::parse_str(runtime).is_ok() {
+            return self.runtimes().resolve(runtime).await;
+        }
+        Ok(self.runtimes().by_slug(runtime))
     }
 
     pub fn experiment(

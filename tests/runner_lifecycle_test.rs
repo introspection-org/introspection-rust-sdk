@@ -309,3 +309,96 @@ async fn refresh_after_close_is_refused() {
     assert!(runner.is_closed());
     assert_eq!(runner.session_id(), "sess_1");
 }
+
+fn request_lines(requests: &[wiremock::Request]) -> Vec<String> {
+    requests
+        .iter()
+        .map(|r| format!("{} {}", r.method, r.url.path()))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_slug_opens_and_refreshes_a_runner_without_listing() {
+    // `GET /v1/runtimes` refuses a `customer` credential with 403, so a slug
+    // goes straight to `/run`, which resolves it in the caller's project.
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/runtimes/customer-agent/run"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(runner_spec(
+            "sess_1",
+            "https://dp.example.com",
+            "2026-01-01T00:00:00Z",
+        )))
+        .expect(2)
+        .mount(&cp)
+        .await;
+
+    let handle = client(&cp).runtime("customer-agent").await.unwrap();
+    assert_eq!(handle.id(), None);
+    let runner = handle.run(run_request()).await.unwrap();
+    assert_eq!(
+        request_lines(&cp.received_requests().await.unwrap()),
+        ["POST /v1/runtimes/customer-agent/run"]
+    );
+    assert_eq!(
+        runner.context().runtime_id,
+        Uuid::parse_str(RUNTIME_ID).unwrap()
+    );
+
+    runner.refresh().await.unwrap();
+    assert_eq!(
+        request_lines(&cp.received_requests().await.unwrap()),
+        [
+            "POST /v1/runtimes/customer-agent/run",
+            "POST /v1/runtimes/customer-agent/run"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_runtime_group_id_still_resolves_then_posts_by_runtime_id() {
+    // A UUID selector is a runtime group id, which `/run` does not take.
+    const GROUP_ID: &str = "33333333-3333-4333-8333-333333333333";
+    let cp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/runtimes"))
+        .and(wiremock::matchers::query_param("runtime", GROUP_ID))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{
+                "id": RUNTIME_ID,
+                "org_id": "00000000-0000-0000-0000-00000000aaaa",
+                "project_id": "00000000-0000-0000-0000-00000000bbbb",
+                "runtime_group_id": GROUP_ID,
+                "recipe_id": RECIPE_ID,
+                "created_by_member_id": "00000000-0000-0000-0000-00000000cccc",
+                "name": "Customer Agent",
+                "slug": "customer-agent",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            }],
+            "count": 1,
+            "next": null,
+        })))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    mount_run(
+        &cp,
+        runner_spec("sess_1", "https://dp.example.com", "2026-01-01T00:00:00Z"),
+        2,
+    )
+    .await;
+
+    let handle = client(&cp).runtime(GROUP_ID).await.unwrap();
+    assert_eq!(handle.id(), Some(Uuid::parse_str(RUNTIME_ID).unwrap()));
+    let runner = handle.run(run_request()).await.unwrap();
+    runner.refresh().await.unwrap();
+    assert_eq!(
+        request_lines(&cp.received_requests().await.unwrap()),
+        [
+            "GET /v1/runtimes".to_string(),
+            format!("POST /v1/runtimes/{RUNTIME_ID}/run"),
+            format!("POST /v1/runtimes/{RUNTIME_ID}/run"),
+        ]
+    );
+}
