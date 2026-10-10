@@ -247,10 +247,6 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
         params.operation_name.as_deref(),
     );
     push_opt(&mut query, "lookback_days", params.lookback_days);
-    #[allow(deprecated)]
-    if let Some(share_id) = params.share_id {
-        query.push(("share_id".into(), share_id.to_string()));
-    }
     for (key, value) in params.filters.iter().flatten() {
         match value {
             serde_json::Value::Null => {}
@@ -277,10 +273,6 @@ fn get_query(params: &ConversationItemGetParams) -> Vec<(String, String)> {
     let mut query = Vec::new();
     for include in &params.include {
         query.push(("include".into(), include.as_str().into()));
-    }
-    #[allow(deprecated)]
-    if let Some(share_id) = params.share_id {
-        query.push(("share_id".into(), share_id.to_string()));
     }
     query
 }

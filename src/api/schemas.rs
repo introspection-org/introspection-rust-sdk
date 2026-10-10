@@ -3593,11 +3593,6 @@ pub struct ConversationListParams {
     pub conversation_id: Option<String>,
     /// Restrict to several conversations.
     pub conversation_ids: Option<Vec<String>>,
-    /// Ignored by the server; shares apply automatically.
-    #[deprecated(
-        note = "ignored by the server: shares now apply automatically to the grantee's reads"
-    )]
-    pub share_id: Option<Vec<String>>,
     pub model: Option<String>,
     pub agent_name: Option<String>,
     pub status: Option<ConversationStatus>,
@@ -3672,11 +3667,6 @@ pub struct ConversationItemListParams {
     pub service_name: Option<String>,
     pub operation_name: Option<String>,
     pub lookback_days: Option<u32>,
-    /// Ignored by the server; shares apply automatically.
-    #[deprecated(
-        note = "ignored by the server: shares now apply automatically to the grantee's reads"
-    )]
-    pub share_id: Option<Uuid>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -3688,11 +3678,6 @@ pub struct ConversationItemListParams {
 #[derive(Debug, Clone, Default)]
 pub struct ConversationItemGetParams {
     pub include: Vec<ConversationItemInclude>,
-    /// Ignored by the server; shares apply automatically.
-    #[deprecated(
-        note = "ignored by the server: shares now apply automatically to the grantee's reads"
-    )]
-    pub share_id: Option<Uuid>,
 }
 
 // The conversation item and its page envelope are the GenAI span types in
@@ -3722,8 +3707,6 @@ impl ConversationListParams {
         .apply(&mut obj)?;
         put_str(&mut obj, "conversation_id", self.conversation_id.as_ref());
         put_list(&mut obj, "conversation_ids", self.conversation_ids.as_ref());
-        #[allow(deprecated)]
-        put_list(&mut obj, "share_id", self.share_id.as_ref());
         put_str(&mut obj, "model", self.model.as_ref());
         put_str(&mut obj, "agent_name", self.agent_name.as_ref());
         if let Some(status) = self.status {
@@ -4960,7 +4943,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn typed_conversation_filters_reach_the_wire() {
         // These were a `HashMap<String, Value>` the caller had to spell by
         // hand: a typo produced no compile error and, per the DP's own
@@ -4969,7 +4951,6 @@ mod tests {
         let wire = ConversationListParams {
             conversation_id: Some("conv".into()),
             conversation_ids: Some(vec!["a".into(), "b".into()]),
-            share_id: Some(vec!["s".into()]),
             model: Some("claude-opus-5".into()),
             agent_name: Some("agent".into()),
             status: Some(ConversationStatus::Error),
@@ -4994,7 +4975,6 @@ mod tests {
 
         assert_eq!(wire["conversation_id"], "conv");
         assert_eq!(wire["conversation_ids"], serde_json::json!(["a", "b"]));
-        assert_eq!(wire["share_id"], serde_json::json!(["s"]));
         assert_eq!(wire["model"], "claude-opus-5");
         assert_eq!(wire["agent_name"], "agent");
         assert_eq!(wire["status"], "Error");
@@ -5597,12 +5577,6 @@ pub struct ConversationExportParams {
     /// Partition lookback bound in days (1-365).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookback_days: Option<u16>,
-    /// Ignored by the server; shares apply automatically.
-    #[deprecated(
-        note = "ignored by the server: shares now apply automatically to the grantee's reads"
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub share_id: Option<Uuid>,
     /// Lower bound on which records are assembled (ISO 8601).
     ///
     /// Named for the wire rather than carrying the ergonomic
