@@ -360,9 +360,12 @@ client.members().update(member_id, &MemberUpdateParams {
 Metadata grants nothing. An assertion merges its keys into an existing
 member's metadata: asserted keys overwrite keys with the same name and other
 keys stay. An absent or empty map changes nothing. `tags` are different
-because they grant access. A member can read and write every file and task
-whose tags intersect its own, so a `RunnerIdentity` sets tags only on a member
-it creates, and setting tags through `members()` requires `members:manage`.
+because they grant access: a share created with `granted_tag` reaches every
+member carrying that tag, so a `RunnerIdentity` sets tags only on a member it
+creates, and setting tags through `members()` requires `members:manage`. (A
+member can also still read and write every file and task whose tags intersect
+its own, but that implicit access is being retired; share with a cohort
+through `shares()` with `granted_tag` instead.)
 The list filters are `tag` (one tag) and `metadata` (up to 16 pairs, all of
 which must match). The members routes are Control Plane routes, so they need
 an org credential with `members:read` / `members:write` / `members:manage`.

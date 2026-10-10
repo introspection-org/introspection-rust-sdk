@@ -121,6 +121,7 @@
 //! | `GET    /v1/shares` | [`Shares::list`] |
 //! | `POST   /v1/shares` | [`Shares::create`] |
 //! | `GET    /v1/shares/{id}` | [`Shares::get`] |
+//! | `PATCH  /v1/shares/{id}` | [`Shares::update`] |
 //! | `DELETE /v1/shares/{id}` | [`Shares::delete`] |
 //! | `GET /v1/conversations/{id}/items` | [`ConversationItems::list`] *(stream or `next_page`)* |
 //! | `GET /v1/conversations/{id}/items/{item_id}` | [`ConversationItems::get`] |
@@ -228,13 +229,13 @@ pub use schemas::{
     RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider,
     RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
     RunCallerPage, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec,
-    Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams, ShareResourceType,
-    SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
-    TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest,
-    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskStatus, TaskUpdate,
-    TelemetryGoalComponent, TimeDimension, Trajectory, TrajectoryAssistantRecord,
-    TrajectoryMetaRecord, TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall,
-    TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
+    Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams, ShareMode,
+    ShareResourceType, ShareUpdate, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions,
+    TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams,
+    TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
+    TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, Trajectory,
+    TrajectoryAssistantRecord, TrajectoryMetaRecord, TrajectoryReasoningRecord, TrajectoryRecord,
+    TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent,
 };
 pub use shares::Shares;
 pub use sse::parse_sse_response;

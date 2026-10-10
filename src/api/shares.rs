@@ -1,11 +1,14 @@
-//! Runner-bound read-sharing grants for files and conversations.
+//! Runner-bound sharing grants for files, conversations and issues.
+//!
+//! Shares apply automatically: a grantee reads the shared resource through its
+//! ordinary routes, with no share id on the request.
 
 use std::sync::Arc;
 
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{ResourceShare, ShareCreate, ShareListParams};
+use crate::api::schemas::{ResourceShare, ShareCreate, ShareListParams, ShareUpdate};
 
 #[derive(Clone)]
 pub struct Shares {
@@ -24,7 +27,8 @@ impl Shares {
             .expect("ShareListParams must serialize to a JSON object")
     }
 
-    /// Create a read grant for a file or conversation.
+    /// Grant a member, a tag cohort, or the whole project access to a file,
+    /// conversation or issue.
     pub async fn create(&self, body: &ShareCreate) -> ApiResult<ResourceShare> {
         self.http.post_json("/v1/shares", body).await
     }
@@ -35,6 +39,17 @@ impl Shares {
             .get_json(
                 &format!("/v1/shares/{}", crate::api::encoding::encode(share_id)),
                 &(),
+            )
+            .await
+    }
+
+    /// Change a grant's mode or conversation visibility window. Only the
+    /// grantor or an admin may update a share; anyone else gets 404.
+    pub async fn update(&self, share_id: &str, body: &ShareUpdate) -> ApiResult<ResourceShare> {
+        self.http
+            .patch_json(
+                &format!("/v1/shares/{}", crate::api::encoding::encode(share_id)),
+                body,
             )
             .await
     }

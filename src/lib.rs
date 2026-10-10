@@ -156,11 +156,12 @@ pub use api::{
     RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
     RunCallerPage, RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity,
     RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, ShareCreate, ShareListParams,
-    ShareResourceType, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions,
-    StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse,
-    TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate,
-    TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
+    ShareMode, ShareResourceType, ShareUpdate, Shares, SortDirection, SpanAttributes, SpanStatus,
+    SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCreate,
+    TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest,
+    TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus,
+    TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent,
+    UploadSource,
 };
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
