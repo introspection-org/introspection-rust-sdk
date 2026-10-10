@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.26.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.25.0...v0.26.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **conversations:** `share_id` is removed from `ConversationListParams`, `ConversationItemListParams`, `ConversationItemGetParams` and `ConversationExportParams`. It was deprecated in 0.25.0 and ignored by the server, so dropping it from a struct literal changes nothing on the wire.
+
+### Code Refactoring
+
+* **conversations:** drop the share_id read parameter ([#113](https://github.com/introspection-org/introspection-rust-sdk/issues/113)) ([513450b](https://github.com/introspection-org/introspection-rust-sdk/commit/513450b0fe96a7c4f7f9f9b7295358341216e3a5))
+
 ## [0.25.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.24.0...v0.25.0) (2026-10-10)
 
 
