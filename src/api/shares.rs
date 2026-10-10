@@ -43,8 +43,8 @@ impl Shares {
             .await
     }
 
-    /// Change a grant's mode or conversation visibility window. Only the
-    /// grantor or an admin may update a share; anyone else gets 404.
+    /// Change a conversation share's `visible_from`. Only the grantor or a
+    /// privileged caller may update a share.
     pub async fn update(&self, share_id: &str, body: &ShareUpdate) -> ApiResult<ResourceShare> {
         self.http
             .patch_json(

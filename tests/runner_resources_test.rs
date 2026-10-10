@@ -16,9 +16,9 @@ use introspection_sdk::api::{
     Event, EventListParams, Events, FileCreateText, FileListParams, FileUpdate, FileUpload,
     FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError,
     IntrospectionEventName, MetricSpec, Metrics, MetricsQuery, ResumeEntry, ShareCreate,
-    ShareListParams, ShareMode, ShareResourceType, ShareUpdate, Shares, SortDirection, TaskCreate,
-    TaskKind, TaskListParams, TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus,
-    TaskUpdate, Tasks, TrajectoryRecord,
+    ShareListParams, ShareResourceType, ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind,
+    TaskListParams, TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate,
+    Tasks, TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -420,13 +420,11 @@ async fn shares_support_identity_grants_and_crud() {
             resource_id: "file_1".into(),
             granted_member_id: Some(member_id),
             granted_tag: None,
-            mode: None,
             visible_from: None,
         })
         .await
         .unwrap();
     assert_eq!(created.granted_member_id, Some(member_id));
-    assert_eq!(created.mode, ShareMode::Read);
     assert_eq!(created.granted_tag, None);
 
     let mut page = shares.list(&ShareListParams {
@@ -439,7 +437,7 @@ async fn shares_support_identity_grants_and_crud() {
 }
 
 #[tokio::test]
-async fn shares_grant_a_tag_cohort_write_on_an_issue() {
+async fn shares_grant_a_tag_cohort_an_issue() {
     let server = MockServer::start().await;
     let shares = Shares::new(build_http(&server));
     let response = json!({
@@ -452,7 +450,6 @@ async fn shares_grant_a_tag_cohort_write_on_an_issue() {
         "resource_id": "issue_1",
         "granted_member_id": null,
         "granted_tag": "customer:acme",
-        "mode": "write",
         "visible_from": null,
         "created_by_member_id": "00000000-0000-0000-0000-000000000020",
         "url": "https://example.test/issues/issue_1"
@@ -463,8 +460,7 @@ async fn shares_grant_a_tag_cohort_write_on_an_issue() {
         .and(body_json(json!({
             "resource_type": "issue",
             "resource_id": "issue_1",
-            "granted_tag": "customer:acme",
-            "mode": "write"
+            "granted_tag": "customer:acme"
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(response.clone()))
         .mount(&server)
@@ -488,14 +484,12 @@ async fn shares_grant_a_tag_cohort_write_on_an_issue() {
     let created = shares
         .create(&ShareCreate {
             granted_tag: Some("customer:acme".into()),
-            mode: Some(ShareMode::Write),
             ..ShareCreate::new(ShareResourceType::Issue, "issue_1")
         })
         .await
         .unwrap();
     assert!(matches!(created.resource_type, ShareResourceType::Issue));
     assert_eq!(created.granted_tag.as_deref(), Some("customer:acme"));
-    assert_eq!(created.mode, ShareMode::Write);
     assert_eq!(
         created.url.as_deref(),
         Some("https://example.test/issues/issue_1")
@@ -510,7 +504,7 @@ async fn shares_grant_a_tag_cohort_write_on_an_issue() {
 }
 
 #[tokio::test]
-async fn share_update_distinguishes_omitted_cleared_and_set_visible_from() {
+async fn share_update_sets_and_clears_visible_from() {
     let server = MockServer::start().await;
     let shares = Shares::new(build_http(&server));
     let share_id = "00000000-0000-0000-0000-000000000012";
@@ -523,7 +517,6 @@ async fn share_update_distinguishes_omitted_cleared_and_set_visible_from() {
             "updated_at": "2026-01-02T00:00:00Z",
             "resource_type": "conversation",
             "resource_id": "conv_1",
-            "mode": "read",
             "visible_from": visible_from,
             "created_by_member_id": "00000000-0000-0000-0000-000000000020"
         })
@@ -545,20 +538,11 @@ async fn share_update_distinguishes_omitted_cleared_and_set_visible_from() {
         .expect(1)
         .mount(&server)
         .await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/shares/{share_id}")))
-        .and(body_json(json!({"mode": "read"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(response(json!(null))))
-        .expect(1)
-        .mount(&server)
-        .await;
-
     let set = shares
         .update(
             share_id,
             &ShareUpdate {
-                visible_from: Some(Some("2026-01-01T00:00:00Z".into())),
-                ..Default::default()
+                visible_from: Some("2026-01-01T00:00:00Z".into()),
             },
         )
         .await
@@ -566,29 +550,13 @@ async fn share_update_distinguishes_omitted_cleared_and_set_visible_from() {
     assert_eq!(set.visible_from.as_deref(), Some("2026-01-01T00:00:00Z"));
 
     let cleared = shares
-        .update(
-            share_id,
-            &ShareUpdate {
-                visible_from: Some(None),
-                ..Default::default()
-            },
-        )
+        .update(share_id, &ShareUpdate { visible_from: None })
         .await
         .unwrap();
     assert_eq!(cleared.visible_from, None);
 
-    let mode_only = shares
-        .update(
-            share_id,
-            &ShareUpdate {
-                mode: Some(ShareMode::Read),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
     assert!(matches!(
-        mode_only.resource_type,
+        cleared.resource_type,
         ShareResourceType::Conversation
     ));
 }

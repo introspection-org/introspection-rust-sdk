@@ -64,7 +64,7 @@ use introspection_sdk::api::schemas::{
     MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
     PaginationParams, RecipeListParams, Repository, RepositoryListParams, RepositoryProvider,
     RepositoryProvisioningStatus, ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate,
-    ShareListParams, ShareMode, ShareResourceType, ShareUpdate, SortDirection, StringOrUuid, Task,
+    ShareListParams, ShareResourceType, ShareUpdate, SortDirection, StringOrUuid, Task,
     TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
     TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
 };
@@ -396,13 +396,11 @@ fn sdk_surface_matches_the_published_reference() {
         resource_id: "file".into(),
         granted_member_id: Some(Uuid::nil()),
         granted_tag: Some("customer:acme".into()),
-        mode: Some(ShareMode::Write),
         visible_from: Some("2026-01-01T00:00:00Z".into()),
     };
 
     let share_update = ShareUpdate {
-        mode: Some(ShareMode::Read),
-        visible_from: Some(Some("2026-01-01T00:00:00Z".into())),
+        visible_from: Some("2026-01-01T00:00:00Z".into()),
     };
 
     let share = ResourceShare {
@@ -415,7 +413,6 @@ fn sdk_surface_matches_the_published_reference() {
         resource_id: "file".into(),
         granted_member_id: Some(Uuid::nil()),
         granted_tag: Some("customer:acme".into()),
-        mode: ShareMode::Read,
         visible_from: Some("2026-01-01T00:00:00Z".into()),
         created_by_member_id: Uuid::nil(),
         url: Some("https://example.invalid/s".into()),

@@ -532,15 +532,9 @@ pub enum ShareResourceType {
     File,
     Conversation,
     Issue,
-}
-
-/// What a share grants. A conversation share is always [`ShareMode::Read`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ShareMode {
-    #[default]
-    Read,
-    Write,
+    /// A channel's audience. Written only by the control plane, so it appears
+    /// on reads but `POST /v1/shares` refuses it.
+    Channel,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -556,8 +550,6 @@ pub struct ResourceShare {
     pub granted_member_id: Option<Uuid>,
     #[serde(default)]
     pub granted_tag: Option<String>,
-    #[serde(default)]
-    pub mode: ShareMode,
     /// Conversation shares only: the grantee sees records from this instant on.
     #[serde(default)]
     pub visible_from: Option<String>,
@@ -573,8 +565,10 @@ pub struct ResourceShare {
 /// The grantee fields are ANDed: `granted_member_id` alone grants that member,
 /// `granted_tag` alone grants everyone whose token carries the tag, both grant
 /// that member only while they hold the tag, and neither grants the whole
-/// project. A share with `granted_tag` is the supported way to share with a
-/// cohort; implicit access through tags is being retired.
+/// project. A share admits the grantee; the caller's token scopes decide
+/// whether they may read, write or delete the resource. A share with
+/// `granted_tag` is the supported way to share with a cohort; implicit access
+/// through tags is being retired.
 #[derive(Debug, Clone, Serialize)]
 pub struct ShareCreate {
     pub resource_type: ShareResourceType,
@@ -584,10 +578,6 @@ pub struct ShareCreate {
     pub granted_member_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_tag: Option<String>,
-    /// `None` uses the server default, [`ShareMode::Read`]. A conversation
-    /// share must be read.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<ShareMode>,
     /// Conversation shares only (ISO 8601, not in the future): hide records
     /// before this instant from the grantee. A conversation shared this way
     /// cannot be forked through `fork_share_id` (409).
@@ -596,7 +586,7 @@ pub struct ShareCreate {
 }
 
 impl ShareCreate {
-    /// A project-wide read share of one resource. Narrow it with struct-update
+    /// A project-wide share of one resource. Narrow it with struct-update
     /// syntax.
     pub fn new(resource_type: ShareResourceType, resource_id: impl Into<String>) -> Self {
         Self {
@@ -604,24 +594,20 @@ impl ShareCreate {
             resource_id: resource_id.into(),
             granted_member_id: None,
             granted_tag: None,
-            mode: None,
             visible_from: None,
         }
     }
 }
 
-/// `PATCH /v1/shares/{id}` body. Set at least one field; only the grantor or
-/// an admin may update a share (404 otherwise).
+/// `PATCH /v1/shares/{id}` body. A share's grantee never changes in place;
+/// only a conversation share's `visible_from` does. Only the grantor or a
+/// privileged caller may update a share.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ShareUpdate {
-    /// 422 for [`ShareMode::Write`] on a conversation share.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<ShareMode>,
-    /// `None` leaves it unchanged, `Some(None)` clears it (sent as `null`),
-    /// and `Some(Some(ts))` sets it. Conversation shares only, and not in the
-    /// future (422 otherwise).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub visible_from: Option<Option<String>>,
+    /// Always sent: `Some(ts)` sets it, `None` clears it (sent as `null`) so
+    /// the grantee sees the whole history. Conversation shares only, and not
+    /// in the future (422 otherwise).
+    pub visible_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
