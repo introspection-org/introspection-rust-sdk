@@ -4,8 +4,8 @@
 //! customer. Customer members are usually minted by asserting a
 //! [`RunnerIdentity`](crate::RunnerIdentity) rather than created here, so the
 //! integrator-facing work on this namespace is reading them back and
-//! labelling them: `tags` (access-bearing) and `metadata` (grants nothing,
-//! filter-only).
+//! labelling them: `tags` (which select the member for shares granted to a
+//! tag) and `metadata` (grants nothing, filter-only).
 //!
 //! These are Control Plane routes, gated on the `members:read`,
 //! `members:write` and `members:manage` scopes, so they need an org

@@ -64,9 +64,9 @@ use introspection_sdk::api::schemas::{
     MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
     PaginationParams, RecipeListParams, Repository, RepositoryListParams, RepositoryProvider,
     RepositoryProvisioningStatus, ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate,
-    ShareListParams, ShareResourceType, SortDirection, StringOrUuid, Task, TaskCancelOptions,
-    TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRunCreate,
-    TaskRunKind, TaskStatus, TimeDimension,
+    ShareListParams, ShareResourceType, ShareUpdate, SortDirection, StringOrUuid, Task,
+    TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
+    TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -246,6 +246,8 @@ fn compare_ahead(
 
 #[test]
 #[ignore = "reaches the network: fetches the published API reference"]
+// `share_id` is deprecated on the conversation reads but still declared.
+#[allow(deprecated)]
 fn sdk_surface_matches_the_published_reference() {
     let (spec, reference) = load_reference();
     let (cp_spec, cp_reference) = load_cp_reference();
@@ -393,6 +395,12 @@ fn sdk_surface_matches_the_published_reference() {
         resource_type: ShareResourceType::File,
         resource_id: "file".into(),
         granted_member_id: Some(Uuid::nil()),
+        granted_tag: Some("customer:acme".into()),
+        visible_from: Some("2026-01-01T00:00:00Z".into()),
+    };
+
+    let share_update = ShareUpdate {
+        visible_from: Some("2026-01-01T00:00:00Z".into()),
     };
 
     let share = ResourceShare {
@@ -404,6 +412,8 @@ fn sdk_surface_matches_the_published_reference() {
         resource_type: ShareResourceType::File,
         resource_id: "file".into(),
         granted_member_id: Some(Uuid::nil()),
+        granted_tag: Some("customer:acme".into()),
+        visible_from: Some("2026-01-01T00:00:00Z".into()),
         created_by_member_id: Uuid::nil(),
         url: Some("https://example.invalid/s".into()),
     };
@@ -415,6 +425,8 @@ fn sdk_surface_matches_the_published_reference() {
         resource_id: Some("file".into()),
         created_by_me: Some(true),
         granted_to_me: Some(true),
+        granted_member_id: Some(Uuid::nil()),
+        granted_tag: Some("customer:acme".into()),
         filters: None,
     };
 
@@ -992,6 +1004,15 @@ fn sdk_surface_matches_the_published_reference() {
             "ShareCreate — POST /v1/shares body",
             wire_fields(&share_create),
             schema_properties(&spec, "ShareCreate"),
+            &[],
+            "sent here but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "ShareUpdate — PATCH /v1/shares/{id} body",
+            wire_fields(&share_update),
+            schema_properties(&spec, "ShareUpdate"),
             &[],
             "sent here but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",

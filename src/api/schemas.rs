@@ -383,10 +383,11 @@ pub struct TaskCreate {
     /// characters with no whitespace or control characters; at most 64 tags,
     /// and duplicates collapse. Filter with [`TaskListParams::tag`].
     ///
-    /// Tags are access-bearing: a caller whose member tags intersect a row's
-    /// tags can read and write it, so a tag shared with a member cohort hands
-    /// them the task. Shared writers may not replace the tags themselves;
-    /// that remains owner/privileged-only.
+    /// A caller whose member tags intersect a row's tags can still read and
+    /// write it today, but that implicit access is being retired: to share
+    /// with a cohort, create a share with [`ShareCreate::granted_tag`]. Shared
+    /// writers may not replace the tags themselves; that remains
+    /// owner/privileged-only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -530,6 +531,10 @@ pub enum TaskCancelOptions {
 pub enum ShareResourceType {
     File,
     Conversation,
+    Issue,
+    /// A channel's audience. Written only by the control plane, so it appears
+    /// on reads but `POST /v1/shares` refuses it.
+    Channel,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -543,19 +548,66 @@ pub struct ResourceShare {
     pub resource_id: String,
     #[serde(default)]
     pub granted_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub granted_tag: Option<String>,
+    /// Conversation shares only: the grantee sees records from this instant on.
+    #[serde(default)]
+    pub visible_from: Option<String>,
     pub created_by_member_id: Uuid,
+    /// The plain resource URL. Shares apply automatically to the grantee's
+    /// reads, so it carries no share id.
     #[serde(default)]
     pub url: Option<String>,
 }
 
+/// `POST /v1/shares` body.
+///
+/// The grantee fields are ANDed: `granted_member_id` alone grants that member,
+/// `granted_tag` alone grants everyone whose token carries the tag, both grant
+/// that member only while they hold the tag, and neither grants the whole
+/// project. A share admits the grantee; the caller's token scopes decide
+/// whether they may read, write or delete the resource. A share with
+/// `granted_tag` is the supported way to share with a cohort; implicit access
+/// through tags is being retired.
 #[derive(Debug, Clone, Serialize)]
 pub struct ShareCreate {
     pub resource_type: ShareResourceType,
     pub resource_id: String,
-    /// Target one member; `None` grants project-wide read. An end customer is
-    /// a member, so there is no separate identity target.
+    /// An end customer is a member, so there is no separate identity target.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_tag: Option<String>,
+    /// Conversation shares only (ISO 8601, not in the future): hide records
+    /// before this instant from the grantee. A conversation shared this way
+    /// cannot be forked through `fork_share_id` (409).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible_from: Option<String>,
+}
+
+impl ShareCreate {
+    /// A project-wide share of one resource. Narrow it with struct-update
+    /// syntax.
+    pub fn new(resource_type: ShareResourceType, resource_id: impl Into<String>) -> Self {
+        Self {
+            resource_type,
+            resource_id: resource_id.into(),
+            granted_member_id: None,
+            granted_tag: None,
+            visible_from: None,
+        }
+    }
+}
+
+/// `PATCH /v1/shares/{id}` body. A share's grantee never changes in place;
+/// only a conversation share's `visible_from` does. Only the grantor or a
+/// privileged caller may update a share.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ShareUpdate {
+    /// Always sent: `Some(ts)` sets it, `None` clears it (sent as `null`) so
+    /// the grantee sees the whole history. Conversation shares only, and not
+    /// in the future (422 otherwise).
+    pub visible_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -572,6 +624,10 @@ pub struct ShareListParams {
     pub created_by_me: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_to_me: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_tag: Option<String>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -638,9 +694,11 @@ pub struct FileUpdate {
     /// convention, not a grammar. Each tag is 1–128 characters with no
     /// whitespace or control characters; at most 64 tags.
     ///
-    /// Access-bearing: a caller whose member tags intersect a file's tags can
-    /// read and write it. Shared writers may not replace the tags themselves;
-    /// that remains owner/privileged-only.
+    /// A caller whose member tags intersect a file's tags can still read and
+    /// write it today, but that implicit access is being retired: to share
+    /// with a cohort, create a share with [`ShareCreate::granted_tag`]. Shared
+    /// writers may not replace the tags themselves; that remains
+    /// owner/privileged-only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }
@@ -2425,9 +2483,11 @@ impl<'de> Deserialize<'de> for MemberType {
 /// A member — the CP read model returned by every `/v1/members` route.
 ///
 /// `tags` and `metadata` are both `key:value`-shaped labels but differ in
-/// what they do: a tag is **access-bearing** (the member can read and write
-/// every file and task whose tags intersect its own), while metadata grants
-/// nothing and only narrows a list.
+/// what they do: a tag selects the member for every share granted to it
+/// ([`ShareCreate::granted_tag`]), while metadata grants nothing and only
+/// narrows a list. A tag also still grants implicit read and write over every
+/// file and task whose tags intersect the member's own, but that is being
+/// retired in favour of tag shares.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Member {
     pub id: Uuid,
@@ -2451,8 +2511,9 @@ pub struct Member {
     pub member_type: MemberType,
     #[serde(default)]
     pub is_deactivated: bool,
-    /// Access-bearing: this member can read and write any file or task whose
-    /// tags intersect these.
+    /// Selects this member for shares granted to any of these tags. (Implicit
+    /// access to files and tasks whose tags intersect these still works but is
+    /// being retired.)
     #[serde(default)]
     pub tags: Vec<String>,
     /// Customer-defined `key: value` labels. Grants nothing; filter on them
@@ -2487,8 +2548,8 @@ pub struct MemberListParams {
     /// The customer members one brokered IdP federated in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_idp_id: Option<Uuid>,
-    /// Members carrying this tag, e.g. `customer:acme` — who can reach the
-    /// rows tagged with it.
+    /// Members carrying this tag, e.g. `customer:acme` — who a share granted
+    /// to that tag reaches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
     /// Match members whose `metadata` holds every pair, each compared exactly
@@ -2529,7 +2590,8 @@ pub struct MemberCreateParams {
     /// Defaults to `"member"` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// Access-bearing, so setting any requires the `members:manage` scope
+    /// Tags grant access (through tag shares), so setting any requires the
+    /// `members:manage` scope
     /// (403 otherwise). Same opaque, exact-match validation as every other
     /// tag write.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2564,8 +2626,9 @@ pub struct MemberUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     /// Replaces the tag list wholesale. `None` leaves tags untouched;
-    /// `Some(vec![])` clears them. Access-bearing: adding a tag grants this
-    /// member read and write over every file and task carrying it.
+    /// `Some(vec![])` clears them. Adding a tag grants this member every share
+    /// granted to it (and, until implicit tag access is retired, read and
+    /// write over every file and task carrying it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     /// Replaces the metadata map wholesale. `None` leaves it untouched;
@@ -3022,7 +3085,8 @@ pub struct RunnerIdentity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
     /// Tags to stamp on the `customer` member this identity mints, **if that
-    /// member is new**. Access-bearing, and bounded on both sides: attenuated
+    /// member is new**. Tags grant access (through tag shares), so this is
+    /// bounded on both sides: attenuated
     /// to the asserting agent member's own tags, and applied on create only —
     /// an existing member's tags are never changed here. Tags use the same
     /// opaque, exact-match validation as every other tag write.
@@ -3529,7 +3593,10 @@ pub struct ConversationListParams {
     pub conversation_id: Option<String>,
     /// Restrict to several conversations.
     pub conversation_ids: Option<Vec<String>>,
-    /// Read through one or more share grants.
+    /// Ignored by the server; shares apply automatically.
+    #[deprecated(
+        note = "ignored by the server: shares now apply automatically to the grantee's reads"
+    )]
     pub share_id: Option<Vec<String>>,
     pub model: Option<String>,
     pub agent_name: Option<String>,
@@ -3605,6 +3672,10 @@ pub struct ConversationItemListParams {
     pub service_name: Option<String>,
     pub operation_name: Option<String>,
     pub lookback_days: Option<u32>,
+    /// Ignored by the server; shares apply automatically.
+    #[deprecated(
+        note = "ignored by the server: shares now apply automatically to the grantee's reads"
+    )]
     pub share_id: Option<Uuid>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
@@ -3617,6 +3688,10 @@ pub struct ConversationItemListParams {
 #[derive(Debug, Clone, Default)]
 pub struct ConversationItemGetParams {
     pub include: Vec<ConversationItemInclude>,
+    /// Ignored by the server; shares apply automatically.
+    #[deprecated(
+        note = "ignored by the server: shares now apply automatically to the grantee's reads"
+    )]
     pub share_id: Option<Uuid>,
 }
 
@@ -3647,6 +3722,7 @@ impl ConversationListParams {
         .apply(&mut obj)?;
         put_str(&mut obj, "conversation_id", self.conversation_id.as_ref());
         put_list(&mut obj, "conversation_ids", self.conversation_ids.as_ref());
+        #[allow(deprecated)]
         put_list(&mut obj, "share_id", self.share_id.as_ref());
         put_str(&mut obj, "model", self.model.as_ref());
         put_str(&mut obj, "agent_name", self.agent_name.as_ref());
@@ -4884,6 +4960,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn typed_conversation_filters_reach_the_wire() {
         // These were a `HashMap<String, Value>` the caller had to spell by
         // hand: a typo produced no compile error and, per the DP's own
@@ -5520,7 +5597,10 @@ pub struct ConversationExportParams {
     /// Partition lookback bound in days (1-365).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookback_days: Option<u16>,
-    /// Read via a `/v1/shares` grant for this conversation.
+    /// Ignored by the server; shares apply automatically.
+    #[deprecated(
+        note = "ignored by the server: shares now apply automatically to the grantee's reads"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_id: Option<Uuid>,
     /// Lower bound on which records are assembled (ISO 8601).
