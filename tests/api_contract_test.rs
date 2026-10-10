@@ -246,8 +246,6 @@ fn compare_ahead(
 
 #[test]
 #[ignore = "reaches the network: fetches the published API reference"]
-// `share_id` is deprecated on the conversation reads but still declared.
-#[allow(deprecated)]
 fn sdk_surface_matches_the_published_reference() {
     let (spec, reference) = load_reference();
     let (cp_spec, cp_reference) = load_cp_reference();
@@ -668,7 +666,6 @@ fn sdk_surface_matches_the_published_reference() {
         service_name: Some("svc".into()),
         operation_name: Some("op".into()),
         lookback_days: Some(7),
-        share_id: Some(Uuid::nil()),
         start_date: Some("2026-01-01T00:00:00Z".into()),
         end_date: Some("2026-01-02T00:00:00Z".into()),
     };
@@ -681,7 +678,6 @@ fn sdk_surface_matches_the_published_reference() {
         service_name: Some("svc".into()),
         operation_name: Some("op".into()),
         lookback_days: Some(7),
-        share_id: Some(Uuid::nil()),
         start_date: Some("2026-01-01T00:00:00Z".into()),
         end_date: Some("2026-01-02T00:00:00Z".into()),
         filters: None,
@@ -701,7 +697,6 @@ fn sdk_surface_matches_the_published_reference() {
         lookback: None,
         conversation_id: Some("conv".into()),
         conversation_ids: Some(vec!["conv".into()]),
-        share_id: Some(vec![Uuid::nil().to_string()]),
         model: Some("claude-opus-5".into()),
         agent_name: Some("agent".into()),
         status: Some(ConversationStatus::Ok),
@@ -992,10 +987,9 @@ fn sdk_surface_matches_the_published_reference() {
             "file list filters — GET /v1/files query parameters",
             wire_fields(&file_list),
             query_parameters(&spec, "/v1/files", "get"),
-            // `task_id`/`share_id` are scoping params the runner already
-            // carries. Which filters to expose is a product decision, so
+            // `task_id` is a scoping param the runner already carries. Which filters to expose is a product decision, so
             // absence is reported and does not fail.
-            &["task_id", "share_id"],
+            &["task_id"],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
             false,
@@ -1302,7 +1296,7 @@ fn sdk_surface_matches_the_published_reference() {
         ),
         // The items route is where the ordering bug hid:
         // they declared an `order` the route never accepted and omitted the
-        // window/share params it did. A sub-resource is still a route.
+        // window params it did. A sub-resource is still a route.
         compare(
             "conversation item list filters — GET /v1/conversations/{id}/items query parameters",
             conversation_item_list

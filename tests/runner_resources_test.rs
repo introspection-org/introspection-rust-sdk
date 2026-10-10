@@ -1212,7 +1212,6 @@ async fn conversation_items_get_fetches_detail_with_includes() {
             "span-1",
             &ConversationItemGetParams {
                 include: vec![ConversationItemInclude::ResourceAttributes],
-                ..Default::default()
             },
         )
         .await
