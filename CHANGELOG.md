@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.24.0...v0.25.0) (2026-10-10)
+
+
+### Features
+
+* **shares:** tag shares, PATCH visible_from and issue shares ([#111](https://github.com/introspection-org/introspection-rust-sdk/issues/111)) ([1099360](https://github.com/introspection-org/introspection-rust-sdk/commit/1099360e5c8b41e4d7ee81b047d82d1e18d21ba7))
+
 ## [0.24.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.23.0...v0.24.0) (2026-10-07)
 
 
