@@ -342,3 +342,33 @@ fn an_identity_without_metadata_omits_the_key() {
         json!({"user_id": "u_demo"})
     );
 }
+
+#[test]
+fn a_customer_member_is_created_by_its_external_user_id() {
+    let params = MemberCreateParams {
+        policy_attributes: Some(std::collections::HashMap::from([(
+            "level".to_string(),
+            serde_json::json!(5),
+        )])),
+        ..MemberCreateParams::customer("user:sam@acme.example")
+    };
+    assert_eq!(
+        serde_json::to_value(&params).unwrap(),
+        serde_json::json!({
+            "member_type": "customer",
+            "external_user_id": "user:sam@acme.example",
+            "policy_attributes": {"level": 5}
+        })
+    );
+
+    let from_file: MemberCreateParams = serde_json::from_value(serde_json::json!({
+        "member_type": "customer",
+        "external_user_id": "user:sam@acme.example",
+        "name": "Sam Example"
+    }))
+    .unwrap();
+    assert_eq!(from_file.member_type, Some(MemberType::Customer));
+    assert!(
+        serde_json::from_value::<MemberCreateParams>(serde_json::json!({"emial": "x"})).is_err()
+    );
+}

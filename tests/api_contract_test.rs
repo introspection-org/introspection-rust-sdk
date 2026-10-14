@@ -562,8 +562,10 @@ fn sdk_surface_matches_the_published_reference() {
     };
 
     let member_create = MemberCreateParams {
-        email: "ada@example.com".into(),
-        name: "Ada Lovelace".into(),
+        member_type: Some(MemberType::Customer),
+        email: Some("ada@example.com".into()),
+        external_user_id: Some("user:abc".into()),
+        name: Some("Ada Lovelace".into()),
         role: Some("member".into()),
         tags: Some(vec!["team:support".into()]),
         metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),

@@ -2610,45 +2610,63 @@ pub struct MemberListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// `POST /v1/members` body — invites a business member by email.
+/// `POST /v1/members` body.
 ///
-/// `email` and `name` are required, and `name` must be a full name (first and
-/// last). Build with [`Self::new`] and struct-update syntax for the rest.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A `business` member (the default) is a person at the organization, invited
+/// by `email` with a full `name` (first and last): build it with [`Self::new`].
+/// A `customer` member is one of the organization's own end users, keyed by the
+/// `external_user_id` the organization knows them by (`user:{id}`, ...): build
+/// it with [`Self::customer`]. It lands on the same member a runner identity
+/// asserting that id would mint, so its attributes are ready before its first
+/// session. Tags and policy attributes decide what a member may do, so setting
+/// either requires `members:manage` (403 otherwise).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemberCreateParams {
-    pub email: String,
-    pub name: String,
+    /// `business` when omitted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_type: Option<MemberType>,
+    /// Required for a `business` member.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// Required for a `customer` member: the organization's own id for them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_user_id: Option<String>,
+    /// A full name (first and last) for a `business` member.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Defaults to `"member"` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// Tags grant access (through tag shares), so setting any requires the
-    /// `members:manage` scope
-    /// (403 otherwise). Same opaque, exact-match validation as every other
-    /// tag write.
+    /// Tags grant access (through tag shares). Same opaque, exact-match
+    /// validation as every other tag write.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     /// `key: value` labels (keys letters, digits, `_` and `-`; at most 64
     /// entries; 422 otherwise). Grants nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
-    /// The member's Cedar attributes for the egress policy gate; setting them
-    /// requires `members:manage` (403 otherwise).
+    /// The member's Cedar attributes for the egress policy gate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl MemberCreateParams {
-    /// Create params with the required fields set and every optional field
-    /// unset. Combine with struct-update syntax.
+    /// A `business` member invited by email. Combine with struct-update syntax.
     pub fn new(email: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
-            email: email.into(),
-            name: name.into(),
-            role: None,
-            tags: None,
-            metadata: None,
-            policy_attributes: None,
+            email: Some(email.into()),
+            name: Some(name.into()),
+            ..Self::default()
+        }
+    }
+
+    /// A `customer` member keyed by the organization's own id for them.
+    pub fn customer(external_user_id: impl Into<String>) -> Self {
+        Self {
+            member_type: Some(MemberType::Customer),
+            external_user_id: Some(external_user_id.into()),
+            ..Self::default()
         }
     }
 }
