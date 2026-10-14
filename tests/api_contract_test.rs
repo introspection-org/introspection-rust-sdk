@@ -58,15 +58,15 @@ use introspection_sdk::api::schemas::{
     ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
     ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
-    Dimension, Event, EventListParams, ExperimentListParams, ExperimentStatus, FeedbackEvent,
-    FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
+    Dimension, EntityUid, Event, EventListParams, ExperimentListParams, ExperimentStatus,
+    FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
     IntrospectionEventName, Member, MemberCreateParams, MemberListParams, MemberType,
     MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
-    PaginationParams, RecipeListParams, Repository, RepositoryListParams, RepositoryProvider,
-    RepositoryProvisioningStatus, ResourceShare, RunnerIdentity, RuntimeListParams, ShareCreate,
-    ShareListParams, ShareResourceType, ShareUpdate, SortDirection, StringOrUuid, Task,
-    TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
-    TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
+    PaginationParams, PolicyEntity, RecipeListParams, Repository, RepositoryListParams,
+    RepositoryProvider, RepositoryProvisioningStatus, ResourceShare, RunnerIdentity,
+    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, SortDirection,
+    StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams,
+    TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -90,6 +90,17 @@ const CP_SPEC_PATH_ENV: &str = "INTROSPECTION_CP_OPENAPI_SPEC";
 /// The reference to check against: a local file when [`SPEC_PATH_ENV`] is set,
 /// otherwise the published one. Returns the source alongside the spec so a
 /// failure report names which reference it disagreed with.
+fn policy_entity() -> PolicyEntity {
+    PolicyEntity {
+        uid: EntityUid {
+            entity_type: "Company".into(),
+            id: "acme".into(),
+        },
+        attrs: HashMap::from([("business_min_level".into(), serde_json::json!(5))]),
+        parents: vec![],
+    }
+}
+
 fn load_cp_reference() -> (Value, String) {
     load_one(CP_SPEC_PATH_ENV, CP_SPEC_URL)
 }
@@ -514,12 +525,11 @@ fn sdk_surface_matches_the_published_reference() {
         signing_secret: Some("signing".into()),
         metadata: Some(Default::default()),
         issuer: Some("https://slack.com".into()),
-        person_server_mode: Some("managed".into()),
         person_server_url: Some("https://ps.example".into()),
-        approval_policy: Some("human".into()),
         application_id: Some(Uuid::nil()),
         assertion_audience: Some("https://slack.com".into()),
         webhook_url: Some("https://api.example/webhooks".into()),
+        policy_entities: Some(vec![policy_entity()]),
         ..ConnectorCreateParams::new("Slack", "slack", ConnectorAuthMode::OauthStored)
     };
 
@@ -533,6 +543,7 @@ fn sdk_surface_matches_the_published_reference() {
         webhook_url: Some("https://api.example/webhooks".into()),
         client_secret: Some("secret".into()),
         signing_secret: Some("signing".into()),
+        policy_entities: Some(vec![policy_entity()]),
     };
 
     let member_list = MemberListParams {
@@ -556,6 +567,7 @@ fn sdk_surface_matches_the_published_reference() {
         role: Some("member".into()),
         tags: Some(vec!["team:support".into()]),
         metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+        policy_attributes: Some(HashMap::from([("level".into(), serde_json::json!(5))])),
     };
 
     let member_update = MemberUpdateParams {
@@ -564,6 +576,7 @@ fn sdk_surface_matches_the_published_reference() {
         role: Some("admin".into()),
         tags: Some(vec!["team:support".into()]),
         metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+        policy_attributes: Some(HashMap::from([("level".into(), serde_json::json!(5))])),
     };
 
     let member = Member {
@@ -584,6 +597,7 @@ fn sdk_surface_matches_the_published_reference() {
         connector_id: Some(Uuid::nil()),
         integration_id: Some(Uuid::nil()),
         is_external_credential_agent: false,
+        policy_attributes: Some(HashMap::from([("level".into(), serde_json::json!(5))])),
     };
 
     let connection_create = ConnectionCreateParams {
