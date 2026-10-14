@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.27.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.26.0...v0.27.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **connectors:** `approval_policy` and `person_server_mode` are removed from `Connector` and `ConnectorCreateParams`. The control plane retired both; a required `approval_policy` made every current connector read fail.
+
+### Features
+
+* **connectors:** AAuth connectors with Cedar policy entities, and member policy attributes ([#115](https://github.com/introspection-org/introspection-rust-sdk/issues/115)) ([5e0507e](https://github.com/introspection-org/introspection-rust-sdk/commit/5e0507ebdf5cc49ed88885389379e18eb562302d))
+
 ## [0.26.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.25.0...v0.26.0) (2026-10-10)
 
 
