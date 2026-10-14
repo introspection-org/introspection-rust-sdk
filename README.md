@@ -495,8 +495,9 @@ client.annotations().create(
 ).await?;
 ```
 
-Reusable labels live under `client.project_labels()`. Their slug and color are
-immutable after creation; only the optional description can be updated.
+The tag catalogue lives under `client.tags()`, keyed by `TagKind::Access` or
+`TagKind::Annotation`. `TagCreate` is an enum per kind, so an access tag has no
+colour to set and an annotation tag cannot omit one.
 
 See [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence) for transcripts,
 typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)

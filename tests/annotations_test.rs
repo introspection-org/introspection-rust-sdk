@@ -6,8 +6,8 @@ use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
     AdvancedOptions, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationTarget, Annotations, ClientConfig, Event, EventListParams, IntrospectionClient,
-    IntrospectionEventName, ProjectLabelCreate, ProjectLabelUpdate, ProjectLabels,
+    AnnotationTagCreate, AnnotationTarget, Annotations, ClientConfig, Event, EventListParams,
+    IntrospectionClient, IntrospectionEventName, TagCreate, TagKind, TagUpdate, Tags,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -51,10 +51,11 @@ fn annotation() -> serde_json::Value {
     })
 }
 
-fn label(description: serde_json::Value) -> serde_json::Value {
+fn tag(kind: &str, color: serde_json::Value, description: serde_json::Value) -> serde_json::Value {
     json!({
-        "slug": "needs-review",
-        "color": "#f97316",
+        "kind": kind,
+        "name": "needs-review",
+        "color": color,
         "description": description,
         "created_at": "2026-08-25T12:00:00Z",
         "updated_at": "2026-08-25T12:00:00Z"
@@ -267,46 +268,110 @@ async fn resolves_reviewer_email_before_single_dp_write() {
 }
 
 #[tokio::test]
-async fn validates_labels_and_only_updates_description() {
+async fn an_annotation_tag_normalizes_its_name_and_color() {
     let dp = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/v1/project-labels"))
-        .and(body_json(
-            json!({"slug": "needs-review", "color": "#f97316", "description": "Queue"}),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(label(json!("Queue"))))
+        .and(path("/v1/tags"))
+        .and(body_json(json!({
+            "kind": "annotation", "name": "needs-review", "color": "#f97316", "description": "Queue"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tag(
+            "annotation",
+            json!("#f97316"),
+            json!("Queue"),
+        )))
         .mount(&dp)
         .await;
-    Mock::given(method("PATCH"))
-        .and(path("/v1/project-labels/needs-review"))
-        .and(body_json(json!({"description": null})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(label(serde_json::Value::Null)))
-        .mount(&dp)
-        .await;
-    let labels = ProjectLabels::new(http(&dp));
-    let created = labels
-        .create(ProjectLabelCreate {
-            slug: " needs-review ".into(),
+    let tags = Tags::new(http(&dp));
+    let created = tags
+        .create(TagCreate::Annotation(AnnotationTagCreate {
+            name: " needs-review ".into(),
             color: "#F97316".into(),
             description: Some("Queue".into()),
-        })
+        }))
         .await
         .unwrap();
-    assert_eq!(created.slug, "needs-review");
-    assert!(labels
-        .create(ProjectLabelCreate {
-            slug: "bad".into(),
-            color: "orange".into(),
-            description: None
-        })
+    assert_eq!(created.name, "needs-review");
+    assert_eq!(created.kind, TagKind::Annotation);
+}
+
+/// The kind is the serde tag, and an access tag carries no `color` key at all
+/// — the API refuses one, so the variant has no field to send.
+#[tokio::test]
+async fn an_access_tag_sends_no_color() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/tags"))
+        .and(body_json(json!({"kind": "access", "name": "acme/eu"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tag(
+            "access",
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        )))
+        .mount(&dp)
+        .await;
+    let tags = Tags::new(http(&dp));
+    let created = tags.create(TagCreate::access("acme/eu")).await.unwrap();
+    assert_eq!(created.kind, TagKind::Access);
+    assert!(created.color.is_none());
+}
+
+#[tokio::test]
+async fn a_bad_color_is_refused_before_the_request() {
+    let tags = Tags::new(http(&MockServer::start().await));
+    assert!(tags
+        .create(TagCreate::annotation("bad", "orange"))
         .await
         .is_err());
-    assert!(labels
-        .update("needs-review", ProjectLabelUpdate { description: None })
+}
+
+#[tokio::test]
+async fn an_access_tag_rejects_a_color_update_and_clears_a_description() {
+    let dp = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/v1/tags/access/acme%2Feu"))
+        .and(body_json(json!({"description": null})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tag(
+            "access",
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        )))
+        .mount(&dp)
+        .await;
+    let tags = Tags::new(http(&dp));
+    assert!(tags
+        .update(TagKind::Access, "acme/eu", TagUpdate::color("#f97316"))
+        .await
+        .is_err());
+    assert!(tags
+        .update(TagKind::Access, "acme/eu", TagUpdate::clear_description())
         .await
         .unwrap()
         .description
         .is_none());
+}
+
+#[tokio::test]
+async fn an_update_naming_nothing_is_refused_before_the_request() {
+    let tags = Tags::new(http(&MockServer::start().await));
+    assert!(tags
+        .update(TagKind::Annotation, "needs-review", TagUpdate::default())
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn deletes_a_tag_by_kind_and_name() {
+    let dp = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/v1/tags/annotation/needs-review"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&dp)
+        .await;
+    Tags::new(http(&dp))
+        .delete(TagKind::Annotation, "needs-review")
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

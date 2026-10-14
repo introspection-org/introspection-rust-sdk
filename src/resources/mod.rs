@@ -53,8 +53,9 @@ pub mod members;
 pub mod recipes;
 pub mod repositories;
 pub mod runtimes;
+pub mod tags;
 
-pub use annotations::{Annotations, ProjectLabels};
+pub use annotations::Annotations;
 pub use automations::Automations;
 pub use connections::MemberConnections;
 pub use connectors::{Connections, Connectors};
@@ -63,3 +64,4 @@ pub use members::Members;
 pub use recipes::Recipes;
 pub use repositories::{Repositories, RepositoryContents};
 pub use runtimes::{RuntimeHandle, Runtimes};
+pub use tags::Tags;

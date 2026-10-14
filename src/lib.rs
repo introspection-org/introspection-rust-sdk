@@ -178,12 +178,15 @@ pub use client::{IntrospectionClient, IntrospectionError, Result, USER_AGENT, VE
 pub use data_plane::DataPlaneResources;
 pub use resources::annotations::{
     AnnotationEventOptions, AnnotationListParams, AnnotationMutation, AnnotationState,
-    AnnotationTarget, ProjectLabel, ProjectLabelCreate, ProjectLabelListParams, ProjectLabelUpdate,
+    AnnotationTarget,
+};
+pub use resources::tags::{
+    AccessTagCreate, AnnotationTagCreate, Tag, TagCreate, TagKind, TagListParams, TagUpdate,
 };
 pub use resources::{
     Annotations, Automations, Connections, Connectors, ExperimentHandle, Experiments,
-    MemberConnections, Members, ProjectLabels, Recipes, Repositories, RepositoryContents,
-    RuntimeHandle, Runtimes,
+    MemberConnections, Members, Recipes, Repositories, RepositoryContents, RuntimeHandle, Runtimes,
+    Tags,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

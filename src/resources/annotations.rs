@@ -1,9 +1,8 @@
-//! Project-level append-only span annotations and managed labels.
+//! Project-level append-only span annotations.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -11,19 +10,6 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{Paginated, PaginationParams};
-
-const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'#')
-    .add(b'%')
-    .add(b'/')
-    .add(b'<')
-    .add(b'>')
-    .add(b'?')
-    .add(b'`')
-    .add(b'{')
-    .add(b'}');
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AnnotationTarget {
@@ -102,44 +88,6 @@ pub enum AnnotationMutation {
 #[derive(Debug, Clone, Default)]
 pub struct AnnotationEventOptions {
     pub event_id: Option<Uuid>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ProjectLabel {
-    pub slug: String,
-    pub color: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProjectLabelCreate {
-    pub slug: String,
-    pub color: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProjectLabelUpdate {
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ProjectLabelListParams {
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub search: Option<String>,
-    /// Escape hatch for a filter this SDK build predates: each pair is merged
-    /// verbatim onto the query string (a string, bool or number as itself, an
-    /// array as a repeated key; a null is dropped, an object is refused).
-    /// Prefer the typed field where one exists; on a collision the
-    /// passthrough wins.
-    #[serde(flatten)]
-    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,80 +260,6 @@ impl Annotations {
         }
         Ok(ids)
     }
-}
-
-#[derive(Clone)]
-pub struct ProjectLabels {
-    http: Arc<HttpClient>,
-}
-
-impl ProjectLabels {
-    pub fn new(http: Arc<HttpClient>) -> Self {
-        Self { http }
-    }
-
-    pub fn list(&self, params: &ProjectLabelListParams) -> Paginator<ProjectLabel> {
-        Paginator::new(self.http.clone(), "/v1/project-labels", params)
-            .expect("ProjectLabelListParams must serialize to an object")
-    }
-
-    pub async fn create(&self, mut input: ProjectLabelCreate) -> ApiResult<ProjectLabel> {
-        input.slug = input.slug.trim().to_string();
-        input.color = input.color.to_lowercase();
-        validate_label(&input.slug, &input.color, input.description.as_deref())?;
-        self.http.post_json("/v1/project-labels", &input).await
-    }
-
-    pub async fn get(&self, slug: &str) -> ApiResult<ProjectLabel> {
-        #[derive(Serialize)]
-        struct Q {}
-        let slug = utf8_percent_encode(slug, PATH_SEGMENT_ENCODE_SET);
-        self.http
-            .get_json(&format!("/v1/project-labels/{slug}"), &Q {})
-            .await
-    }
-
-    pub async fn update(&self, slug: &str, input: ProjectLabelUpdate) -> ApiResult<ProjectLabel> {
-        if input
-            .description
-            .as_ref()
-            .is_some_and(|value| value.len() > 2000)
-        {
-            return Err(validation(
-                "Project label description must not exceed 2000 characters",
-                "invalid_project_label_description",
-            ));
-        }
-        let slug = utf8_percent_encode(slug, PATH_SEGMENT_ENCODE_SET);
-        self.http
-            .patch_json(&format!("/v1/project-labels/{slug}"), &input)
-            .await
-    }
-}
-
-fn validate_label(slug: &str, color: &str, description: Option<&str>) -> ApiResult<()> {
-    if slug.is_empty() || slug.len() > 128 {
-        return Err(validation(
-            "Project label slug must contain 1 to 128 characters",
-            "invalid_project_label_slug",
-        ));
-    }
-    let valid_color = color.len() == 7
-        && color.starts_with('#')
-        && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit());
-    if !valid_color {
-        return Err(validation(
-            "Project label color must be a six-digit hex color such as #f97316",
-            "invalid_project_label_color",
-        ));
-    }
-    if description.is_some_and(|value| value.len() > 2000) {
-        return Err(validation(
-            "Project label description must not exceed 2000 characters",
-            "invalid_project_label_description",
-        ));
-    }
-    Ok(())
 }
 
 fn validation(message: &str, code: &str) -> IntrospectionAPIError {
