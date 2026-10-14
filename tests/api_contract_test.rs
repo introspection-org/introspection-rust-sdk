@@ -51,16 +51,16 @@ use introspection_sdk::api::schemas::{
     AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
     AutomationSkipReason, AutomationSkippedPayload, AutomationTriggerResponse,
     AutomationTriggerType, AutomationTriggeredPayload, AutomationUpdateParams,
-    ClientRegistrationMethod, Connection, ConnectionBrokerSubjectType, ConnectionCreateParams,
-    ConnectionCreateSubjectType, ConnectionListParams, ConnectionStatus, ConnectionSubjectType,
-    ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
-    ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscovery,
-    ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
+    BusinessMemberCreate, ClientRegistrationMethod, Connection, ConnectionBrokerSubjectType,
+    ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams, ConnectionStatus,
+    ConnectionSubjectType, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
+    ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
     ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
-    Dimension, EntityUid, Event, EventListParams, ExperimentListParams, ExperimentStatus,
-    FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate, HavingTerm,
-    IntrospectionEventName, Member, MemberCreateParams, MemberListParams, MemberType,
+    CustomerMemberCreate, Dimension, EntityUid, Event, EventListParams, ExperimentListParams,
+    ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate,
+    HavingTerm, IntrospectionEventName, Member, MemberCreateParams, MemberListParams, MemberType,
     MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
     PaginationParams, PolicyEntity, RecipeListParams, Repository, RepositoryListParams,
     RepositoryProvider, RepositoryProvisioningStatus, ResourceShare, RunnerIdentity,
@@ -561,16 +561,22 @@ fn sdk_surface_matches_the_published_reference() {
         filters: None,
     };
 
-    let member_create = MemberCreateParams {
-        member_type: Some(MemberType::Customer),
-        email: Some("ada@example.com".into()),
-        external_user_id: Some("user:abc".into()),
-        name: Some("Ada Lovelace".into()),
+    let member_create_business = MemberCreateParams::Business(BusinessMemberCreate {
+        email: "ada@example.com".into(),
+        name: "Ada Lovelace".into(),
         role: Some("member".into()),
         tags: Some(vec!["team:support".into()]),
         metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
         policy_attributes: Some(HashMap::from([("level".into(), serde_json::json!(5))])),
-    };
+    });
+    let member_create_customer = MemberCreateParams::Customer(CustomerMemberCreate {
+        external_user_id: "user:abc".into(),
+        name: Some("Ada Lovelace".into()),
+        email: Some("ada@example.com".into()),
+        tags: Some(vec!["team:support".into()]),
+        metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+        policy_attributes: Some(HashMap::from([("level".into(), serde_json::json!(5))])),
+    });
 
     let member_update = MemberUpdateParams {
         name: Some("Ada Lovelace".into()),
@@ -1186,14 +1192,15 @@ fn sdk_surface_matches_the_published_reference() {
         ),
         compare(
             "MemberCreate — POST /v1/members body",
-            wire_fields(&member_create),
+            wire_fields(&member_create_business)
+                .union(&wire_fields(&member_create_customer))
+                .cloned()
+                .collect(),
             schema_properties(&cp_spec, "MemberCreate"),
             // Declared by the shared member schema but never read by the
-            // invite route, which mints a business member from email + name.
+            // create route.
             &[
-                "external_user_id",
                 "image_url",
-                "member_type",
                 "is_deactivated",
                 "application_idp_id",
                 "connector_id",
