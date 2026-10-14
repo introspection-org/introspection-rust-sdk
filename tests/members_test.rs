@@ -8,8 +8,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig, RunRequest};
 use introspection_sdk::{
-    AdvancedOptions, ClientConfig, IntrospectionClient, MemberCreateParams, MemberListParams,
-    MemberType, MemberUpdateParams, Members, PaginationParams, RunnerIdentity,
+    AdvancedOptions, BusinessMemberCreate, ClientConfig, CustomerMemberCreate, IntrospectionClient,
+    MemberCreateParams, MemberListParams, MemberType, MemberUpdateParams, Members,
+    PaginationParams, RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -190,6 +191,7 @@ async fn create_sends_tags_and_metadata_only_when_set() {
     Mock::given(method("POST"))
         .and(path("/v1/members"))
         .and(body_json(json!({
+            "member_type": "business",
             "email": "ada@example.com",
             "name": "Ada Lovelace",
             "tags": ["team:support"],
@@ -201,6 +203,7 @@ async fn create_sends_tags_and_metadata_only_when_set() {
     Mock::given(method("POST"))
         .and(path("/v1/members"))
         .and(body_json(json!({
+            "member_type": "business",
             "email": "grace@example.com",
             "name": "Grace Hopper",
         })))
@@ -210,15 +213,18 @@ async fn create_sends_tags_and_metadata_only_when_set() {
 
     let members = Members::new(build_http(&server));
     members
-        .create(&MemberCreateParams {
+        .create(&MemberCreateParams::Business(BusinessMemberCreate {
             tags: Some(vec!["team:support".into()]),
             metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
-            ..MemberCreateParams::new("ada@example.com", "Ada Lovelace")
-        })
+            role: None,
+            policy_attributes: None,
+            email: "ada@example.com".into(),
+            name: "Ada Lovelace".into(),
+        }))
         .await
         .unwrap();
     members
-        .create(&MemberCreateParams::new(
+        .create(&MemberCreateParams::business(
             "grace@example.com",
             "Grace Hopper",
         ))
@@ -341,4 +347,59 @@ fn an_identity_without_metadata_omits_the_key() {
         serde_json::to_value(identity).unwrap(),
         json!({"user_id": "u_demo"})
     );
+}
+
+#[test]
+fn a_customer_member_is_created_by_its_external_user_id() {
+    let params = MemberCreateParams::Customer(CustomerMemberCreate {
+        policy_attributes: Some(HashMap::from([("level".to_string(), json!(5))])),
+        ..CustomerMemberCreate {
+            external_user_id: "user:sam@acme.example".into(),
+            ..Default::default()
+        }
+    });
+    assert_eq!(
+        serde_json::to_value(&params).unwrap(),
+        json!({
+            "member_type": "customer",
+            "external_user_id": "user:sam@acme.example",
+            "policy_attributes": {"level": 5}
+        })
+    );
+}
+
+#[test]
+fn member_create_documents_read_into_the_variant_their_member_type_names() {
+    let customer: MemberCreateParams = serde_json::from_value(json!({
+        "member_type": "customer",
+        "external_user_id": "user:sam@acme.example",
+        "name": "Sam Example"
+    }))
+    .unwrap();
+    assert!(
+        matches!(customer, MemberCreateParams::Customer(ref c) if c.external_user_id == "user:sam@acme.example")
+    );
+
+    // No member_type is a business member, as the API reads it.
+    let business: MemberCreateParams =
+        serde_json::from_value(json!({"email": "dana@acme.example", "name": "Dana Example"}))
+            .unwrap();
+    assert!(matches!(business, MemberCreateParams::Business(_)));
+    assert_eq!(
+        serde_json::to_value(&business).unwrap()["member_type"],
+        "business"
+    );
+
+    for invalid in [
+        json!({"name": "Dana Example"}),
+        json!({"member_type": "customer", "name": "Sam"}),
+        json!({"member_type": "customer", "external_user_id": "user:x", "role": "admin"}),
+        json!({"member_type": "agent", "name": "x"}),
+        json!({"email": "x@y", "name": "X Y", "emial": "typo"}),
+    ] {
+        assert!(
+            serde_json::from_value::<MemberCreateParams>(invalid.clone()).is_err(),
+            "{invalid}"
+        );
+    }
 }

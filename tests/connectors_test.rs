@@ -61,7 +61,6 @@ fn connector_json() -> serde_json::Value {
         "environment": "production",
         "scopes": ["chat:write"],
         "api_hosts": ["slack.com"],
-        "approval_policy": "human",
         "status": "active",
         "requires_runtime": true,
     })
@@ -776,4 +775,36 @@ async fn a_connection_without_provider_fields_decodes_to_none() {
 
     assert!(connection.provider_app.is_none());
     assert!(connection.provider_account_id.is_none());
+}
+
+#[test]
+fn aauth_connector_params_read_from_json_and_keep_their_policy_entities() {
+    let params: ConnectorCreateParams = serde_json::from_value(json!({
+        "name": "Flight Sector booking",
+        "provider": "flightsector",
+        "auth_mode": "aauth",
+        "person_server_url": "https://ps.example",
+        "application_id": "00000000-0000-0000-0000-0000000000ee",
+        "api_hosts": ["api.booking.example"],
+        "policy_entities": [
+            {"uid": {"type": "Company", "id": "acme"}, "attrs": {"business_min_level": 5}, "parents": []}
+        ]
+    }))
+    .expect("an aauth connector file parses");
+    assert_eq!(params.auth_mode, ConnectorAuthMode::Aauth);
+    let entities = params.policy_entities.as_ref().expect("entities kept");
+    assert_eq!(entities[0].uid.entity_type, "Company");
+    assert_eq!(entities[0].attrs["business_min_level"], json!(5));
+
+    let wire = serde_json::to_value(&params).unwrap();
+    assert_eq!(wire["auth_mode"], "aauth");
+    assert_eq!(wire["policy_entities"][0]["uid"]["type"], "Company");
+
+    let typo = serde_json::from_value::<ConnectorCreateParams>(json!({
+        "name": "x", "provider": "x", "auth_mode": "aauth", "policy_entity": []
+    }));
+    assert!(
+        typo.is_err(),
+        "an unknown field in a connector file is refused"
+    );
 }

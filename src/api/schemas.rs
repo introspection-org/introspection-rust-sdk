@@ -1599,6 +1599,9 @@ pub enum ConnectorAuthMode {
     IdentityAssertion,
     FederatedExchange,
     PersonAuthorized,
+    /// AAuth (-11): the platform is the connector's Agent Provider and its
+    /// egress signs for the session; approvals come from `person_server_url`.
+    Aauth,
     /// Forward-compatible escape hatch.
     Other(String),
 }
@@ -1613,6 +1616,7 @@ impl ConnectorAuthMode {
             Self::IdentityAssertion => "identity_assertion",
             Self::FederatedExchange => "federated_exchange",
             Self::PersonAuthorized => "person_authorized",
+            Self::Aauth => "aauth",
             Self::Other(s) => s,
         }
     }
@@ -1627,6 +1631,7 @@ impl From<&str> for ConnectorAuthMode {
             "identity_assertion" => Self::IdentityAssertion,
             "federated_exchange" => Self::FederatedExchange,
             "person_authorized" => Self::PersonAuthorized,
+            "aauth" => Self::Aauth,
             other => Self::Other(other.to_string()),
         }
     }
@@ -1841,13 +1846,8 @@ pub struct Connector {
     pub api_hosts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
-    /// `managed` / `byo` / `discovered`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub person_server_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub person_server_url: Option<String>,
-    /// `human` / `judge_advises_human` / `judge_auto_within_envelope`.
-    pub approval_policy: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1859,6 +1859,10 @@ pub struct Connector {
     pub created_by_member_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Cedar entities the recipe's policies read when a request reaches this
+    /// connector's hosts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_entities: Option<Vec<PolicyEntity>>,
     /// Server-derived: whether [`Connectors::authorize`] must name a runtime
     /// for this connector (chat providers need the agent that replies).
     ///
@@ -1949,7 +1953,8 @@ pub struct ConnectionListParams {
 /// replaces the live connector's configuration (name, environment, endpoints,
 /// scopes, API hosts, client id, metadata, ...) and keeps its provider, auth
 /// mode and stored secrets.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorCreateParams {
     pub name: String,
     /// Provider slug, e.g. `"slack"`, `"gmail"`, `"stripe"`.
@@ -1996,17 +2001,16 @@ pub struct ConnectorCreateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issuer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub person_server_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub person_server_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub approval_policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assertion_audience: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
+    /// Cedar entities for the recipe's policies; see [`PolicyEntity`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_entities: Option<Vec<PolicyEntity>>,
 }
 
 impl ConnectorCreateParams {
@@ -2033,12 +2037,11 @@ impl ConnectorCreateParams {
             signing_secret: None,
             metadata: None,
             issuer: None,
-            person_server_mode: None,
             person_server_url: None,
-            approval_policy: None,
             application_id: None,
             assertion_audience: None,
             webhook_url: None,
+            policy_entities: None,
         }
     }
 }
@@ -2047,7 +2050,8 @@ impl ConnectorCreateParams {
 /// (`environment`, `provider`, `auth_mode`, and `slug` are create-time facts).
 /// Only provided fields change; omitting `client_secret` / `signing_secret`
 /// means "unchanged", not "clear".
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -2069,6 +2073,28 @@ pub struct ConnectorUpdateParams {
     /// Write-only; omitted = unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signing_secret: Option<String>,
+    /// Replaces the connector's Cedar entities; omitted = unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_entities: Option<Vec<PolicyEntity>>,
+}
+
+/// A Cedar entity a recipe's policies read, in Cedar's JSON entity format:
+/// e.g. a company and the seniority its business-class bookings need.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct PolicyEntity {
+    pub uid: EntityUid,
+    #[serde(default)]
+    pub attrs: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub parents: Vec<EntityUid>,
+}
+
+/// A Cedar entity reference, `{"type": "Company", "id": "acme"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub struct EntityUid {
+    #[serde(rename = "type")]
+    pub entity_type: String,
+    pub id: String,
 }
 
 /// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
@@ -2533,6 +2559,11 @@ pub struct Member {
     /// Application may act as.
     #[serde(default)]
     pub is_external_credential_agent: bool,
+    /// Facts the recipe's Cedar policies read about this member (its
+    /// principal's attributes); an `{"__entity": {...}}` value references a
+    /// [`PolicyEntity`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Filters supported by `GET /v1/members`.
@@ -2579,45 +2610,121 @@ pub struct MemberListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// `POST /v1/members` body — invites a business member by email.
+/// `POST /v1/members` body: a business member invited by email, or a customer
+/// member keyed by the organization's own id for them. Each variant carries the
+/// fields its kind requires, and serializes with its `member_type`.
 ///
-/// `email` and `name` are required, and `name` must be a full name (first and
-/// last). Build with [`Self::new`] and struct-update syntax for the rest.
+/// A customer lands on the same member a runner identity asserting its
+/// `external_user_id` would mint, so its attributes are ready before its first
+/// session. Customers, tags and policy attributes need `members:manage` (403
+/// otherwise).
 #[derive(Debug, Clone, Serialize)]
-pub struct MemberCreateParams {
+#[serde(tag = "member_type", rename_all = "snake_case")]
+pub enum MemberCreateParams {
+    Business(BusinessMemberCreate),
+    Customer(CustomerMemberCreate),
+}
+
+impl MemberCreateParams {
+    /// A business member invited by `email`, with a full `name` (first and
+    /// last). Combine with [`BusinessMemberCreate`]'s struct-update syntax for
+    /// the rest.
+    pub fn business(email: impl Into<String>, name: impl Into<String>) -> Self {
+        Self::Business(BusinessMemberCreate {
+            email: email.into(),
+            name: name.into(),
+            role: None,
+            tags: None,
+            metadata: None,
+            policy_attributes: None,
+        })
+    }
+
+    /// A customer member keyed by `external_user_id`: `user:{id}` or
+    /// `anon:{id}`.
+    pub fn customer(external_user_id: impl Into<String>) -> Self {
+        Self::Customer(CustomerMemberCreate {
+            external_user_id: external_user_id.into(),
+            ..CustomerMemberCreate::default()
+        })
+    }
+}
+
+/// A missing `member_type` is a business member, as the API reads it.
+impl<'de> Deserialize<'de> for MemberCreateParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
+        let kind = match value.remove("member_type") {
+            None | Some(serde_json::Value::Null) => "business".to_owned(),
+            Some(serde_json::Value::String(kind)) => kind,
+            Some(other) => {
+                return Err(serde::de::Error::custom(format!(
+                    "member_type must be a string, got {other}"
+                )))
+            }
+        };
+        let value = serde_json::Value::Object(value);
+        match kind.as_str() {
+            "business" => serde_json::from_value(value)
+                .map(Self::Business)
+                .map_err(serde::de::Error::custom),
+            "customer" => serde_json::from_value(value)
+                .map(Self::Customer)
+                .map_err(serde::de::Error::custom),
+            other => Err(serde::de::Error::custom(format!(
+                "member_type must be business or customer, got {other}"
+            ))),
+        }
+    }
+}
+
+/// A person at the organization, invited by email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BusinessMemberCreate {
     pub email: String,
+    /// A full name, first and last.
     pub name: String,
     /// Defaults to `"member"` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// Tags grant access (through tag shares), so setting any requires the
-    /// `members:manage` scope
-    /// (403 otherwise). Same opaque, exact-match validation as every other
-    /// tag write.
+    /// Tags grant access (through tag shares). Same opaque, exact-match
+    /// validation as every other tag write.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     /// `key: value` labels (keys letters, digits, `_` and `-`; at most 64
     /// entries; 422 otherwise). Grants nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
+    /// The member's Cedar attributes for the egress policy gate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
 }
 
-impl MemberCreateParams {
-    /// Create params with the required fields set and every optional field
-    /// unset. Combine with struct-update syntax.
-    pub fn new(email: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            email: email.into(),
-            name: name.into(),
-            role: None,
-            tags: None,
-            metadata: None,
-        }
-    }
+/// One of the organization's own end users, keyed by its id for them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomerMemberCreate {
+    /// `user:{id}` or `anon:{id}`, as a runner identity asserts it.
+    pub external_user_id: String,
+    /// Display only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Display only; a customer never signs in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+    /// The member's Cedar attributes for the egress policy gate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// `PATCH /v1/members/{id}` body. Only provided fields change.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemberUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -2635,6 +2742,10 @@ pub struct MemberUpdateParams {
     /// `Some(HashMap::new())` clears it. Grants nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
+    /// Replaces the member's Cedar attributes wholesale; `None` leaves them
+    /// untouched. Setting them needs an org owner or admin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- automations (DP) ------------------------------------------------------
