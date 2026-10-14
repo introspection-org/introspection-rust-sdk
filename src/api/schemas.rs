@@ -837,14 +837,15 @@ pub struct RecipeListParams {
 // ----- repositories (CP) -----------------------------------------------------
 
 /// Who serves a repository's Git, which decides how a client reaches it.
-/// `hosted` is served by the project's own data plane; `github` needs the
+/// `introspection` is served by the project's own data plane (`hosted` is the
+/// name it shipped under, read as the same provider); `github` needs the
 /// installation the row's `integration_id` names. `Other` captures a provider
 /// the CP adds later so the rest of the record still reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum RepositoryProvider {
     #[default]
     Github,
-    Hosted,
+    Introspection,
     /// Forward-compatible escape hatch.
     Other(String),
 }
@@ -853,7 +854,7 @@ impl RepositoryProvider {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Github => "github",
-            Self::Hosted => "hosted",
+            Self::Introspection => "introspection",
             Self::Other(s) => s,
         }
     }
@@ -863,7 +864,7 @@ impl From<&str> for RepositoryProvider {
     fn from(s: &str) -> Self {
         match s {
             "github" => Self::Github,
-            "hosted" => Self::Hosted,
+            "introspection" | "hosted" => Self::Introspection,
             other => Self::Other(other.to_string()),
         }
     }
@@ -4858,13 +4859,19 @@ mod tests {
     fn repository_enums_round_trip_and_keep_unknown_values() {
         for (wire, provider) in [
             ("github", RepositoryProvider::Github),
-            ("hosted", RepositoryProvider::Hosted),
+            ("introspection", RepositoryProvider::Introspection),
             ("codeberg", RepositoryProvider::Other("codeberg".into())),
         ] {
             let decoded: RepositoryProvider = serde_json::from_value(json!(wire)).unwrap();
             assert_eq!(decoded, provider);
             assert_eq!(serde_json::to_value(&decoded).unwrap(), json!(wire));
         }
+        let legacy: RepositoryProvider = serde_json::from_value(json!("hosted")).unwrap();
+        assert_eq!(
+            legacy,
+            RepositoryProvider::Introspection,
+            "the name it shipped under"
+        );
         let status: RepositoryProvisioningStatus = serde_json::from_value(json!("failed")).unwrap();
         assert_eq!(status, RepositoryProvisioningStatus::Failed);
         assert_eq!(

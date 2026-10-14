@@ -117,7 +117,7 @@ async fn get_scopes_the_read_to_the_project() {
             "url": "https://git.example.test/v1/git/support.git",
             "name": "support",
             "slug": "support",
-            "provider": "hosted",
+            "provider": "introspection",
             "default_branch": "trunk",
             "provisioning_status": "pending",
             "seed_template": "pi-agent",
@@ -136,7 +136,7 @@ async fn get_scopes_the_read_to_the_project() {
         .await
         .unwrap();
 
-    assert_eq!(repository.provider, RepositoryProvider::Hosted);
+    assert_eq!(repository.provider, RepositoryProvider::Introspection);
     assert_eq!(repository.default_branch, "trunk");
     assert_eq!(repository.seed_template.as_deref(), Some("pi-agent"));
     assert_eq!(
@@ -205,7 +205,7 @@ async fn repositories_is_constructible_directly_from_a_caller_owned_http_client(
                 "project_id": PROJECT_ID,
                 "name": "support-triage",
                 "slug": "support-triage",
-                "provider": "hosted",
+                "provider": "introspection",
                 "created_at": "2026-09-01T00:00:00Z"
             }
         ])))
@@ -246,7 +246,7 @@ async fn repositories_is_constructible_directly_from_a_caller_owned_http_client(
         .unwrap();
 
     assert_eq!(repositories.len(), 1);
-    assert_eq!(repositories[0].provider, RepositoryProvider::Hosted);
+    assert_eq!(repositories[0].provider, RepositoryProvider::Introspection);
 
     let request = &server.received_requests().await.unwrap()[0];
     assert_eq!(
