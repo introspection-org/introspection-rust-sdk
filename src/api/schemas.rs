@@ -4919,6 +4919,8 @@ pub struct MetricsMeta {
     #[serde(default)]
     pub truncated: bool,
     /// The read was confined to the caller's own owner key, not the project.
+    /// A project API key reads only its system agent's rows, so expect `true`
+    /// with one; a member login reads the whole project.
     #[serde(default)]
     pub owner_scoped: bool,
     #[serde(flatten)]
