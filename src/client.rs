@@ -27,7 +27,7 @@ use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
     Annotations, Automations, Connectors, ExperimentHandle, Experiments, MemberConnections,
-    Members, ProjectLabels, Recipes, Repositories, RuntimeHandle, Runtimes,
+    Members, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
 };
 use crate::types::{self, ClientConfig};
 
@@ -73,7 +73,7 @@ pub struct IntrospectionClient {
     connectors: Connectors,
     members: Members,
     annotations: Annotations,
-    project_labels: ProjectLabels,
+    tags: Tags,
     dp_http: Arc<HttpClient>,
 }
 
@@ -148,7 +148,7 @@ impl IntrospectionClient {
             connectors: Connectors::new(cp_http.clone()),
             members: Members::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
-            project_labels: ProjectLabels::new(dp_http.clone()),
+            tags: Tags::new(dp_http.clone()),
             dp_http,
         })
     }
@@ -175,8 +175,8 @@ impl IntrospectionClient {
         &self.annotations
     }
 
-    pub fn project_labels(&self) -> &ProjectLabels {
-        &self.project_labels
+    pub fn tags(&self) -> &Tags {
+        &self.tags
     }
 
     /// `/v1/connectors` CRUD, its nested `connections`, and `authorize()` —
