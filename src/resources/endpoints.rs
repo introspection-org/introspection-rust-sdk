@@ -3,6 +3,9 @@
 //! Read-only. Binding a host, an MCP server or a model provider is project
 //! administration and lives in the CLI; reading a binding is what a tool
 //! needs to reach the server it names.
+//!
+//! Both calls need `endpoints:read`, which only a member login carries; a
+//! project API key gets 403.
 
 use std::sync::Arc;
 
