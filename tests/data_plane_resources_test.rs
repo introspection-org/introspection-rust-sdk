@@ -94,7 +94,7 @@ async fn drive_every_namespace(dp: &impl DataPlaneResources) {
         .query(&MetricsQuery {
             view: "spans".into(),
             metrics: vec![MetricSpec {
-                measure: "duration_ns".into(),
+                measure: Some("duration_ns".into()),
                 aggregation: "p95".into(),
             }],
             lookback: Some("24h".into()),

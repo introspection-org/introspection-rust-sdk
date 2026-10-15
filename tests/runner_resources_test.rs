@@ -13,12 +13,12 @@ use futures::StreamExt;
 use introspection_sdk::api::{
     ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
     ConversationItemInclude, ConversationItemListParams, ConversationListParams, Conversations,
-    Event, EventListParams, Events, FileCreateText, FileListParams, FileUpdate, FileUpload,
-    FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError,
-    IntrospectionEventName, MetricSpec, Metrics, MetricsQuery, ResumeEntry, ShareCreate,
-    ShareListParams, ShareResourceType, ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind,
-    TaskListParams, TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate,
-    Tasks, TrajectoryRecord,
+    Dimension, Event, EventListParams, Events, FileCreateText, FileListParams, FileUpdate,
+    FileUpload, FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig,
+    IntrospectionAPIError, IntrospectionEventName, MetricFilter, MetricSpec, Metrics,
+    MetricsConfig, MetricsQuery, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType,
+    ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt,
+    TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -1346,8 +1346,24 @@ async fn metrics_query_posts_bounded_body() {
             "to_timestamp": "2026-07-01T00:00:00Z",
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": [{"p95": 1234}],
-            "meta": {"approximate": true},
+            "data": [{
+                "timestamp": null,
+                "dimensions": [],
+                "metrics": [{
+                    "metric_index": 0,
+                    "measure": "duration_ns",
+                    "aggregation": "p95",
+                    "value": 1234.0,
+                }],
+            }],
+            "meta": {
+                "view": "spans",
+                "window": {"start": "2026-06-01T00:00:00Z", "end": "2026-07-01T00:00:00Z"},
+                "row_count": 1,
+                "row_limit": 100,
+                "approximate": true,
+                "order_by": [],
+            },
         })))
         .mount(&server)
         .await;
@@ -1356,7 +1372,7 @@ async fn metrics_query_posts_bounded_body() {
         .query(&MetricsQuery {
             view: "spans".into(),
             metrics: vec![MetricSpec {
-                measure: "duration_ns".into(),
+                measure: Some("duration_ns".into()),
                 aggregation: "p95".into(),
             }],
             start: Some("2026-06-01T00:00:00Z".into()),
@@ -1366,7 +1382,120 @@ async fn metrics_query_posts_bounded_body() {
         .await
         .unwrap();
     assert_eq!(res.data.len(), 1);
-    assert_eq!(res.data[0]["p95"], 1234);
+    assert_eq!(res.data[0].metric(0), Some(1234.0));
+    let meta = res.meta.as_ref().unwrap();
+    assert!(meta.approximate);
+    assert!(!res.truncated());
+    assert_eq!(meta.window.as_ref().unwrap().end, "2026-07-01T00:00:00Z");
+}
+
+#[tokio::test]
+async fn metrics_query_counts_without_a_measure_and_filters_on_existence() {
+    let server = MockServer::start().await;
+    let metrics = Metrics::new(build_http(&server));
+
+    // `count` with any measure, and `exists` with any value but null, are 422s.
+    Mock::given(method("POST"))
+        .and(path("/v1/metrics"))
+        .and(body_json(json!({
+            "view": "spans",
+            "metrics": [
+                {"aggregation": "count"},
+                {"aggregation": "sum", "measure": "status_error"},
+            ],
+            "dimensions": [{"field": "trace_id"}, {"field": "gen_ai.tool.name"}],
+            "filters": [
+                {"field": "gen_ai.tool.name", "operator": "in", "value": ["crm_get"]},
+                {"field": "attr.mcp.server.binding", "operator": "exists", "value": null},
+            ],
+            "config": {"row_limit": 10000},
+            "from_timestamp": "2026-06-01T00:00:00Z",
+            "to_timestamp": "2026-07-01T00:00:00Z",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{
+                "dimensions": [
+                    {"field": "trace_id", "value": "t1"},
+                    {"field": "gen_ai.tool.name", "value": "crm_get"},
+                ],
+                "metrics": [
+                    {"metric_index": 0, "measure": null, "aggregation": "count", "value": 3.0},
+                    {"metric_index": 1, "measure": "status_error", "aggregation": "sum", "value": 1.0},
+                ],
+            }],
+            "meta": {"view": "spans", "row_count": 1, "row_limit": 10000, "truncated": true},
+        })))
+        .mount(&server)
+        .await;
+
+    let res = metrics
+        .query(&MetricsQuery {
+            view: "spans".into(),
+            metrics: vec![MetricSpec::count(), MetricSpec::of("sum", "status_error")],
+            dimensions: Some(vec![
+                Dimension {
+                    field: "trace_id".into(),
+                },
+                Dimension {
+                    field: "gen_ai.tool.name".into(),
+                },
+            ]),
+            filters: Some(vec![
+                MetricFilter {
+                    field: "gen_ai.tool.name".into(),
+                    operator: "in".into(),
+                    value: json!(["crm_get"]),
+                },
+                MetricFilter {
+                    field: "attr.mcp.server.binding".into(),
+                    operator: "exists".into(),
+                    value: serde_json::Value::Null,
+                },
+            ]),
+            config: Some(MetricsConfig {
+                row_limit: Some(10_000),
+                series_limit: None,
+            }),
+            start: Some("2026-06-01T00:00:00Z".into()),
+            end: Some("2026-07-01T00:00:00Z".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(res.truncated());
+    let row = &res.data[0];
+    assert_eq!(row.dimension("trace_id"), Some("t1"));
+    assert_eq!(row.dimension("gen_ai.tool.name"), Some("crm_get"));
+    assert_eq!(row.dimension("runtime_group_id"), None);
+    assert_eq!(row.metric(0), Some(3.0));
+    assert_eq!(row.metric(1), Some(1.0));
+}
+
+#[tokio::test]
+async fn conversations_list_filters_by_trace_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations"))
+        .and(query_param("trace_id", "4bf92f3577b34da6a3ce929d0e0e4736"))
+        .and(query_param("limit", "1"))
+        .and(query_param("start_date", "2026-06-01T00:00:00Z"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"records": [], "count": 0, "next": null})),
+        )
+        .mount(&server)
+        .await;
+
+    let mut pages = Conversations::new(build_http(&server))
+        .list(&ConversationListParams {
+            trace_id: Some("4bf92f3577b34da6a3ce929d0e0e4736".into()),
+            limit: Some(1),
+            start: Some("2026-06-01T00:00:00Z".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let page = pages.next_page().await.unwrap().unwrap();
+    assert!(page.records.is_empty());
 }
 
 #[cfg(feature = "arrow")]

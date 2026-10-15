@@ -26,8 +26,8 @@ use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Automations, Connectors, ExperimentHandle, Experiments, MemberConnections,
-    Members, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
+    Annotations, Automations, Connectors, Endpoints, ExperimentHandle, Experiments,
+    MemberConnections, Members, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
 };
 use crate::types::{self, ClientConfig};
 
@@ -71,6 +71,7 @@ pub struct IntrospectionClient {
     recipes: Recipes,
     repositories: Repositories,
     connectors: Connectors,
+    endpoints: Endpoints,
     members: Members,
     annotations: Annotations,
     tags: Tags,
@@ -146,6 +147,7 @@ impl IntrospectionClient {
             recipes: Recipes::new(cp_http.clone()),
             repositories: Repositories::new(cp_http.clone(), dp_http.clone()),
             connectors: Connectors::new(cp_http.clone()),
+            endpoints: Endpoints::new(cp_http.clone()),
             members: Members::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             tags: Tags::new(dp_http.clone()),
@@ -183,6 +185,11 @@ impl IntrospectionClient {
     /// the consent URL a Business hands its customer.
     pub fn connectors(&self) -> &Connectors {
         &self.connectors
+    }
+
+    /// `GET /v1/endpoints` — the project's endpoint bindings, read-only.
+    pub fn endpoints(&self) -> &Endpoints {
+        &self.endpoints
     }
 
     /// `/v1/members` list, read, invite and update — including the `tags`
