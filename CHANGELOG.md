@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.29.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.28.0...v0.29.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* `MetricSpec::measure` is `Option<String>`, and `MetricsResponse::data` is `Vec<MetricRow>` and `meta` is `Option<MetricsMeta>` rather than JSON values. `ConversationListParams` and `ConnectionTokenParams` gain fields, so an exhaustive struct literal needs `..Default::default()`.
+
+### Features
+
+* endpoint bindings, typed metrics rows, and the trace and token selectors ([#120](https://github.com/introspection-org/introspection-rust-sdk/issues/120)) ([74337dd](https://github.com/introspection-org/introspection-rust-sdk/commit/74337dd08074b7ca14342191e389707b0285dc26))
+
 ## [0.28.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.27.0...v0.28.0) (2026-10-15)
 
 
