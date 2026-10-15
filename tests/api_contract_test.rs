@@ -53,16 +53,18 @@ use introspection_sdk::api::schemas::{
     AutomationTriggerType, AutomationTriggeredPayload, AutomationUpdateParams,
     BusinessMemberCreate, ClientRegistrationMethod, Connection, ConnectionBrokerSubjectType,
     ConnectionCreateParams, ConnectionCreateSubjectType, ConnectionListParams, ConnectionStatus,
-    ConnectionSubjectType, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
-    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
-    ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus, ConnectorUpdateParams,
-    ConversationExportParams, ConversationItemInclude, ConversationItemListParams,
-    ConversationListParams, ConversationResolution, ConversationSentiment, ConversationStatus,
-    CustomerMemberCreate, Dimension, EntityUid, Event, EventListParams, ExperimentListParams,
-    ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams, FileType, FileUpdate,
-    HavingTerm, IntrospectionEventName, Member, MemberCreateParams, MemberListParams, MemberType,
-    MemberUpdateParams, MetricFilter, MetricSpec, MetricsConfig, MetricsQuery, OrderTerm,
-    PaginationParams, PolicyEntity, RecipeListParams, Repository, RepositoryListParams,
+    ConnectionSubjectType, ConnectionTokenParams, ConnectorAuthMode, ConnectorAuthorizeBinding,
+    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorCustomAppSearchParams,
+    ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus,
+    ConnectorUpdateParams, ConversationExportParams, ConversationItemInclude,
+    ConversationItemListParams, ConversationListParams, ConversationResolution,
+    ConversationSentiment, ConversationStatus, CustomerMemberCreate, Dimension, Endpoint,
+    EndpointKind, EndpointListParams, EndpointMetadata, EntityUid, Event, EventListParams,
+    ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
+    FileType, FileUpdate, HavingTerm, IntrospectionEventName, Member, MemberCreateParams,
+    MemberListParams, MemberType, MemberUpdateParams, MetricDimensionValue, MetricFilter,
+    MetricRow, MetricSpec, MetricValue, MetricsConfig, MetricsMeta, MetricsQuery, MetricsWindow,
+    OrderTerm, PaginationParams, PolicyEntity, RecipeListParams, Repository, RepositoryListParams,
     RepositoryProvider, RepositoryProvisioningStatus, ResourceShare, RunnerIdentity,
     RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, SortDirection,
     StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams,
@@ -705,9 +707,9 @@ fn sdk_surface_matches_the_published_reference() {
         filters: None,
     };
 
-    // Every typed field is populated, so the assertion below is that all 23
-    // declared query params of `GET /v1/conversations` are reachable from the
-    // typed surface -- not just the handful a spot-check would set.
+    // Every typed field is populated, so the assertion below covers every
+    // query param of `GET /v1/conversations` the typed surface reaches -- not
+    // just the handful a spot-check would set.
     let conversation_list = ConversationListParams {
         limit: Some(1),
         next: Some("cursor".into()),
@@ -719,6 +721,7 @@ fn sdk_surface_matches_the_published_reference() {
         lookback: None,
         conversation_id: Some("conv".into()),
         conversation_ids: Some(vec!["conv".into()]),
+        trace_id: Some("trace".into()),
         model: Some("claude-opus-5".into()),
         agent_name: Some("agent".into()),
         status: Some(ConversationStatus::Ok),
@@ -888,7 +891,7 @@ fn sdk_surface_matches_the_published_reference() {
     let metrics = MetricsQuery {
         view: "v".into(),
         metrics: vec![MetricSpec {
-            measure: "m".into(),
+            measure: Some("m".into()),
             aggregation: "sum".into(),
         }],
         dimensions: Some(vec![Dimension { field: "f".into() }]),
@@ -921,6 +924,97 @@ fn sdk_surface_matches_the_published_reference() {
         // As above: `lookback` conflicts with `start`/`end`, and all three
         // resolve into the same two wire keys.
         lookback: None,
+    };
+
+    let token_request = ConnectionTokenParams {
+        // The query-string selector, never part of the body.
+        project: Some("proj".into()),
+        connection_id: Some(Uuid::nil()),
+        subject: Some(ConnectionBrokerSubjectType::User),
+        action: Some("calendar.list".into()),
+        requested_permissions: Some(Default::default()),
+    };
+    // `get_token` adds the connector id it takes positionally.
+    let mut token_body = wire_fields(&token_request);
+    token_body.insert("connector_id".into());
+
+    let endpoint_list = EndpointListParams {
+        project: Some("proj".into()),
+        kind: Some(EndpointKind::Mcp),
+        runtime_id: Some(Uuid::nil()),
+        runtime: Some("support-agent".into()),
+        environment: Some("production".into()),
+        mcp_server_id: Some("crm".into()),
+        pagination: PaginationParams {
+            limit: Some(1),
+            next: Some("cursor".into()),
+        },
+        filters: None,
+    };
+
+    let endpoint_metadata = EndpointMetadata {
+        mcp_server_id: Some("crm".into()),
+        connector_id: Some(Uuid::nil()),
+        provider_app: Some("crm".into()),
+        extra_hosts: vec!["*.crm.example".into()],
+        auth_audience: Some("https://crm.example".into()),
+        extra: HashMap::new(),
+    };
+
+    let endpoint = Endpoint {
+        id: Uuid::nil(),
+        org_id: Uuid::nil(),
+        project_id: Uuid::nil(),
+        name: "CRM".into(),
+        host: "mcp.crm.example".into(),
+        base_url: Some("https://mcp.crm.example/mcp".into()),
+        kind: EndpointKind::Mcp,
+        metadata: endpoint_metadata.clone(),
+        assertion_claims: Some(HashMap::new()),
+        runtime_id: Some(Uuid::nil()),
+        runtime_group_id: Some(Uuid::nil()),
+        environment: Some("production".into()),
+        verify_path: Some("/health".into()),
+        headers: HashMap::new(),
+        header_names: vec![],
+        credential_refs: vec![],
+        last_verified_at: Some("2026-01-01T00:00:00Z".into()),
+        authorized_application_id: Some(Uuid::nil()),
+        created_by_member_id: Uuid::nil(),
+        created_at: "2026-01-01T00:00:00Z".into(),
+        updated_at: "2026-01-01T00:00:00Z".into(),
+    };
+
+    let metric_row = MetricRow {
+        timestamp: Some(0),
+        dimensions: vec![],
+        metrics: vec![],
+    };
+    let metric_value = MetricValue {
+        metric_index: 0,
+        measure: Some("m".into()),
+        aggregation: "sum".into(),
+        value: 1.0,
+    };
+    let metric_dimension = MetricDimensionValue {
+        field: "f".into(),
+        value: "v".into(),
+    };
+    let metrics_window = MetricsWindow {
+        start: "2026-01-01T00:00:00Z".into(),
+        end: "2026-01-02T00:00:00Z".into(),
+    };
+    let metrics_meta = MetricsMeta {
+        view: "spans".into(),
+        window: Some(metrics_window.clone()),
+        row_count: 1,
+        row_limit: 1,
+        interval: Some("hour".into()),
+        step_seconds: Some(3600),
+        approximate: false,
+        truncated: false,
+        owner_scoped: false,
+        extra: HashMap::new(),
     };
 
     let comparisons = [
@@ -1426,6 +1520,90 @@ fn sdk_surface_matches_the_published_reference() {
             &[],
             "sent here but not declared by the API",
             "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "MetricRow — POST /v1/metrics response row",
+            wire_fields(&metric_row),
+            schema_properties(&spec, "MetricResultRow"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "MetricValue — POST /v1/metrics row metric",
+            wire_fields(&metric_value),
+            schema_properties(&spec, "MetricResultValue"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "MetricDimensionValue — POST /v1/metrics row dimension",
+            wire_fields(&metric_dimension),
+            schema_properties(&spec, "MetricDimensionValue"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "MetricsMeta — POST /v1/metrics response meta",
+            wire_fields(&metrics_meta),
+            schema_properties(&spec, "MetricQueryMeta"),
+            // The request's own ordering, echoed back; it rides in `extra`.
+            &["order_by"],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "MetricsWindow — POST /v1/metrics meta.window",
+            wire_fields(&metrics_window),
+            schema_properties(&spec, "EffectiveWindow"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare(
+            "ConnectionTokenParams — POST /v1/oauth/connections/token body",
+            token_body,
+            schema_properties(&cp_spec, "BrokerTokenRequest"),
+            &[],
+            "sent here but not accepted by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "endpoint list filters — GET /v1/endpoints query parameters",
+            wire_fields(&endpoint_list),
+            query_parameters(&cp_spec, "/v1/endpoints", "get"),
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
+        ),
+        compare(
+            "Endpoint — the endpoint read model",
+            wire_fields(&endpoint),
+            schema_properties(&cp_spec, "EndpointResponse"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
+            true,
+        ),
+        compare_ahead(
+            "EndpointMetadata — an endpoint's metadata",
+            wire_fields(&endpoint_metadata),
+            schema_properties(&cp_spec, "EndpointMetadata"),
+            // Shipped by the Control Plane before the published reference.
+            &["extra_hosts"],
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
             true,
         ),
     ];

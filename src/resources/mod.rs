@@ -18,6 +18,8 @@
 //!   under `.connections`, plus `authorize()`, which mints the consent URL
 //!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer
 //!   so their workspace connects to an agent.
+//! - [`Endpoints`] — `GET /v1/endpoints` lookup: the project's endpoint
+//!   bindings, such as the `kind: mcp` binding naming an MCP server.
 //! - [`Members`] — `/v1/members` list, read, invite and update: the customer
 //!   members an integrator's identity assertions mint, and the `tags` and
 //!   `metadata` it labels them with.
@@ -42,12 +44,14 @@
 //! ships). Authoring the rest
 //! — creating, editing, or deleting runtimes, recipes and experiments, and
 //! administering projects, repositories, keys, and bindings — lives in the
-//! CLI, not here.
+//! CLI, not here. Bindings are readable here so a tool can reach the server
+//! one names; creating or changing one is still the CLI's.
 
 pub mod annotations;
 pub mod automations;
 pub mod connections;
 pub mod connectors;
+pub mod endpoints;
 pub mod experiments;
 pub mod members;
 pub mod recipes;
@@ -59,6 +63,7 @@ pub use annotations::Annotations;
 pub use automations::Automations;
 pub use connections::MemberConnections;
 pub use connectors::{Connections, Connectors};
+pub use endpoints::Endpoints;
 pub use experiments::{ExperimentHandle, Experiments};
 pub use members::Members;
 pub use recipes::Recipes;

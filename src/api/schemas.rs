@@ -2422,8 +2422,19 @@ pub struct ConnectionMissionConstraints {
     pub payload_binding: Option<String>,
 }
 
+/// `POST /v1/oauth/connections/token` options (the `connector_id` itself is
+/// the method's first argument).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ConnectionTokenParams {
+    /// The project the connector belongs to, sent as the `project` query
+    /// parameter. Leave it unset for a credential scoped to one project; a
+    /// session or an org-wide token has to name it.
+    #[serde(skip)]
+    pub project: Option<StringOrUuid>,
+    /// The exact connection to use. Unset, the platform resolves it from the
+    /// authenticated subject.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<ConnectionBrokerSubjectType>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2747,6 +2758,154 @@ pub struct MemberUpdateParams {
     /// untouched. Setting them needs an org owner or admin.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
+}
+
+// ----- endpoints (CP) --------------------------------------------------------
+
+/// What an [`Endpoint`] binds: a model provider, a plain upstream API, or an
+/// MCP server. `Other` keeps a binding readable when the CP reports a kind
+/// this SDK predates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndpointKind {
+    Llm,
+    Api,
+    Mcp,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl EndpointKind {
+    /// On-the-wire string form.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Llm => "llm",
+            Self::Api => "api",
+            Self::Mcp => "mcp",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for EndpointKind {
+    fn from(s: &str) -> Self {
+        match s {
+            "llm" => Self::Llm,
+            "api" => Self::Api,
+            "mcp" => Self::Mcp,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for EndpointKind {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for EndpointKind {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Non-secret metadata on an [`Endpoint`]. An MCP binding names its server
+/// in `mcp_server_id`, and how it authenticates in `connector_id` (a stored
+/// connection) or `provider_app` (one app on a multi-app host).
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct EndpointMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_app: Option<String>,
+    /// Hosts the endpoint hands out URLs on that carry their own credential.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_hosts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_audience: Option<String>,
+    /// The metadata is open: keys this SDK predates ride along here.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// An endpoint binding (`/v1/endpoints`): a host the project's agents reach,
+/// with the headers or identity the platform attaches on the way.
+///
+/// `headers` carries configured values with `${NAME}` credential references
+/// left unresolved; a credential's secret value is never returned.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Endpoint {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    /// Hostname only: no scheme, path or port.
+    pub host: String,
+    /// Full base URL, when the binding overrides `https://{host}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    pub kind: EndpointKind,
+    #[serde(default)]
+    pub metadata: EndpointMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assertion_claims: Option<HashMap<String, String>>,
+    /// Set when the binding is scoped to one runtime; unset, it serves every
+    /// runtime in the project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_path: Option<String>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub header_names: Vec<String>,
+    #[serde(default)]
+    pub credential_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_verified_at: Option<String>,
+    /// The application that signs this endpoint's identity assertions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorized_application_id: Option<Uuid>,
+    pub created_by_member_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Filters supported by `GET /v1/endpoints`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct EndpointListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<EndpointKind>,
+    /// Only bindings scoped to this runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    /// Only bindings scoped to this Runtime, by slug or runtime group id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<StringOrUuid>,
+    /// Only bindings scoped to this environment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// Only bindings whose `metadata.mcp_server_id` is this server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_server_id: Option<String>,
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 // ----- automations (DP) ------------------------------------------------------
@@ -3705,6 +3864,8 @@ pub struct ConversationListParams {
     pub conversation_id: Option<String>,
     /// Restrict to several conversations.
     pub conversation_ids: Option<Vec<String>>,
+    /// Restrict to the conversation containing this trace.
+    pub trace_id: Option<String>,
     pub model: Option<String>,
     pub agent_name: Option<String>,
     pub status: Option<ConversationStatus>,
@@ -3819,6 +3980,7 @@ impl ConversationListParams {
         .apply(&mut obj)?;
         put_str(&mut obj, "conversation_id", self.conversation_id.as_ref());
         put_list(&mut obj, "conversation_ids", self.conversation_ids.as_ref());
+        put_str(&mut obj, "trace_id", self.trace_id.as_ref());
         put_str(&mut obj, "model", self.model.as_ref());
         put_str(&mut obj, "agent_name", self.agent_name.as_ref());
         if let Some(status) = self.status {
@@ -4488,10 +4650,32 @@ fn merge_filters(
 // ----- metrics (POST /v1/metrics) --------------------------------------------
 
 /// One `{measure, aggregation}` metric term in a [`MetricsQuery`].
+///
+/// `count` takes no measure and every other aggregation requires one; the API
+/// rejects either mismatch with a 422, so build a count with [`Self::count`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricSpec {
-    pub measure: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measure: Option<String>,
     pub aggregation: String,
+}
+
+impl MetricSpec {
+    /// The `count` aggregation, which counts rows and takes no measure.
+    pub fn count() -> Self {
+        Self {
+            measure: None,
+            aggregation: "count".into(),
+        }
+    }
+
+    /// An aggregation over `measure`, such as `("sum", "status_error")`.
+    pub fn of(aggregation: impl Into<String>, measure: impl Into<String>) -> Self {
+        Self {
+            measure: Some(measure.into()),
+            aggregation: aggregation.into(),
+        }
+    }
 }
 
 /// One grouping dimension `{field}`.
@@ -4500,7 +4684,8 @@ pub struct Dimension {
     pub field: String,
 }
 
-/// One `{field, operator, value}` filter term.
+/// One `{field, operator, value}` filter term. `exists` takes no value: pass
+/// `serde_json::Value::Null`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricFilter {
     pub field: String,
@@ -4643,17 +4828,108 @@ fn encode_err(e: serde_json::Error) -> IntrospectionAPIError {
     IntrospectionAPIError::Decode(format!("failed to encode metrics query: {e}"))
 }
 
-/// Response from `POST /v1/metrics`. The row shape depends on the requested
-/// view / metrics / dimensions, so rows stay as `serde_json::Value` and any
-/// envelope fields other than `data`/`meta` ride along in [`Self::extra`].
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// Response from `POST /v1/metrics`. Every row has the same shape whatever
+/// the view: the grouping values in `dimensions`, and one value per requested
+/// metric in `metrics`, in request order.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MetricsResponse {
     #[serde(default)]
-    pub data: Vec<serde_json::Value>,
+    pub data: Vec<MetricRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<serde_json::Value>,
+    pub meta: Option<MetricsMeta>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl MetricsResponse {
+    /// Whether the rows were cut at `row_limit`, so they cover only part of
+    /// the window.
+    pub fn truncated(&self) -> bool {
+        self.meta.as_ref().is_some_and(|meta| meta.truncated)
+    }
+}
+
+/// One row of a [`MetricsResponse`].
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct MetricRow {
+    /// Bucket start; set only with a `time_dimension`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
+    #[serde(default)]
+    pub dimensions: Vec<MetricDimensionValue>,
+    #[serde(default)]
+    pub metrics: Vec<MetricValue>,
+}
+
+impl MetricRow {
+    /// The value this row groups `field` by.
+    pub fn dimension(&self, field: &str) -> Option<&str> {
+        self.dimensions
+            .iter()
+            .find(|dimension| dimension.field == field)
+            .map(|dimension| dimension.value.as_str())
+    }
+
+    /// The value of the metric at `metric_index` in the request.
+    pub fn metric(&self, metric_index: u32) -> Option<f64> {
+        self.metrics
+            .iter()
+            .find(|metric| metric.metric_index == metric_index)
+            .map(|metric| metric.value)
+    }
+}
+
+/// One grouping value of a [`MetricRow`].
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct MetricDimensionValue {
+    pub field: String,
+    pub value: String,
+}
+
+/// One aggregated value of a [`MetricRow`]; `metric_index` points into the
+/// request's `metrics`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct MetricValue {
+    pub metric_index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measure: Option<String>,
+    pub aggregation: String,
+    pub value: f64,
+}
+
+/// What a [`MetricsResponse`] answered for.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct MetricsMeta {
+    #[serde(default)]
+    pub view: String,
+    /// The window the query ran over after the server resolved it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<MetricsWindow>,
+    #[serde(default)]
+    pub row_count: u64,
+    #[serde(default)]
+    pub row_limit: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_seconds: Option<i64>,
+    #[serde(default)]
+    pub approximate: bool,
+    /// The rows stop at `row_limit`; the counts cover part of the window.
+    #[serde(default)]
+    pub truncated: bool,
+    /// The read was confined to the caller's own owner key, not the project.
+    #[serde(default)]
+    pub owner_scoped: bool,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// `meta.window` of a [`MetricsResponse`].
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct MetricsWindow {
+    pub start: String,
+    pub end: String,
 }
 
 #[cfg(test)]
@@ -4687,7 +4963,7 @@ mod tests {
         let body = MetricsQuery {
             view: "observations".into(),
             metrics: vec![MetricSpec {
-                measure: "conversation_id".into(),
+                measure: Some("conversation_id".into()),
                 aggregation: "count_distinct".into(),
             }],
             lookback: Some("24h".into()),
@@ -5549,7 +5825,7 @@ mod tests {
         let wire = MetricsQuery {
             view: "spans".into(),
             metrics: vec![MetricSpec {
-                measure: "duration_ns".into(),
+                measure: Some("duration_ns".into()),
                 aggregation: "p95".into(),
             }],
             start: Some("2026-06-01T00:00:00Z".into()),

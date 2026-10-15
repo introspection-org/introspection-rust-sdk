@@ -486,6 +486,43 @@ async fn connections_get_token_returns_a_provider_token() {
                     host: Some("calendar.example.com".to_string()),
                     ..Default::default()
                 }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    match result {
+        ConnectionTokenResult::Token(token) => assert_eq!(token.token, "provider-token"),
+        other => panic!("expected token, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn connections_get_token_names_the_project_and_the_connection() {
+    let server = MockServer::start().await;
+    // The project rides the query string, never the closed request body.
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/token"))
+        .and(query_param("project", "support desk"))
+        .and(body_json(json!({
+            "connector_id": CONNECTOR_ID,
+            "connection_id": CONNECTION_ID,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "token": "provider-token",
+            "token_type": "bearer",
+        })))
+        .mount(&server)
+        .await;
+
+    let result = Connections::new(build_http(&server))
+        .get_token(
+            connector_id(),
+            &ConnectionTokenParams {
+                project: Some("support desk".into()),
+                connection_id: Some(connection_id()),
+                ..Default::default()
             },
         )
         .await

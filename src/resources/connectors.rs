@@ -16,7 +16,8 @@
 //! and never on [`Connector`]. Omitting one on update leaves it as it is.
 //!
 //! Project scope comes from the authenticated credential; connector calls do
-//! not take a separate project selector.
+//! not take a separate project selector, except the token broker, whose
+//! [`ConnectionTokenParams::project`] serves a session or org-wide token.
 
 use std::sync::Arc;
 
@@ -33,6 +34,7 @@ use crate::api::schemas::{
     ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams,
     ConnectorUpdateParams,
 };
+use crate::resources::experiments::encode_project;
 
 /// `client.connectors.connections` — the authorized subjects under one
 /// connector (`/v1/connectors/{connector_id}/connections`).
@@ -119,9 +121,14 @@ impl Connections {
             "connector_id".to_string(),
             serde_json::Value::String(connector_id.to_string()),
         );
-        self.http
-            .post_json("/v1/oauth/connections/token", &body)
-            .await
+        let path = match &params.project {
+            Some(project) => format!(
+                "/v1/oauth/connections/token?project={}",
+                encode_project(project)
+            ),
+            None => "/v1/oauth/connections/token".to_string(),
+        };
+        self.http.post_json(&path, &body).await
     }
 }
 
