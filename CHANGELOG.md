@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.28.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.27.0...v0.28.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tags:** `client.project_labels()` is now `client.tags()`, and `ProjectLabel{,Create,Update,ListParams}` are replaced by `Tag`, `TagCreate`, `TagUpdate` and `TagListParams`, which take a `TagKind`.
+* **repositories:** `RepositoryProvider::Hosted` is renamed
+
+### Features
+
+* **tags:** the tag catalogue, keyed by access or annotation ([#119](https://github.com/introspection-org/introspection-rust-sdk/issues/119)) ([14fafce](https://github.com/introspection-org/introspection-rust-sdk/commit/14fafcecd5d86e8042a6f114e08f420a4a13cf06))
+
+
+### Bug Fixes
+
+* **repositories:** the platform-served provider is `introspection` ([#117](https://github.com/introspection-org/introspection-rust-sdk/issues/117)) ([bb87b2a](https://github.com/introspection-org/introspection-rust-sdk/commit/bb87b2add1c9bd09420444b9348ee74afc2f254c))
+
 ## [0.27.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.26.0...v0.27.0) (2026-10-14)
 
 
