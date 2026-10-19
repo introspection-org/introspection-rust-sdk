@@ -22,10 +22,21 @@
 //! and `INTROSPECTION_PROJECT` (the seeded project's slug) for the routes a
 //! member session must name a project on. A test whose settings are missing
 //! skips rather than fails.
+//!
+//! Task runs name the scripted model (`openrouter/google/gemma-4-31b-it:free`)
+//! through `metadata.model` and drive it with an in-band `<<SCRIPT {...}>>`
+//! directive, so a run costs nothing and replies deterministically. On the
+//! coverage stack (`INTROSPECTION_SANDBOX=fake`) every sandbox is the data
+//! plane's in-process fake: its turns still reach the scripted model through
+//! the egress gateway, but it runs no agent, so the tests that need one (live
+//! steer, a streamed turn, real command output, ask-user → resume) skip there.
 
 use std::collections::HashMap;
 use std::env;
+use std::time::{Duration, Instant};
 
+use futures::StreamExt;
+use introspection_sdk::agui::Event;
 use introspection_sdk::api::IntrospectionAPIError;
 use introspection_sdk::{
     AdvancedOptions, ApiKeyCreateParams, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus,
@@ -33,20 +44,29 @@ use introspection_sdk::{
     ApplicationSecretCreateParams, ApplicationType, ApplicationUpdateParams,
     AutomationCreateParams, AutomationListParams, AutomationTriggerType, AutomationUpdateParams,
     ClientConfig, ConnectorListParams, ConversationListParams, CredentialCreateParams,
-    CredentialUpdateParams, EventListParams, ExperimentListParams, FileCreateText, FileListParams,
-    FileUpdate, FileUpload, FileVersionListParams, ImageCreate, ImageKind, ImageListParams,
-    ImageSource, IntegrationCreateParams, IntegrationStatus, IntegrationType,
-    IntegrationUpdateParams, IntrospectionClient, IntrospectionEventName, JudgeListParams,
-    JudgeUpdateParams, Lane, MemberListParams, PaginationParams, ProjectCreateParams,
-    ProjectListParams, ProjectUpdateParams, RecipeListParams, RuntimeListParams,
-    RuntimeSettingListParams, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate,
-    StringOrUuid, TagCreate, TagKind, TagListParams, TagUpdate, TaskCommandListParams,
-    TaskCommandSpec, UploadSource, VariableCreateParams, VariableUpdateParams,
+    CredentialUpdateParams, EventListParams, ExperimentListParams, ExperimentStatus,
+    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionListParams, ImageCreate,
+    ImageKind, ImageListParams, ImageSource, IntegrationCreateParams, IntegrationStatus,
+    IntegrationType, IntegrationUpdateParams, IntrospectionClient, IntrospectionEventName,
+    JudgeListParams, JudgeUpdateParams, Lane, MemberListParams, PaginationParams,
+    ProjectCreateParams, ProjectListParams, ProjectUpdateParams, RecipeListParams, ResumeEntry,
+    RunRequest, RunnerIdentity, RuntimeListParams, RuntimeSettingListParams, ShareCreate,
+    ShareListParams, ShareResourceType, ShareUpdate, StringOrUuid, TagCreate, TagKind,
+    TagListParams, TagUpdate, Task, TaskCancelOptions, TaskCommandListParams, TaskCommandSpec,
+    TaskCommandStatus, TaskCreate, TaskKind, TaskListParams, TaskPrompt, TaskRunCreate,
+    TaskRunKind, TaskRunResume, TaskStatus, TaskUpdate, Tasks, UploadSource, VariableCreateParams,
+    VariableUpdateParams,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 const PAGES: usize = 5;
+
+/// The catalog id the AI gateway diverts to the scripted LLM.
+const SCRIPTED_MODEL: &str = "openrouter/google/gemma-4-31b-it:free";
+/// How long a run may take to settle; the fake settles in seconds.
+const SETTLE: Duration = Duration::from_secs(120);
+const POLL: Duration = Duration::from_millis(500);
 
 /// Which credential a test drives the API with.
 #[derive(Clone, Copy)]
@@ -100,6 +120,83 @@ fn live_client(credential: Credential) -> Option<IntrospectionClient> {
 /// collide and a leftover from a crashed run is recognisable.
 fn unique(prefix: &str) -> String {
     format!("sdk-{prefix}-{}", Uuid::now_v7().simple())
+}
+
+/// Whether the deployment's sandboxes are the in-process fake, which runs no
+/// agent. Set by the coverage run; a deployment that does not say runs real ones.
+fn fake_sandbox() -> bool {
+    env::var("INTROSPECTION_SANDBOX").ok().as_deref() == Some("fake")
+}
+
+/// `true` (and a note on stderr) when the test needs a real agent.
+fn skip_on_fake_sandbox(what: &str) -> bool {
+    let fake = fake_sandbox();
+    if fake {
+        eprintln!(
+            "skipping: {what} needs a real runtime agent; INTROSPECTION_SANDBOX=fake runs none"
+        );
+    }
+    fake
+}
+
+/// A prompt the scripted LLM answers per `directive`, ahead of a line a real
+/// model would also follow.
+fn scripted_prompt(text: &str, directive: Value) -> String {
+    format!("{text} <<SCRIPT {directive}>>")
+}
+
+/// Metadata pinning the run to the scripted model, plus `extra`.
+fn scripted_metadata(extra: &[(&str, Value)]) -> HashMap<String, Value> {
+    let mut metadata = HashMap::from([("model".to_string(), json!(SCRIPTED_MODEL))]);
+    metadata.extend(extra.iter().map(|(k, v)| (k.to_string(), v.clone())));
+    metadata
+}
+
+/// A task whose first turn the scripted LLM answers per `directive`.
+fn scripted_task(title: &str, directive: Value) -> TaskCreate {
+    TaskCreate {
+        title: Some(unique(title)),
+        prompt: Some(scripted_prompt("Reply with exactly: hi", directive)),
+        idle_timeout_seconds: Some(30),
+        tags: Some(vec![unique("suite")]),
+        metadata: Some(scripted_metadata(&[])),
+        ..Default::default()
+    }
+}
+
+/// Poll the task until `done` holds, or panic after [`SETTLE`].
+async fn wait_for(tasks: &Tasks, task_id: &str, what: &str, done: impl Fn(&Task) -> bool) -> Task {
+    let deadline = Instant::now() + SETTLE;
+    loop {
+        let task = tasks.get(task_id).await.expect("tasks.get");
+        if done(&task) {
+            return task;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "task {task_id} never became {what}; last status {:?}",
+            task.status
+        );
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+/// The turn finished: the runtime reported the reply it recorded.
+fn answered(task: &Task) -> bool {
+    task.metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.contains_key("last_response"))
+}
+
+fn settled(task: &Task) -> bool {
+    matches!(
+        task.status,
+        TaskStatus::Idle
+            | TaskStatus::AwaitingUser
+            | TaskStatus::Completed
+            | TaskStatus::Failed
+            | TaskStatus::Cancelled
+    )
 }
 
 fn assert_status<T: std::fmt::Debug>(result: Result<T, IntrospectionAPIError>, expected: u16) {
@@ -362,7 +459,26 @@ async fn automations_crud_walk() {
         .await
         .expect("update");
     automations.delete(created.id).await.expect("delete");
-    assert_status(automations.get(created.id).await, 404);
+    // A deleted automation still reads back by id, but leaves the list and
+    // refuses edits.
+    let listed = automations
+        .list(&AutomationListParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("list after delete");
+    assert!(!listed.iter().any(|a| a.id == created.id));
+    assert_status(
+        automations
+            .update(
+                created.id,
+                &AutomationUpdateParams {
+                    description: Some("after delete".into()),
+                    ..Default::default()
+                },
+            )
+            .await,
+        409,
+    );
 }
 
 #[tokio::test]
@@ -1005,4 +1121,612 @@ async fn task_commands_reads() {
         ),
         Ok(command) => panic!("a command was recorded for a missing task: {command:?}"),
     }
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn tasks_crud_walk() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    let tasks = client.tasks();
+    let request = scripted_task("crud", json!({"reply": "hi"}));
+    let tag = request.tags.clone().expect("tags")[0].clone();
+    let created = tasks.create(&request).await.expect("create");
+    let task_id = created.task.id.to_string();
+    assert_eq!(created.run.task_id, created.task.id);
+
+    let fetched = tasks.get(&task_id).await.expect("get");
+    assert_eq!(fetched.title, request.title);
+    let listed = tasks
+        .list(&TaskListParams {
+            tag: Some(tag),
+            include_total: Some(true),
+            ..Default::default()
+        })
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|task| task.id == created.task.id));
+
+    let retitled = unique("retitled");
+    let updated = tasks
+        .update(
+            &task_id,
+            &TaskUpdate {
+                title: Some(retitled.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.title.as_deref(), Some(retitled.as_str()));
+
+    tasks.archive(&task_id).await.expect("archive");
+    assert!(tasks.get(&task_id).await.expect("get").is_archived);
+    tasks.unarchive(&task_id).await.expect("unarchive");
+    assert!(!tasks.get(&task_id).await.expect("get").is_archived);
+
+    tasks.delete(&task_id).await.expect("delete");
+    assert_status(tasks.get(&task_id).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_run_says_hi() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    let tasks = client.tasks();
+    let reply = "hi from the scripted model";
+    let created = tasks
+        .create(&scripted_task("hi", json!({"reply": reply})))
+        .await
+        .expect("create");
+    let task_id = created.task.id.to_string();
+    let run_id = created.run.id.clone();
+
+    wait_for(&tasks, &task_id, "answered", answered).await;
+    let run = tasks.runs.get(&task_id, &run_id).await.expect("runs.get");
+    assert_eq!(run.id, run_id);
+
+    // A real agent streams the reply and finishes the run. The fake keeps no
+    // stream, so the attach settles as incomplete and the transcript below is
+    // the record of the turn.
+    let mut stream = Box::pin(tasks.runs.stream(&task_id, &run_id).await.expect("stream"));
+    let mut text = String::new();
+    let mut settled_stream = false;
+    while let Some(event) = tokio::time::timeout(SETTLE, stream.next())
+        .await
+        .expect("the stream settles")
+    {
+        match event {
+            Ok(Event::TextMessageContent(content)) => text.push_str(&content.delta),
+            Ok(Event::RunFinished(_)) => {
+                settled_stream = true;
+                break;
+            }
+            Ok(Event::RunError(error)) => panic!("run failed: {}", error.message),
+            Ok(_) => {}
+            Err(IntrospectionAPIError::StreamIncomplete(_)) if fake_sandbox() => {
+                settled_stream = true;
+                break;
+            }
+            Err(err) => panic!("stream event: {err}"),
+        }
+    }
+    assert!(settled_stream, "the stream ended without settling");
+    if !fake_sandbox() {
+        assert_eq!(text.trim(), reply);
+    }
+
+    // The turn's chat span ingests asynchronously; its output is the scripted reply.
+    let conversations = client.conversations();
+    let deadline = Instant::now() + SETTLE;
+    loop {
+        let span = match conversations.retrieve(&task_id, None).await {
+            Ok(span) => span,
+            Err(err) if err.status() == Some(404) => None,
+            Err(err) => panic!("conversations.retrieve: {err}"),
+        };
+        if let Some(span) = span {
+            let output = format!("{:?}", span.output_messages());
+            assert!(output.contains(reply), "transcript output: {output}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the turn never reached the transcript"
+        );
+        tokio::time::sleep(POLL).await;
+    }
+    conversations
+        .get(&task_id)
+        .await
+        .expect("conversations.get");
+
+    // A follow-up turn on the same task.
+    let next = tasks
+        .runs
+        .create(
+            &task_id,
+            &TaskRunCreate {
+                prompt: Some(TaskPrompt {
+                    text: scripted_prompt("Reply with exactly: again", json!({"reply": "again"})),
+                    images: None,
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("runs.create");
+    assert_eq!(next.run.task_id, created.task.id);
+    tasks
+        .runs
+        .get(&task_id, &next.run.id)
+        .await
+        .expect("runs.get follow-up");
+    tasks.delete(&task_id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_run_cancel() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    let tasks = client.tasks();
+    // A slow reply keeps the turn in flight long enough to cancel it.
+    let created = tasks
+        .create(&scripted_task(
+            "cancel",
+            json!({"reply": "slow", "behavior": {"latency": 20}}),
+        ))
+        .await
+        .expect("create");
+    let task_id = created.task.id.to_string();
+    let cancelled = tasks
+        .runs
+        .cancel_with(&task_id, &created.run.id, &TaskCancelOptions::Abort)
+        .await
+        .expect("cancel");
+    assert_eq!(cancelled.id, created.run.id);
+    tasks.delete(&task_id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_commands_exec() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    let tasks = client.tasks();
+    let mut request = scripted_task("commands", json!({"reply": "ready"}));
+    request.kind = Some(TaskKind::Eval);
+    request.commands = Some(true);
+    let created = tasks.create(&request).await.expect("create eval task");
+    let task_id = created.task.id.to_string();
+    wait_for(&tasks, &task_id, "live", |task| {
+        matches!(
+            task.status,
+            TaskStatus::Running | TaskStatus::Idle | TaskStatus::AwaitingUser
+        )
+    })
+    .await;
+
+    let command = tasks
+        .commands
+        .create(&task_id, &TaskCommandSpec::exec(["echo", "hi"]))
+        .await
+        .expect("commands.create");
+    let deadline = Instant::now() + SETTLE;
+    let finished = loop {
+        let read = tasks
+            .commands
+            .get(&task_id, &command.id.to_string(), Some(30))
+            .await
+            .expect("commands.get");
+        if read.status.is_terminal() || Instant::now() > deadline {
+            break read;
+        }
+    };
+    assert_eq!(
+        finished.status,
+        TaskCommandStatus::Completed,
+        "{finished:?}"
+    );
+    assert_eq!(finished.exit_code, Some(0));
+    if !fake_sandbox() {
+        assert_eq!(finished.stdout.as_deref(), Some("hi\n"));
+    }
+    let listed = tasks
+        .commands
+        .list(&task_id, &TaskCommandListParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("commands.list");
+    assert!(listed.iter().any(|c| c.id == command.id));
+    tasks.delete(&task_id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_run_steer() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    if skip_on_fake_sandbox("steering a live turn") {
+        return;
+    }
+    let tasks = client.tasks();
+    let created = tasks
+        .create(&scripted_task(
+            "steer",
+            json!({"reply": "first", "behavior": {"latency": 10}}),
+        ))
+        .await
+        .expect("create");
+    let task_id = created.task.id.to_string();
+    let steer = tasks
+        .runs
+        .create(
+            &task_id,
+            &TaskRunCreate {
+                prompt: Some(TaskPrompt {
+                    text: scripted_prompt("Change of plan.", json!({"reply": "steered"})),
+                    images: None,
+                }),
+                kind: Some(TaskRunKind::Steer),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("steer");
+    let text = steer.text().await.expect("steered run settles");
+    assert!(text.contains("steered"), "steered reply: {text}");
+    tasks.delete(&task_id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_run_model_provider_faults() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    let tasks = client.tasks();
+    // Every attempt fails upstream, so whatever retries the runtime makes run out.
+    let created = tasks
+        .create(&scripted_task(
+            "fault",
+            json!({"reply": "never", "behavior": {"errors": {"http_5xx": 1.0}}}),
+        ))
+        .await
+        .expect("create");
+    let task_id = created.task.id.to_string();
+    if fake_sandbox() {
+        // The fake records no reply for a turn the gateway did not serve, and
+        // the task settles without one.
+        let task = wait_for(&tasks, &task_id, "settled", |task| {
+            matches!(task.status, TaskStatus::Completed | TaskStatus::Failed)
+        })
+        .await;
+        assert!(!answered(&task), "a failed turn recorded a reply: {task:?}");
+    } else {
+        // A real runtime retries the provider, then fails the run with the
+        // upstream error once its retries run out.
+        let mut stream = Box::pin(
+            tasks
+                .runs
+                .stream(&task_id, &created.run.id)
+                .await
+                .expect("stream"),
+        );
+        let mut failed = false;
+        while let Some(event) = tokio::time::timeout(SETTLE, stream.next())
+            .await
+            .expect("the stream settles")
+        {
+            match event {
+                Ok(Event::RunError(_)) | Err(IntrospectionAPIError::RunFailed { .. }) => {
+                    failed = true;
+                    break;
+                }
+                Ok(Event::RunFinished(_)) => break,
+                _ => {}
+            }
+        }
+        let task = wait_for(&tasks, &task_id, "settled", settled).await;
+        assert!(failed || task.status == TaskStatus::Failed, "{task:?}");
+    }
+    tasks.delete(&task_id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn automation_trigger_runs_a_task() {
+    let Some(client) = live_client(Credential::Member) else {
+        return;
+    };
+    let Some(runtime_group_id) = setting("INTROSPECTION_RUNTIME_GROUP_ID") else {
+        return;
+    };
+    let automations = client.automations();
+    let created = automations
+        .create(&AutomationCreateParams {
+            name: unique("triggered"),
+            trigger_type: AutomationTriggerType::Manual,
+            description: None,
+            cron_schedule: None,
+            kind: None,
+            prompt: Some(scripted_prompt(
+                "Reply with exactly: hi",
+                json!({"reply": "hi"}),
+            )),
+            runtime_group_id: Some(runtime_group_id.parse().expect("runtime group id")),
+            task_id: None,
+            next_trigger_at: None,
+            metadata: None,
+            enabled: Some(true),
+        })
+        .await
+        .expect("create");
+    let triggered = automations.trigger(created.id).await.expect("trigger");
+    assert_eq!(triggered.automation_id, created.id);
+    if let Some(task_id) = triggered.task_id {
+        let tasks = client.tasks();
+        let task = wait_for(&tasks, &task_id.to_string(), "answered", answered).await;
+        assert_eq!(task.automation_id, Some(created.id));
+    }
+    automations.delete(created.id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn runtime_run_opens_a_runner() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    let Some(runtime) = setting("INTROSPECTION_RUNTIME") else {
+        return;
+    };
+    let (Some(runtime_id), Some(project)) = (
+        setting("INTROSPECTION_RUNTIME_ID"),
+        setting("INTROSPECTION_PROJECT"),
+    ) else {
+        return;
+    };
+    let fetched = client
+        .runtimes()
+        .get(
+            runtime_id.parse().expect("runtime id"),
+            Some(project.into()),
+        )
+        .await
+        .expect("runtimes.get");
+    assert_eq!(fetched.slug, runtime);
+    let handle = client.runtime(&runtime).await.expect("resolve runtime");
+    let runner = handle
+        .run(RunRequest::default())
+        .await
+        .expect("runtimes.run");
+    let context = runner.context();
+    assert_eq!(
+        context.runtime_group_id.map(|id| id.to_string()),
+        setting("INTROSPECTION_RUNTIME_GROUP_ID")
+    );
+    let tasks = runner.tasks();
+    let created = tasks
+        .create(&scripted_task("runner", json!({"reply": "hi"})))
+        .await
+        .expect("runner task");
+    let task_id = created.task.id.to_string();
+    wait_for(&tasks, &task_id, "answered", answered).await;
+    // A runner's session carries no `tasks:delete`; the project key removes it.
+    client.tasks().delete(&task_id).await.expect("delete");
+    runner.close();
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn ask_user_interrupt_resume() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    if skip_on_fake_sandbox("an ask-user interrupt") {
+        return;
+    }
+    let tasks = client.tasks();
+    // The scripted model calls the recipe's `ask_user_question` tool, which
+    // pauses the run; once resumed with the answer, the model replies.
+    let created = tasks
+        .create(&scripted_task(
+            "ask",
+            json!({
+                "tool": {
+                    "name": "ask_user_question",
+                    "arguments": {"question": "Tea or coffee?", "options": ["Tea", "Coffee"]},
+                },
+                "reply": "tea it is",
+            }),
+        ))
+        .await
+        .expect("create");
+    let task_id = created.task.id.to_string();
+
+    let mut stream = Box::pin(
+        tasks
+            .runs
+            .stream(&task_id, &created.run.id)
+            .await
+            .expect("stream"),
+    );
+    let mut interrupt_id = None;
+    while let Some(event) = tokio::time::timeout(SETTLE, stream.next())
+        .await
+        .expect("the stream settles")
+    {
+        if let Event::RunFinished(finished) = event.expect("stream event") {
+            interrupt_id = finished
+                .outcome
+                .as_ref()
+                .filter(|outcome| outcome["type"] == "interrupt")
+                .and_then(|outcome| outcome["interrupts"][0]["id"].as_str())
+                .map(str::to_string);
+            break;
+        }
+    }
+    let interrupt_id = interrupt_id.expect("the run finished on an interrupt");
+    wait_for(&tasks, &task_id, "awaiting the user", |task| {
+        task.status == TaskStatus::AwaitingUser
+    })
+    .await;
+
+    let resumed = tasks
+        .runs
+        .resume(
+            &task_id,
+            &TaskRunResume {
+                resume: vec![ResumeEntry {
+                    interrupt_id,
+                    status: "resolved".into(),
+                    payload: Some(json!({"answer": "Tea"})),
+                }],
+            },
+        )
+        .await
+        .expect("resume");
+    let text = resumed.text().await.expect("the resumed run settles");
+    assert!(text.contains("tea it is"), "resumed reply: {text}");
+    tasks.delete(&task_id).await.expect("delete");
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn experiment_lifecycle() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let (Some(project), Some(runtime_id), Some(runtime_group_id), Some(judge_id)) = (
+        setting("INTROSPECTION_PROJECT"),
+        setting("INTROSPECTION_RUNTIME_ID"),
+        setting("INTROSPECTION_RUNTIME_GROUP_ID"),
+        setting("INTROSPECTION_JUDGE_ID"),
+    ) else {
+        return;
+    };
+    let experiments = client.experiments();
+    // Two arms on one runtime, differing only by the agent they run.
+    let draft = |name: String| {
+        json!({
+            "project": project,
+            "name": name,
+            "runtime_group_id": runtime_group_id,
+            "arms": [
+                {"runtime_id": runtime_id, "arm_label": "control"},
+                {"runtime_id": runtime_id, "arm_label": "variant", "agent_overrides": {"agent": "agent-variant"}},
+            ],
+            "goal_json": {
+                "kind": "composite",
+                "direction": "maximize",
+                "components": [{"source": "judge", "judge_id": judge_id, "weight": 1.0}],
+            },
+        })
+    };
+
+    let ended = experiments
+        .create(&draft(unique("experiment")))
+        .await
+        .expect("create");
+    assert_eq!(ended.status, ExperimentStatus::Draft);
+    let described = experiments
+        .update(
+            ended.id,
+            project.clone(),
+            &json!({"description": "created by the rust sdk live suite"}),
+        )
+        .await
+        .expect("update");
+    assert_eq!(
+        described.description.as_deref(),
+        Some("created by the rust sdk live suite")
+    );
+    let handle = experiments.handle(ended.id, project.clone());
+    let started = handle.start().await.expect("start");
+    assert_eq!(started.status, ExperimentStatus::Running);
+    // The bandit assigns an arm per stable subject, so the runner names one.
+    let runner = handle
+        .run(RunRequest {
+            identity: Some(RunnerIdentity {
+                user_id: Some(unique("subject")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .expect("run");
+    assert_eq!(runner.context().experiment_id, Some(ended.id));
+    runner.close();
+    assert_eq!(
+        handle.end().await.expect("end").status,
+        ExperimentStatus::Ended
+    );
+
+    let cancelled = experiments
+        .create(&draft(unique("experiment")))
+        .await
+        .expect("create second");
+    let handle = experiments.handle(cancelled.id, project.clone());
+    handle.start().await.expect("start second");
+    assert_eq!(
+        handle.cancel().await.expect("cancel").status,
+        ExperimentStatus::Cancelled
+    );
+    experiments
+        .get(cancelled.id, project.clone())
+        .await
+        .expect("get");
+    experiments
+        .delete(ended.id, project.clone())
+        .await
+        .expect("delete");
+    assert_status(experiments.get(ended.id, project).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_run_recovers_from_a_transient_provider_fault() {
+    let Some(client) = live_client(Credential::ApiKey) else {
+        return;
+    };
+    // The fake dials the model once per turn and does not retry.
+    if skip_on_fake_sandbox("retrying a failed model call") {
+        return;
+    }
+    let tasks = client.tasks();
+    // The first call fails; the runtime's retry gets the reply.
+    let created = tasks
+        .create(&scripted_task(
+            "retry",
+            json!({
+                "reply": "recovered",
+                "behavior": {"fail_first": {"count": 1, "key": unique("fail-first")}},
+            }),
+        ))
+        .await
+        .expect("create");
+    let task_id = created.task.id.to_string();
+    let text = tasks
+        .runs
+        .stream(&task_id, &created.run.id)
+        .await
+        .expect("stream")
+        .fold(String::new(), |mut text, event| async move {
+            if let Ok(Event::TextMessageContent(content)) = event {
+                text.push_str(&content.delta);
+            }
+            text
+        })
+        .await;
+    assert_eq!(text.trim(), "recovered");
+    tasks.delete(&task_id).await.expect("delete");
 }
