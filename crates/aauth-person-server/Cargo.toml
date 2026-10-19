@@ -27,6 +27,7 @@ base64 = { workspace = true }
 bytes = { workspace = true }
 getrandom = { workspace = true }
 hmac = { workspace = true }
+percent-encoding = "2"
 http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -18,6 +18,7 @@ use base64::Engine;
 use bytes::Bytes;
 use hmac::{Hmac, Mac};
 use http::{HeaderValue, Method, Request, Response, StatusCode};
+use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use sha2::Sha256;
@@ -199,9 +200,16 @@ pub struct Endpoints {
 }
 
 impl Endpoints {
-    /// Where the agent polls approval `id`.
-    pub fn pending(&self, id: &str) -> String {
-        format!("{}{id}", self.pending_prefix)
+    /// Where the agent polls approval `id`, asked under `tenant`.
+    pub fn pending(&self, tenant: Option<&str>, id: &str) -> String {
+        match tenant {
+            Some(tenant) => format!(
+                "{}{}/{id}",
+                self.pending_prefix,
+                utf8_percent_encode(tenant, SEGMENT)
+            ),
+            None => format!("{}{id}", self.pending_prefix),
+        }
     }
 }
 
@@ -266,6 +274,13 @@ fn mission_not_found() -> AAuthError {
         "mission_not_found",
         "no such mission",
     )
+}
+
+/// What a tenant escapes to in a pending URL's path segment.
+const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.');
+
+fn tenant_of(params: &Map<String, Value>) -> Option<&str> {
+    str_of(params, "tenant").filter(|t| !t.is_empty())
 }
 
 /// A pending approval's grant claims, kept to the scalar claims a resource token carries.
@@ -403,7 +418,13 @@ impl PersonServer {
             (&Method::POST, ["person-token"]) => self.request_person_token(request, path).await?,
             (&Method::POST, ["token"]) => self.request_auth_token(request, path).await?,
             (&Method::GET | &Method::DELETE, ["pending", id]) if !id.is_empty() => {
-                self.pending_state(request, path, id).await?
+                self.pending_state(request, path, None, id).await?
+            }
+            (&Method::GET | &Method::DELETE, ["pending", tenant, id])
+                if !tenant.is_empty() && !id.is_empty() =>
+            {
+                let tenant = percent_decode_str(tenant).decode_utf8_lossy();
+                self.pending_state(request, path, Some(&tenant), id).await?
             }
             _ => return self.manage(request, &segments).await,
         };
@@ -499,13 +520,19 @@ impl PersonServer {
         agent: &Agent,
         params: &Map<String, Value>,
     ) -> Result<Person, AAuthError> {
+        let tenant = tenant_of(params);
         if let Some(hint) = str_of(params, "login_hint") {
-            let Some(hinted) = self.directory.person(hint, str_of(params, "tenant")).await else {
+            let Some(hinted) = self.directory.person(hint, tenant).await else {
                 return Err(AAuthError::invalid_request(
                     "not someone this Person Server speaks for",
                 ));
             };
-            let bound = self.store.bind(&agent.jkt, &hinted).await;
+            // Tokens carry the tenant the agent asked under.
+            let hinted = Person {
+                tenant: tenant.map(str::to_string).or(hinted.tenant),
+                ..hinted
+            };
+            let bound = self.store.bind(tenant, &agent.jkt, &hinted).await?;
             if bound.id != hinted.id {
                 return Err(AAuthError::new(
                     StatusCode::FORBIDDEN,
@@ -516,8 +543,8 @@ impl PersonServer {
             return Ok(hinted);
         }
         self.store
-            .binding(&agent.jkt)
-            .await
+            .binding(tenant, &agent.jkt)
+            .await?
             .ok_or_else(|| AAuthError::invalid_request("name the person: login_hint"))
     }
 
@@ -630,7 +657,10 @@ impl PersonServer {
         let person = self.person_for(&agent, &params).await?;
         let mission = match params.get("mission_s256") {
             None | Some(Value::Null) => None,
-            Some(hash) => Some(self.live_mission(&agent, hash.as_str()).await?),
+            Some(hash) => Some(
+                self.live_mission(&agent, tenant_of(&params), hash.as_str())
+                    .await?,
+            ),
         };
         if mission.as_ref().is_some_and(|m| m.person.id != person.id) {
             return Err(mission_not_found());
@@ -641,9 +671,14 @@ impl PersonServer {
     }
 
     /// The live mission `s256` names, if it is this agent's; the same 404 otherwise.
-    async fn live_mission(&self, agent: &Agent, s256: Option<&str>) -> Result<Mission, AAuthError> {
+    async fn live_mission(
+        &self,
+        agent: &Agent,
+        tenant: Option<&str>,
+        s256: Option<&str>,
+    ) -> Result<Mission, AAuthError> {
         let mission = match s256 {
-            Some(s256) => self.store.mission(s256).await,
+            Some(s256) => self.store.mission(tenant, s256).await?,
             None => None,
         };
         let Some(mission) = mission.filter(|m| m.agent_id == agent.id) else {
@@ -652,7 +687,9 @@ impl PersonServer {
         // The agent identifier is the provider's; the person is the key's.
         // Another key under the same identifier, bound to someone else, gets
         // the same 404 as a stranger.
-        if self.store.binding(&agent.jkt).await.map(|p| p.id) != Some(mission.person.id.clone()) {
+        if self.store.binding(tenant, &agent.jkt).await?.map(|p| p.id)
+            != Some(mission.person.id.clone())
+        {
             return Err(mission_not_found());
         }
         if mission.completed_at.is_some() {
@@ -701,6 +738,7 @@ impl PersonServer {
             agent,
             person,
             description.to_string(),
+            tenant_of(&params),
         );
         self.ask(Approval { grant, ..approval }).await
     }
@@ -713,7 +751,8 @@ impl PersonServer {
     ) -> Result<Response<Bytes>, AAuthError> {
         let agent = self.verify_agent(request, path).await?;
         let params = read_body(request.body())?;
-        let mission = self.live_mission(&agent, Some(s256)).await?;
+        let tenant = tenant_of(&params);
+        let mission = self.live_mission(&agent, tenant, Some(s256)).await?;
         match str_of(&params, "action") {
             Some("update") => {
                 let entry = str_of(&params, "description")
@@ -723,8 +762,8 @@ impl PersonServer {
                 let now = self.now();
                 if !self
                     .store
-                    .log_mission(&mission.s256, LogEntry { at: now, entry }, now)
-                    .await
+                    .log_mission(tenant, &mission.s256, LogEntry { at: now, entry }, now)
+                    .await?
                 {
                     return Err(AAuthError::new(
                         StatusCode::FORBIDDEN,
@@ -742,6 +781,7 @@ impl PersonServer {
                     agent,
                     mission.person.clone(),
                     summary.to_string(),
+                    tenant,
                 );
                 self.ask(Approval {
                     mission_s256: Some(mission.s256),
@@ -819,8 +859,13 @@ impl PersonServer {
         }
         let resource = trim(unverified.claim_str("iss").unwrap_or_default()).to_string();
         // The mission's approved resources are the only issuers whose keys are fetched.
+        let tenant = tenant_of(params);
+        // The presented token names the tenant it was issued under.
+        if presented.claim_str("tenant") != tenant {
+            return Err(invalid("tenant does not match the presented token"));
+        }
         let mission = match unverified.claim_str("mission_s256") {
-            Some(s256) => self.live_mission(agent, Some(s256)).await?,
+            Some(s256) => self.live_mission(agent, tenant, Some(s256)).await?,
             None => {
                 return Err(AAuthError::new(
                     StatusCode::FORBIDDEN,
@@ -943,6 +988,7 @@ impl PersonServer {
         let agent = self.verify_agent(request, path).await?;
         let params = read_body(request.body())?;
         let (rt, mission, resource) = self.verify_resource_token(&agent, &params).await?;
+        let tenant = tenant_of(&params);
         let budget = Budget::from_value(rt.get("budget")).map_err(|_| {
             AAuthError::new(
                 StatusCode::BAD_REQUEST,
@@ -970,12 +1016,13 @@ impl PersonServer {
             if let Some(spent) = self
                 .store
                 .spend(
+                    tenant,
                     &mission.s256,
                     budget.amount,
                     Spend::WithinBudget,
                     self.now(),
                 )
-                .await
+                .await?
             {
                 return Ok(ok(&self.auth_token(&agent, &spent, &grant).await));
             }
@@ -987,6 +1034,7 @@ impl PersonServer {
             agent,
             mission.person.clone(),
             description,
+            tenant,
         );
         self.ask(Approval {
             mission_s256: Some(mission.s256),
@@ -1005,6 +1053,7 @@ impl PersonServer {
         agent: Agent,
         person: Person,
         description: String,
+        tenant: Option<&str>,
     ) -> Approval {
         let created = self.now();
         Approval {
@@ -1022,8 +1071,10 @@ impl PersonServer {
             grant: Map::new(),
             decided_budget: None,
             decided_by: None,
+            decided_at: None,
             created_at: created,
             expires_at: created + self.approval_ttl,
+            tenant: tenant.map(str::to_string),
         }
     }
 
@@ -1037,16 +1088,17 @@ impl PersonServer {
                 approval.approver = approver;
             }
         }
-        self.store.insert_approval(&approval).await;
+        let tenant = approval.tenant.as_deref();
+        self.store.insert_approval(tenant, &approval).await?;
         self.hooks.on_approval(&approval).await;
-        Ok(self.still_pending(&approval.id))
+        Ok(self.still_pending(tenant, &approval.id))
     }
 
-    fn still_pending(&self, id: &str) -> Response<Bytes> {
+    fn still_pending(&self, tenant: Option<&str>, id: &str) -> Response<Bytes> {
         let mut response = json_response(StatusCode::ACCEPTED, &json!({ "status": "pending" }));
         let headers = response.headers_mut();
         for (name, value) in [
-            ("location", self.endpoints.pending(id)),
+            ("location", self.endpoints.pending(tenant, id)),
             ("retry-after", self.retry_after.to_string()),
             ("cache-control", "no-store".to_string()),
             (
@@ -1067,13 +1119,14 @@ impl PersonServer {
         &self,
         request: &Request<Bytes>,
         path: &str,
+        tenant: Option<&str>,
         id: &str,
     ) -> Result<Response<Bytes>, AAuthError> {
         let agent = self.verify_agent(request, path).await?;
         let Some(approval) = self
             .store
-            .approval(id)
-            .await
+            .approval(tenant, id)
+            .await?
             .filter(|a| a.agent.jkt == agent.jkt)
         else {
             return Ok(problem(
@@ -1087,11 +1140,12 @@ impl PersonServer {
                 let withdrawn = Approval {
                     status: ApprovalStatus::Denied,
                     decided_by: Some("agent".into()),
+                    decided_at: Some(self.now()),
                     ..approval
                 };
                 self.store
-                    .transition_approval(ApprovalStatus::Pending, &withdrawn)
-                    .await;
+                    .transition_approval(tenant, ApprovalStatus::Pending, &withdrawn)
+                    .await?;
             }
             let mut response = Response::new(Bytes::new());
             *response.status_mut() = StatusCode::NO_CONTENT;
@@ -1113,7 +1167,7 @@ impl PersonServer {
                     Some("nobody answered in time"),
                 ));
             }
-            ApprovalStatus::Pending => return Ok(self.still_pending(id)),
+            ApprovalStatus::Pending => return Ok(self.still_pending(tenant, id)),
             ApprovalStatus::Collected => {
                 return Ok(problem(
                     StatusCode::GONE,
@@ -1127,7 +1181,7 @@ impl PersonServer {
             return Ok(ok(&json!({})));
         }
         let mission = self
-            .live_mission(&agent, approval.mission_s256.as_deref())
+            .live_mission(&agent, tenant, approval.mission_s256.as_deref())
             .await?;
         if approval.kind == ApprovalKind::Mission {
             let mut tokens = Map::new();
@@ -1150,8 +1204,8 @@ impl PersonServer {
         };
         if !self
             .store
-            .transition_approval(ApprovalStatus::Approved, &collected)
-            .await
+            .transition_approval(tenant, ApprovalStatus::Approved, &collected)
+            .await?
         {
             return Ok(problem(
                 StatusCode::GONE,
@@ -1162,11 +1216,17 @@ impl PersonServer {
         Ok(ok(&self.auth_token(&agent, &mission, &grant).await))
     }
 
-    /// Record a decision. Approving does what was asked: creates the mission,
-    /// spends the request, or completes the mission. A decision is made once:
-    /// a second, even a concurrent one, is a `409`.
-    pub async fn decide(&self, id: &str, decision: Decision) -> Result<Approval, AAuthError> {
-        let Some(approval) = self.store.approval(id).await else {
+    /// Record a decision on approval `id`, asked under `tenant`. Approving
+    /// does what was asked: creates the mission, spends the request, or
+    /// completes the mission. A decision is made once: a second, even a
+    /// concurrent one, is a `409`.
+    pub async fn decide(
+        &self,
+        tenant: Option<&str>,
+        id: &str,
+        decision: Decision,
+    ) -> Result<Approval, AAuthError> {
+        let Some(approval) = self.store.approval(tenant, id).await? else {
             return Err(AAuthError::new(
                 StatusCode::NOT_FOUND,
                 "not_found",
@@ -1198,6 +1258,7 @@ impl PersonServer {
             },
             decided_budget: decision.budget.clone(),
             decided_by: decision.decided_by.clone().or(approval.decided_by.clone()),
+            decided_at: Some(now),
             ..approval.clone()
         };
         let mut new_mission = None;
@@ -1208,7 +1269,7 @@ impl PersonServer {
             new_mission = Some(mission);
         } else if approved {
             let mission = match &approval.mission_s256 {
-                Some(s256) => self.store.mission(s256).await,
+                Some(s256) => self.store.mission(tenant, s256).await?,
                 None => None,
             };
             existing = Some(mission.filter(|m| m.is_live(now)).ok_or_else(|| {
@@ -1222,31 +1283,31 @@ impl PersonServer {
         // The mission goes in first, so a decision never points at a mission
         // it did not create.
         if let Some(mission) = &new_mission {
-            if !self.store.insert_mission(mission).await {
+            if !self.store.insert_mission(tenant, mission).await? {
                 return Err(already());
             }
         }
         // The transition is the decision: whatever it does happens only once.
         if !self
             .store
-            .transition_approval(ApprovalStatus::Pending, &decided)
-            .await
+            .transition_approval(tenant, ApprovalStatus::Pending, &decided)
+            .await?
         {
             if let Some(mission) = &new_mission {
-                self.store.end_mission(&mission.s256, now).await;
+                self.store.end_mission(tenant, &mission.s256, now).await?;
             }
             return Err(already());
         }
         if let Some(mission) = existing {
             if approval.kind == ApprovalKind::Completion {
-                self.store.end_mission(&mission.s256, now).await;
+                self.store.end_mission(tenant, &mission.s256, now).await?;
             } else if let (Some(asked), Some(budget)) = (&approval.budget, &mission.budget) {
                 // A request in another unit than the mission's budget is
                 // approved without spending it.
                 if budget.same_scale(asked) {
                     self.store
-                        .spend(&mission.s256, asked.amount, Spend::Approved, now)
-                        .await;
+                        .spend(tenant, &mission.s256, asked.amount, Spend::Approved, now)
+                        .await?;
                 }
             }
         }
@@ -1289,14 +1350,16 @@ impl PersonServer {
             log: Vec::new(),
             expires_at,
             completed_at: None,
+            tenant: approval.tenant.clone(),
         }
     }
 
-    /// End a mission now: nothing is issued under it afterwards.
-    pub async fn terminate(&self, s256: &str) -> Result<Mission, AAuthError> {
+    /// End mission `s256`, approved under `tenant`, now: nothing is issued
+    /// under it afterwards.
+    pub async fn terminate(&self, tenant: Option<&str>, s256: &str) -> Result<Mission, AAuthError> {
         self.store
-            .end_mission(s256, self.now())
-            .await
+            .end_mission(tenant, s256, self.now())
+            .await?
             .ok_or_else(mission_not_found)
     }
 
@@ -1317,13 +1380,23 @@ impl PersonServer {
     }
 
     /// `GET /consent[?status=]`, `POST /consent/{id}/decision`,
-    /// `GET /missions[/{s256}]`, `PATCH /missions/{s256}` (terminate).
+    /// `GET /missions[/{s256}]`, `PATCH /missions/{s256}` (terminate); each
+    /// takes `?tenant=` for a tenant's records.
     async fn manage(
         &self,
         request: &Request<Bytes>,
         segments: &[&str],
     ) -> Result<Option<Response<Bytes>>, AAuthError> {
         let method = request.method();
+        let query = |name: &str| {
+            request.uri().query().and_then(|q| {
+                url::form_urlencoded::parse(q.as_bytes())
+                    .find(|(k, _)| k == name)
+                    .map(|(_, v)| v.into_owned())
+            })
+        };
+        let tenant = query("tenant").filter(|t| !t.is_empty());
+        let tenant = tenant.as_deref();
         let response = match segments {
             ["consent"] => {
                 self.admitted(request)?;
@@ -1334,15 +1407,11 @@ impl PersonServer {
                         None,
                     )));
                 }
-                let status = request.uri().query().and_then(|q| {
-                    url::form_urlencoded::parse(q.as_bytes())
-                        .find(|(k, _)| k == "status")
-                        .map(|(_, v)| v.into_owned())
-                });
+                let status = query("status");
                 let approvals: Vec<Approval> = self
                     .store
-                    .approvals()
-                    .await
+                    .approvals(tenant)
+                    .await?
                     .into_iter()
                     .filter(|a| {
                         status.as_deref().is_none_or(|s| {
@@ -1378,7 +1447,7 @@ impl PersonServer {
                     budget,
                     decided_by: str_of(&params, "decided_by").map(str::to_string),
                 };
-                ok(&self.decide(id, decision).await?)
+                ok(&self.decide(tenant, id, decision).await?)
             }
             ["missions"] => {
                 self.admitted(request)?;
@@ -1389,16 +1458,16 @@ impl PersonServer {
                         None,
                     )));
                 }
-                ok(&self.store.missions().await)
+                ok(&self.store.missions(tenant).await?)
             }
             ["missions", s256] => {
                 self.admitted(request)?;
                 match *method {
-                    Method::GET => match self.store.mission(s256).await {
+                    Method::GET => match self.store.mission(tenant, s256).await? {
                         Some(mission) => ok(&mission),
                         None => json_response(StatusCode::NOT_FOUND, &Value::Null),
                     },
-                    Method::PATCH => ok(&self.terminate(s256).await?),
+                    Method::PATCH => ok(&self.terminate(tenant, s256).await?),
                     _ => problem(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", None),
                 }
             }

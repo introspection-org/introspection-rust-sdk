@@ -115,10 +115,16 @@ pub struct Approval {
     /// Who decided, in the operator's terms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decided_by: Option<String>,
+    /// When it was decided, in seconds since the epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<i64>,
     /// When it was asked, in seconds since the epoch.
     pub created_at: i64,
     /// When it expires undecided.
     pub expires_at: i64,
+    /// The AAuth `tenant` it was asked under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
 }
 
 /// An update the agent logged against a mission.
@@ -156,6 +162,9 @@ pub struct Mission {
     /// When it was completed or terminated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
+    /// The AAuth `tenant` it was approved under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
 }
 
 impl Mission {

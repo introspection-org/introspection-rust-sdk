@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use aauth_person_server::{
     Approval, ApprovalKind, ApprovalStatus, Config, Decision, Directory, Hooks, LogEntry,
-    MemoryStore, Mission, Person, PersonServer, Spend, Store,
+    MemoryStore, Mission, Person, PersonServer, Spend, Store, StoreError, StoreResult,
 };
 use aauth_protocol::discovery::{JwksResolver, StaticFetch};
 use aauth_protocol::httpsig::{sign_jwt, Outgoing};
@@ -271,6 +271,7 @@ async fn approved_mission(world: &World, agent: &TestAgent) -> (String, String) 
     world
         .ps
         .decide(
+            None,
             &world.last_approval().id,
             Decision::approve().with_budget(usd(300_000)).by("dana"),
         )
@@ -332,7 +333,11 @@ async fn a_mission_is_put_to_the_approver_and_its_tokens_are_minted_once_approve
 
     world
         .ps
-        .decide(&approval.id, Decision::approve().with_budget(usd(300_000)))
+        .decide(
+            None,
+            &approval.id,
+            Decision::approve().with_budget(usd(300_000)),
+        )
         .await
         .unwrap();
     let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
@@ -383,7 +388,14 @@ async fn a_charge_within_budget_is_issued_at_once_and_one_over_it_is_put_to_the_
     assert_eq!(auth.scope(), Some("booking.reserve"));
     assert_eq!(auth.claims["budget"]["amount"], 120_000);
     assert_eq!(
-        world.ps.store().mission(&s256).await.unwrap().spent,
+        world
+            .ps
+            .store()
+            .mission(None, &s256)
+            .await
+            .unwrap()
+            .unwrap()
+            .spent,
         120_000
     );
 
@@ -401,7 +413,7 @@ async fn a_charge_within_budget_is_issued_at_once_and_one_over_it_is_put_to_the_
     assert_eq!(approval.budget, Some(usd(200_000)));
     world
         .ps
-        .decide(&approval.id, Decision::approve())
+        .decide(None, &approval.id, Decision::approve())
         .await
         .unwrap();
     let (status, body, _) = world
@@ -410,7 +422,14 @@ async fn a_charge_within_budget_is_issued_at_once_and_one_over_it_is_put_to_the_
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["auth_token"].is_string());
     assert_eq!(
-        world.ps.store().mission(&s256).await.unwrap().spent,
+        world
+            .ps
+            .store()
+            .mission(None, &s256)
+            .await
+            .unwrap()
+            .unwrap()
+            .spent,
         320_000
     );
 }
@@ -479,7 +498,7 @@ async fn completing_a_mission_is_the_persons_decision_and_ends_it() {
     );
     world
         .ps
-        .decide(&approval.id, Decision::approve())
+        .decide(None, &approval.id, Decision::approve())
         .await
         .unwrap();
     let (status, _, _) = world
@@ -601,7 +620,7 @@ async fn an_unanswered_approval_expires() {
     assert_eq!(status, StatusCode::REQUEST_TIMEOUT);
     let late = world
         .ps
-        .decide(&world.last_approval().id, Decision::approve())
+        .decide(None, &world.last_approval().id, Decision::approve())
         .await
         .unwrap_err();
     assert_eq!(late.status, StatusCode::GONE);
@@ -666,7 +685,7 @@ async fn an_approved_charge_is_collected_once() {
     assert_eq!(status, StatusCode::ACCEPTED);
     world
         .ps
-        .decide(&world.last_approval().id, Decision::approve())
+        .decide(None, &world.last_approval().id, Decision::approve())
         .await
         .unwrap();
     let pending = location(&response);
@@ -677,7 +696,14 @@ async fn an_approved_charge_is_collected_once() {
         assert_eq!(status, StatusCode::GONE, "{body}");
     }
     assert_eq!(
-        world.ps.store().mission(&s256).await.unwrap().spent,
+        world
+            .ps
+            .store()
+            .mission(None, &s256)
+            .await
+            .unwrap()
+            .unwrap()
+            .spent,
         400_000
     );
 }
@@ -696,14 +722,14 @@ async fn a_decision_is_made_once() {
         .await;
     let id = world.last_approval().id;
     let (first, second) = tokio::join!(
-        world.ps.decide(&id, Decision::approve()),
-        world.ps.decide(&id, Decision::approve()),
+        world.ps.decide(None, &id, Decision::approve()),
+        world.ps.decide(None, &id, Decision::approve()),
     );
     assert!(
         first.is_ok() != second.is_ok(),
         "exactly one decision lands"
     );
-    assert_eq!(world.ps.store().missions().await.len(), 1);
+    assert_eq!(world.ps.store().missions(None).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -720,12 +746,12 @@ async fn a_terminated_mission_issues_nothing_more() {
         .await;
     let decided = world
         .ps
-        .decide(&world.last_approval().id, Decision::approve())
+        .decide(None, &world.last_approval().id, Decision::approve())
         .await
         .unwrap();
     world
         .ps
-        .terminate(decided.mission_s256.as_deref().unwrap())
+        .terminate(None, decided.mission_s256.as_deref().unwrap())
         .await
         .unwrap();
     let (status, body, _) = world
@@ -816,7 +842,7 @@ async fn identical_missions_approved_together_stay_apart() {
                 .await;
             world
                 .ps
-                .decide(&world.last_approval().id, Decision::approve())
+                .decide(None, &world.last_approval().id, Decision::approve())
                 .await
                 .unwrap()
                 .mission_s256
@@ -825,60 +851,89 @@ async fn identical_missions_approved_together_stay_apart() {
     };
     // The same agent, description and resources, approved in the same second.
     let sams = propose(world.agent(), "user:sam@acme.example").await;
-    let ended = world.ps.terminate(&sams).await.unwrap();
+    let ended = world.ps.terminate(None, &sams).await.unwrap();
     let danas = propose(world.agent(), "user:dana@acme.example").await;
     assert_ne!(sams, danas);
-    let still = world.ps.terminate(&sams).await.unwrap();
+    let still = world.ps.terminate(None, &sams).await.unwrap();
     assert_eq!(still.person.id, "sam");
     assert_eq!(still.completed_at, ended.completed_at);
 }
 
 /// A store whose next approval transition loses, as when another decision
-/// lands between this one's read and its write.
+/// lands between this one's read and its write, or that is down.
 #[derive(Default)]
 struct LosesNextTransition {
     inner: MemoryStore,
     lose: std::sync::atomic::AtomicBool,
+    down: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl Store for LosesNextTransition {
-    async fn binding(&self, jkt: &str) -> Option<Person> {
-        self.inner.binding(jkt).await
+    async fn binding(&self, t: Option<&str>, jkt: &str) -> StoreResult<Option<Person>> {
+        self.inner.binding(t, jkt).await
     }
-    async fn bind(&self, jkt: &str, person: &Person) -> Person {
-        self.inner.bind(jkt, person).await
+    async fn bind(&self, t: Option<&str>, jkt: &str, person: &Person) -> StoreResult<Person> {
+        if self.down.load(Ordering::SeqCst) {
+            return Err(StoreError::new("the database is down"));
+        }
+        self.inner.bind(t, jkt, person).await
     }
-    async fn mission(&self, s256: &str) -> Option<Mission> {
-        self.inner.mission(s256).await
+    async fn mission(&self, t: Option<&str>, s256: &str) -> StoreResult<Option<Mission>> {
+        self.inner.mission(t, s256).await
     }
-    async fn insert_mission(&self, mission: &Mission) -> bool {
-        self.inner.insert_mission(mission).await
+    async fn insert_mission(&self, t: Option<&str>, mission: &Mission) -> StoreResult<bool> {
+        self.inner.insert_mission(t, mission).await
     }
-    async fn log_mission(&self, s256: &str, entry: LogEntry, now: i64) -> bool {
-        self.inner.log_mission(s256, entry, now).await
+    async fn log_mission(
+        &self,
+        t: Option<&str>,
+        s256: &str,
+        entry: LogEntry,
+        now: i64,
+    ) -> StoreResult<bool> {
+        self.inner.log_mission(t, s256, entry, now).await
     }
-    async fn end_mission(&self, s256: &str, at: i64) -> Option<Mission> {
-        self.inner.end_mission(s256, at).await
+    async fn end_mission(
+        &self,
+        t: Option<&str>,
+        s256: &str,
+        at: i64,
+    ) -> StoreResult<Option<Mission>> {
+        self.inner.end_mission(t, s256, at).await
     }
-    async fn spend(&self, s256: &str, amount: u64, rule: Spend, now: i64) -> Option<Mission> {
-        self.inner.spend(s256, amount, rule, now).await
+    async fn spend(
+        &self,
+        t: Option<&str>,
+        s256: &str,
+        amount: u64,
+        rule: Spend,
+        now: i64,
+    ) -> StoreResult<Option<Mission>> {
+        self.inner.spend(t, s256, amount, rule, now).await
     }
-    async fn missions(&self) -> Vec<Mission> {
-        self.inner.missions().await
+    async fn missions(&self, t: Option<&str>) -> StoreResult<Vec<Mission>> {
+        self.inner.missions(t).await
     }
-    async fn approval(&self, id: &str) -> Option<Approval> {
-        self.inner.approval(id).await
+    async fn approval(&self, t: Option<&str>, id: &str) -> StoreResult<Option<Approval>> {
+        self.inner.approval(t, id).await
     }
-    async fn insert_approval(&self, approval: &Approval) {
-        self.inner.insert_approval(approval).await
+    async fn insert_approval(&self, t: Option<&str>, approval: &Approval) -> StoreResult<()> {
+        self.inner.insert_approval(t, approval).await
     }
-    async fn transition_approval(&self, expected: ApprovalStatus, next: &Approval) -> bool {
-        !self.lose.swap(false, Ordering::SeqCst)
-            && self.inner.transition_approval(expected, next).await
+    async fn transition_approval(
+        &self,
+        t: Option<&str>,
+        expected: ApprovalStatus,
+        next: &Approval,
+    ) -> StoreResult<bool> {
+        if self.lose.swap(false, Ordering::SeqCst) {
+            return Ok(false);
+        }
+        self.inner.transition_approval(t, expected, next).await
     }
-    async fn approvals(&self) -> Vec<Approval> {
-        self.inner.approvals().await
+    async fn approvals(&self, t: Option<&str>) -> StoreResult<Vec<Approval>> {
+        self.inner.approvals(t).await
     }
 }
 
@@ -896,17 +951,111 @@ async fn a_decision_that_loses_the_race_ends_the_mission_it_made() {
         .await;
     let id = world.last_approval().id;
     store.lose.store(true, Ordering::SeqCst);
-    let lost = world.ps.decide(&id, Decision::approve()).await.unwrap_err();
+    let lost = world
+        .ps
+        .decide(None, &id, Decision::approve())
+        .await
+        .unwrap_err();
     assert_eq!(lost.status, StatusCode::CONFLICT);
-    let missions = store.missions().await;
+    let missions = store.missions(None).await.unwrap();
     assert_eq!(missions.len(), 1);
     assert!(
         missions[0].completed_at.is_some(),
         "the mission it made is ended"
     );
     assert_eq!(
-        store.approval(&id).await.unwrap().status,
+        store.approval(None, &id).await.unwrap().unwrap().status,
         ApprovalStatus::Pending,
         "the decision did not land"
     );
+}
+
+#[tokio::test]
+async fn a_store_that_is_down_is_a_503() {
+    let store = Arc::new(LosesNextTransition::default());
+    let world = World::with_store(Some(store.clone()));
+    store.down.store(true, Ordering::SeqCst);
+    let (status, body, _) = world
+        .call(
+            &world.agent(),
+            Method::POST,
+            &format!("{PS}/person-token"),
+            Some(json!({ "resource": BOOKING, "login_hint": "user:sam@acme.example" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["error"], "temporarily_unavailable");
+}
+
+#[tokio::test]
+async fn each_tenant_keeps_its_own_missions() {
+    let world = World::new();
+    let agent = world.agent();
+    let (status, _, response) = world
+        .call(
+            &agent,
+            Method::POST,
+            &format!("{PS}/mission"),
+            Some(json!({
+                "description": "Sydney", "resources": [BOOKING],
+                "login_hint": "user:sam@acme.example", "tenant": "acme",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let pending = location(&response);
+    assert!(pending.contains("/pending/acme/"), "{pending}");
+    let id = world.last_approval().id;
+    for elsewhere in [None, Some("globex")] {
+        let refused = world
+            .ps
+            .decide(elsewhere, &id, Decision::approve())
+            .await
+            .unwrap_err();
+        assert_eq!(refused.status, StatusCode::NOT_FOUND);
+    }
+    world
+        .ps
+        .decide(
+            Some("acme"),
+            &id,
+            Decision::approve().with_budget(usd(1_000)),
+        )
+        .await
+        .unwrap();
+    let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let presented = body["person_tokens"][BOOKING].as_str().unwrap().to_string();
+    let person = world
+        .as_resource(BOOKING, &presented, &agent, TokenKind::Person)
+        .await;
+    assert_eq!(
+        aauth_protocol::jwt::decode(&presented)
+            .unwrap()
+            .claim_str("tenant"),
+        Some("acme")
+    );
+
+    // An auth token is asked for under the tenant the person token names.
+    let charge = |tenant: &'static str| {
+        let token = world.charge(BOOKING, &person, &agent, 100);
+        let presented = presented.clone();
+        let world = &world;
+        let agent = &agent;
+        async move {
+            world
+                .call(
+                    agent,
+                    Method::POST,
+                    &format!("{PS}/token"),
+                    Some(json!({ "resource_token": token, "presented_token": presented, "tenant": tenant })),
+                )
+                .await
+        }
+    };
+    let (status, body, _) = charge("globex").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "invalid_resource_token");
+    let (status, body, _) = charge("acme").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }

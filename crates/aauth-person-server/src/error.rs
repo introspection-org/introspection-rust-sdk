@@ -52,6 +52,16 @@ impl AAuthError {
     }
 }
 
+impl From<crate::store::StoreError> for AAuthError {
+    fn from(error: crate::store::StoreError) -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "temporarily_unavailable",
+            error.to_string(),
+        )
+    }
+}
+
 /// A problem response: `{error, detail?}`.
 pub fn problem(status: StatusCode, error: &str, detail: Option<&str>) -> Response<Bytes> {
     let mut body = json!({ "error": error });

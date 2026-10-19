@@ -74,7 +74,7 @@
 //! // Later, when Dana answers an approval:
 //! # let approval_id = "an-approval-id";
 //! # let _ =
-//! ps.decide(approval_id, Decision::approve().by("dana@acme.example")).await;
+//! ps.decide(None, approval_id, Decision::approve().by("dana@acme.example")).await;
 //! # Ok(())
 //! # }
 //! ```
@@ -102,12 +102,19 @@
 //! | `POST /mission/{s256}` | `update` or `completion` |
 //! | `POST /person-token` | a person token |
 //! | `POST /token` | an auth token, for a resource token |
-//! | `GET`, `DELETE /pending/{id}` | poll, or withdraw, a pending request |
+//! | `GET`, `DELETE /pending/[{tenant}/]{id}` | poll, or withdraw, a pending request |
 //!
 //! With [`Config::admin_token`], the management routes are on too, behind
 //! `Authorization: Bearer <token>`: `GET /consent[?status=]`,
 //! `POST /consent/{id}/decision`, `GET /missions[/{s256}]`, and
-//! `PATCH /missions/{s256}` to terminate one.
+//! `PATCH /missions/{s256}` to terminate one; each takes `?tenant=`.
+//!
+//! # Tenants
+//!
+//! A Person Server can serve many organisations at once. An agent names its
+//! AAuth `tenant` in each request body; the pending URL carries it, tokens
+//! carry it as `tenant`, and every [`Store`] call is scoped by it, so one
+//! tenant's missions, approvals and key bindings are never another's.
 //!
 //! # Deploying
 //!
@@ -115,7 +122,9 @@
 //!   bindings forever. For more than one process, implement [`Store`] on a
 //!   database: its `spend`, `transition_approval` and `insert_mission` must
 //!   be atomic, which is what makes each budget spend and each decision
-//!   happen once, and keeps one mission from replacing another.
+//!   happen once, and keeps one mission from replacing another. A store
+//!   that fails answers with a [`StoreError`], which the agent sees as a
+//!   `503`.
 //! - Bound request bodies before handing them over (the example caps them
 //!   at 256 KiB), and rate-limit in front: this crate does neither.
 //! - Only a trusted agent provider's keys, a mission's resources' keys, and
@@ -146,7 +155,7 @@ pub use aauth_protocol;
 pub use directory::{Directory, Hooks, NoHooks};
 pub use error::{problem, AAuthError};
 pub use server::{Config, Endpoints, PersonServer};
-pub use store::{MemoryStore, Spend, Store};
+pub use store::{MemoryStore, Spend, Store, StoreError, StoreResult};
 pub use types::{
     Agent, Approval, ApprovalKind, ApprovalStatus, Decision, Issued, IssuedKind, LogEntry, Mission,
     Person, Verdict,
