@@ -109,9 +109,9 @@ interrupts, and cancellation.
 ## The same Data Plane calls on a client or a runner
 
 `IntrospectionClient` and `Runner` expose one Data Plane surface, enforced by
-the `DataPlaneResources` trait: `tasks()` (with `.runs`), `files()`,
-`shares()`, `conversations()`, `events()`, `metrics()`, `automations()` and
-`connections()`. On the client they act with the client's token; on a runner, with
+the `DataPlaneResources` trait: `tasks()` (with `.runs` and `.commands`),
+`files()`, `shares()`, `conversations()`, `events()`, `metrics()`,
+`automations()`, `connections()` and `images()`. On the client they act with the client's token; on a runner, with
 its session token. Both carry the methods inherently, so a call needs no
 import, and generic code can take either:
 
@@ -569,6 +569,33 @@ match client.repositories().merge(repository.id, &merge).await? {
     Some(commit) => println!("merged as {}", commit.sha),
     None => println!("already up to date"),
 }
+```
+
+## Administer a project
+
+With an org credential (a member's session or access token; a project API key
+carries none of these scopes), the client manages what the `introspection` CLI
+does: `projects()`, `api_keys()`, `applications()` (with `.idps`, `.secrets`
+and `.keys`), `credentials()`, `variables()`, `integrations()`, `judges()` and
+`oidc().me()`. A secret the API returns once, or takes on write, is a `Secret`
+whose `Debug` prints `<redacted>`.
+
+```rust
+use introspection_sdk::{ApiKeyCreateParams, CredentialCreateParams, StringOrUuid};
+
+let project = Some(StringOrUuid::from("support"));
+let key = client
+    .api_keys()
+    .create(&ApiKeyCreateParams { name: Some("ci".into()), ..Default::default() }, project.clone())
+    .await?;
+let plaintext = key.api_key.expect("returned on create only");
+save(plaintext.expose())?;
+client.api_keys().acknowledge(key.key.id, project.clone()).await?;
+
+client
+    .credentials()
+    .create(&CredentialCreateParams::new("OPENAI_API_KEY", openai_key), project)
+    .await?;
 ```
 
 ## Sign in

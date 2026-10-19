@@ -15,21 +15,33 @@
 //! ```
 //!
 //! reading `INTROSPECTION_TOKEN`, `INTROSPECTION_BASE_API_URL` (Control Plane)
-//! and `INTROSPECTION_DP_URL` (Data Plane), plus `INTROSPECTION_CP_SESSION` for
-//! the member-authored routes an API key cannot reach. A test whose settings
-//! are missing skips rather than fails.
+//! and `INTROSPECTION_DP_URL` (Data Plane), plus `INTROSPECTION_CP_SESSION` (an
+//! owner's Control Plane session) for the member-authored and administration
+//! routes an API key cannot reach, `INTROSPECTION_MEMBER_TOKEN` (an owner's
+//! Data Plane token) for the Data Plane writes no API key capability grants,
+//! and `INTROSPECTION_PROJECT` (the seeded project's slug) for the routes a
+//! member session must name a project on. A test whose settings are missing
+//! skips rather than fails.
 
 use std::collections::HashMap;
 use std::env;
 
 use introspection_sdk::api::IntrospectionAPIError;
 use introspection_sdk::{
-    AdvancedOptions, AutomationCreateParams, AutomationListParams, AutomationTriggerType,
-    AutomationUpdateParams, ClientConfig, ConnectorListParams, ConversationListParams,
-    EventListParams, ExperimentListParams, FileCreateText, FileListParams, FileUpdate, FileUpload,
-    FileVersionListParams, IntrospectionClient, IntrospectionEventName, MemberListParams,
-    RecipeListParams, RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType,
-    ShareUpdate, TagCreate, TagKind, TagListParams, TagUpdate, UploadSource,
+    AdvancedOptions, ApiKeyCreateParams, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus,
+    ApiKeyUpdateParams, ApplicationCreateParams, ApplicationIdpCreateParams, ApplicationListParams,
+    ApplicationSecretCreateParams, ApplicationType, ApplicationUpdateParams,
+    AutomationCreateParams, AutomationListParams, AutomationTriggerType, AutomationUpdateParams,
+    ClientConfig, ConnectorListParams, ConversationListParams, CredentialCreateParams,
+    CredentialUpdateParams, EventListParams, ExperimentListParams, FileCreateText, FileListParams,
+    FileUpdate, FileUpload, FileVersionListParams, ImageCreate, ImageKind, ImageListParams,
+    ImageSource, IntegrationCreateParams, IntegrationStatus, IntegrationType,
+    IntegrationUpdateParams, IntrospectionClient, IntrospectionEventName, JudgeListParams,
+    JudgeUpdateParams, Lane, MemberListParams, PaginationParams, ProjectCreateParams,
+    ProjectListParams, ProjectUpdateParams, RecipeListParams, RuntimeListParams,
+    RuntimeSettingListParams, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate,
+    StringOrUuid, TagCreate, TagKind, TagListParams, TagUpdate, TaskCommandListParams,
+    TaskCommandSpec, UploadSource, VariableCreateParams, VariableUpdateParams,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -453,4 +465,544 @@ async fn rejected_credentials_are_typed() {
         .expect("client config");
     let client = IntrospectionClient::new(config).expect("client");
     assert_status(client.files().get(&Uuid::now_v7().to_string()).await, 401);
+}
+
+/// The project the Control Plane administration walks address: a member
+/// session names no project of its own.
+fn live_project() -> Option<String> {
+    setting("INTROSPECTION_PROJECT")
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn oidc_me_with_session() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let me = client.oidc().me().await.expect("oidc.me");
+    assert!(me.authenticated);
+    assert!(me.member_id.is_some(), "a member session names its member");
+    assert!(me.org_id.is_some());
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn api_keys_crud_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let Some(project) = live_project() else {
+        return;
+    };
+    let keys = client.api_keys();
+    let project = Some(StringOrUuid::from(project));
+
+    let created = keys
+        .create(
+            &ApiKeyCreateParams {
+                name: Some(unique("key")),
+                environment: Some(Lane::Development),
+                ..Default::default()
+            },
+            project.clone(),
+        )
+        .await
+        .expect("create");
+    let key_id = created.key.id;
+    assert!(created.api_key.is_some(), "the plaintext rides the create");
+    assert!(
+        keys.acknowledge(key_id, project.clone())
+            .await
+            .expect("acknowledge")
+            .acknowledged
+    );
+    assert_status(keys.acknowledge(key_id, project.clone()).await, 404);
+
+    let listed = keys
+        .list(&ApiKeyListParams {
+            project: project.clone(),
+            expiring: None,
+        })
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|k| k.id == key_id));
+
+    let renamed = unique("key-renamed");
+    let updated = keys
+        .update(
+            key_id,
+            &ApiKeyUpdateParams {
+                name: Some(renamed.clone()),
+                ..Default::default()
+            },
+            project.clone(),
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.name.as_deref(), Some(renamed.as_str()));
+
+    keys.delete(
+        key_id,
+        &ApiKeyDeleteParams {
+            project: project.clone(),
+            expires_in: None,
+        },
+    )
+    .await
+    .expect("delete");
+    let listed = keys
+        .list(&ApiKeyListParams {
+            project,
+            expiring: None,
+        })
+        .await
+        .expect("list after delete");
+    assert!(!listed
+        .iter()
+        .any(|k| k.id == key_id && k.status == ApiKeyStatus::Active));
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn applications_crud_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let Some(project) = live_project() else {
+        return;
+    };
+    let applications = client.applications();
+    let project = Some(StringOrUuid::from(project));
+
+    // Every plan may create a service account; browser and federated types
+    // are plan-gated.
+    let created = applications
+        .create(
+            &ApplicationCreateParams::new(unique("app"), ApplicationType::ServiceAccount),
+            project.clone(),
+        )
+        .await
+        .expect("create");
+    let app_id = created.id;
+    applications
+        .get(app_id, project.clone())
+        .await
+        .expect("get");
+    let listed = applications
+        .list(&ApplicationListParams {
+            project: project.clone(),
+            ..Default::default()
+        })
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|a| a.id == app_id));
+    let renamed = unique("app-renamed");
+    let updated = applications
+        .update(
+            app_id,
+            &ApplicationUpdateParams {
+                name: Some(renamed.clone()),
+                ..Default::default()
+            },
+            project.clone(),
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.name, renamed);
+
+    let secret = applications
+        .secrets
+        .create(
+            app_id,
+            &ApplicationSecretCreateParams {
+                name: Some(unique("secret")),
+            },
+        )
+        .await
+        .expect("secrets.create");
+    assert!(secret.secret.is_some(), "the plaintext rides the create");
+    let secrets = applications
+        .secrets
+        .list(app_id, &PaginationParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("secrets.list");
+    assert!(secrets.iter().any(|s| s.id == secret.id));
+    applications
+        .secrets
+        .delete(app_id, secret.id, None)
+        .await
+        .expect("secrets.delete");
+
+    let key = applications.keys.create(app_id).await.expect("keys.create");
+    let keys = applications.keys.list(app_id).await.expect("keys.list");
+    assert!(keys.iter().any(|k| k.id == key.id));
+    applications
+        .keys
+        .delete(app_id, key.id)
+        .await
+        .expect("keys.delete");
+
+    let idps = applications
+        .idps
+        .list(app_id, &PaginationParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("idps.list");
+    assert!(idps.is_empty());
+    // A service account federates no end users, so the attach is refused;
+    // reaching that refusal is what pins the route and body.
+    let refused = applications
+        .idps
+        .create(
+            app_id,
+            &ApplicationIdpCreateParams {
+                issuer: Some("https://idp.example.com".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+    match refused {
+        Err(err) => assert!(
+            matches!(err.status(), Some(400 | 403)),
+            "unexpected error: {err}"
+        ),
+        Ok(idp) => panic!("a service account attached an IdP: {idp:?}"),
+    }
+
+    applications
+        .delete(app_id, project.clone())
+        .await
+        .expect("delete");
+    assert_status(applications.get(app_id, project).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn credentials_crud_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let Some(project) = live_project() else {
+        return;
+    };
+    let credentials = client.credentials();
+    let project = Some(StringOrUuid::from(project));
+    let name = format!("SDK_{}", Uuid::now_v7().simple()).to_uppercase();
+
+    let created = credentials
+        .create(
+            &CredentialCreateParams::new(name.clone(), "sk-live-suite"),
+            project.clone(),
+        )
+        .await
+        .expect("create");
+    assert!(created.has_secret);
+    let fetched = credentials
+        .get(created.id, project.clone())
+        .await
+        .expect("get");
+    assert_eq!(fetched.name, name);
+    let listed = credentials
+        .list(&RuntimeSettingListParams {
+            project: project.clone(),
+            ..Default::default()
+        })
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|c| c.id == created.id));
+    credentials
+        .update(
+            created.id,
+            &CredentialUpdateParams {
+                secret: Some("sk-rotated".into()),
+                ..Default::default()
+            },
+            project.clone(),
+        )
+        .await
+        .expect("update");
+
+    credentials
+        .delete(created.id, project.clone())
+        .await
+        .expect("delete");
+    assert_status(credentials.get(created.id, project).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn variables_crud_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let Some(project) = live_project() else {
+        return;
+    };
+    let variables = client.variables();
+    let project = Some(StringOrUuid::from(project));
+    let name = format!("SDK_{}", Uuid::now_v7().simple()).to_uppercase();
+
+    let created = variables
+        .create(
+            &VariableCreateParams::new(name.clone(), "one"),
+            project.clone(),
+        )
+        .await
+        .expect("create");
+    assert_eq!(created.value.as_deref(), Some("one"));
+    let updated = variables
+        .update(
+            created.id,
+            &VariableUpdateParams {
+                value: Some("two".into()),
+                ..Default::default()
+            },
+            project.clone(),
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.value.as_deref(), Some("two"));
+    let params = RuntimeSettingListParams {
+        project: project.clone(),
+        ..Default::default()
+    };
+    let listed = variables
+        .list(&params)
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|v| v.id == created.id));
+
+    variables.delete(created.id, project).await.expect("delete");
+    let listed = variables
+        .list(&params)
+        .collect_all(PAGES)
+        .await
+        .expect("list after delete");
+    assert!(!listed.iter().any(|v| v.id == created.id));
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn integrations_crud_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let integrations = client.integrations();
+
+    // One live integration per type per org: a create returns the pending
+    // one if it exists, and 409s on an active one.
+    let mut create = IntegrationCreateParams::new(IntegrationType::Custom);
+    create.name = Some(unique("integration"));
+    let created = match integrations.create(&create).await {
+        Ok(created) => created,
+        Err(err) if err.status() == Some(409) => {
+            eprintln!("skipping: the org already has an active custom integration");
+            return;
+        }
+        Err(err) => panic!("create: {err}"),
+    };
+    assert_eq!(created.status, IntegrationStatus::Pending);
+    integrations.get(created.id).await.expect("get");
+    let listed = integrations
+        .list(&PaginationParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|i| i.id == created.id));
+    let renamed = unique("integration-renamed");
+    let updated = integrations
+        .update(
+            created.id,
+            &IntegrationUpdateParams {
+                name: Some(renamed.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.name.as_deref(), Some(renamed.as_str()));
+
+    integrations.delete(created.id).await.expect("delete");
+    assert_status(integrations.get(created.id).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn judges_read_and_update_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let Some(project) = live_project() else {
+        return;
+    };
+    let judges = client.judges();
+    let project = Some(StringOrUuid::from(project));
+
+    let listed = judges
+        .list(&JudgeListParams {
+            project: project.clone(),
+            ..Default::default()
+        })
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert_status(judges.get(Uuid::now_v7(), project.clone()).await, 404);
+    // Judges are published with a Recipe, so a project without one has none
+    // to read; the update writes back the judge's own values.
+    let Some(judge) = listed.first() else {
+        eprintln!("skipping the judge read: the project has no judges");
+        return;
+    };
+    let fetched = judges.get(judge.id, project.clone()).await.expect("get");
+    let updated = judges
+        .update(
+            judge.id,
+            &JudgeUpdateParams {
+                enabled: Some(fetched.enabled),
+                sample_rate: Some(fetched.sample_rate),
+            },
+            project,
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.enabled, fetched.enabled);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn projects_crud_walk() {
+    let Some(client) = live_client(Credential::Session) else {
+        return;
+    };
+    let Some(slug) = live_project() else {
+        return;
+    };
+    let projects = client.projects();
+
+    let seeded = projects.get(slug.as_str()).await.expect("get");
+    let listed = projects
+        .list(&ProjectListParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert!(listed.iter().any(|p| p.id == seeded.id));
+    let description = unique("description");
+    let updated = projects
+        .update(
+            seeded.id,
+            &ProjectUpdateParams {
+                description: Some(description.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update");
+    assert_eq!(updated.description.as_deref(), Some(description.as_str()));
+    projects
+        .update(
+            seeded.id,
+            &ProjectUpdateParams {
+                description: Some(seeded.description.clone().unwrap_or_default()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("restore description");
+
+    // A scratch project on the seeded project's plane, so the walk deletes
+    // nothing it did not create.
+    let created = match projects
+        .create(&ProjectCreateParams::new(
+            unique("project"),
+            seeded.deployment_id,
+        ))
+        .await
+    {
+        Ok(created) => created,
+        Err(err) if err.status() == Some(403) => {
+            eprintln!("skipping the project create: the plan's project limit is reached ({err})");
+            return;
+        }
+        Err(err) => panic!("create: {err}"),
+    };
+    projects.get(created.id).await.expect("get created");
+    projects.delete(created.id).await.expect("delete");
+    assert_status(projects.get(created.id).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn images_crud_walk() {
+    let Some(client) = live_client(Credential::Member) else {
+        return;
+    };
+    let images = client.images();
+
+    images
+        .list(&ImageListParams::default())
+        .collect_all(PAGES)
+        .await
+        .expect("list");
+    assert_status(images.get(Uuid::now_v7()).await, 404);
+
+    // A digest no registry serves: the create only records intent, and the
+    // build it sends fails on the row without touching anything else.
+    let source = ImageSource::Mirror {
+        reference: format!("registry.invalid/sdk/live@sha256:{}", "0".repeat(64)),
+    };
+    let created = match images
+        .create(&ImageCreate::new(unique("image"), source))
+        .await
+    {
+        Ok(created) => created,
+        Err(err) if err.status() == Some(422) => {
+            eprintln!("skipping the image create: evals are not enabled on this plane ({err})");
+            return;
+        }
+        Err(err) => panic!("create: {err}"),
+    };
+    assert_eq!(created.kind, ImageKind::Service);
+    images.get(created.id).await.expect("get");
+    images.delete(created.id).await.expect("delete");
+    assert_status(images.get(created.id).await, 404);
+}
+
+#[tokio::test]
+#[ignore = "reaches a live deployment; see the module docs"]
+async fn task_commands_reads() {
+    let Some(client) = live_client(Credential::Member) else {
+        return;
+    };
+    let commands = client.tasks().commands;
+    let task_id = Uuid::now_v7().to_string();
+
+    // A command needs an eval task with a live sandbox, which the seed does
+    // not run; these pin the routes, the credential and the error shapes.
+    let listed = commands
+        .list(&task_id, &TaskCommandListParams::default())
+        .collect_all(1)
+        .await
+        .expect("list");
+    assert!(listed.is_empty());
+    assert_status(
+        commands
+            .get(&task_id, &Uuid::now_v7().to_string(), None)
+            .await,
+        404,
+    );
+    match commands
+        .create(&task_id, &TaskCommandSpec::exec(["true"]))
+        .await
+    {
+        // 404 for the missing task, or 422 on a plane without evals.
+        Err(err) => assert!(
+            matches!(err.status(), Some(404 | 422)),
+            "unexpected error: {err}"
+        ),
+        Ok(command) => panic!("a command was recorded for a missing task: {command:?}"),
+    }
 }
