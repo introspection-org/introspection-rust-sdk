@@ -287,6 +287,8 @@ fn sdk_surface_matches_the_published_reference() {
         runtime_id: Some(Uuid::nil()),
         title: Some("t".into()),
         prompt: Some("p".into()),
+        kind: Some(TaskKind::Eval),
+        commands: Some(true),
         agent_name: Some("agent".into()),
         repositories: Some(vec![TaskRepoRequest {
             repo: "owner/name".into(),
