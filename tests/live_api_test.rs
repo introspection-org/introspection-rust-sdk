@@ -14,14 +14,18 @@
 //! INTROSPECTION_LIVE=1 cargo test --test live_api_test -- --ignored --test-threads=1
 //! ```
 //!
-//! reading `INTROSPECTION_TOKEN`, `INTROSPECTION_BASE_API_URL` (Control Plane)
-//! and `INTROSPECTION_DP_URL` (Data Plane), plus `INTROSPECTION_CP_SESSION` (an
-//! owner's Control Plane session) for the member-authored and administration
-//! routes an API key cannot reach, `INTROSPECTION_MEMBER_TOKEN` (an owner's
-//! Data Plane token) for the Data Plane writes no API key capability grants,
-//! and `INTROSPECTION_PROJECT` (the seeded project's slug) for the routes a
-//! member session must name a project on. A test whose settings are missing
-//! skips rather than fails.
+//! authenticating as the seeded project's service account:
+//! `INTROSPECTION_CLIENT_ID` and `INTROSPECTION_CLIENT_SECRET` mint a token
+//! against `INTROSPECTION_BASE_API_URL` (the Control Plane) for
+//! `INTROSPECTION_PROJECT` (the seeded project's slug), and the token response
+//! names the Data Plane, so no Data Plane URL is configured anywhere. Two
+//! routes families stay out of a service account's reach, and take an owner's
+//! credential instead: `INTROSPECTION_MEMBER_TOKEN` (a Data Plane bearer, sent
+//! to the discovered Data Plane) for annotation tags, and
+//! `INTROSPECTION_CP_SESSION` (a Control Plane session cookie, sent alone,
+//! since a bearer beside it wins and is refused) for the member and
+//! administration routes. A test whose settings are missing skips rather than
+//! fails.
 //!
 //! Task runs name the scripted model (`openrouter/google/gemma-4-31b-it:free`)
 //! through `metadata.model` and drive it with an in-band `<<SCRIPT {...}>>`
@@ -33,11 +37,16 @@
 
 use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use introspection_sdk::agui::Event;
-use introspection_sdk::api::IntrospectionAPIError;
+use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
+use introspection_sdk::{
+    service_account_token, ApiKeys, Applications, Credentials, Integrations, Judges, Members, Oidc,
+    ServiceAccountTokenParams, Variables,
+};
 use introspection_sdk::{
     AdvancedOptions, ApiKeyCreateParams, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus,
     ApiKeyUpdateParams, ApplicationCreateParams, ApplicationIdpCreateParams, ApplicationListParams,
@@ -50,13 +59,14 @@ use introspection_sdk::{
     IntegrationType, IntegrationUpdateParams, IntrospectionClient, IntrospectionEventName,
     JudgeListParams, JudgeUpdateParams, Lane, MemberListParams, PaginationParams,
     ProjectCreateParams, ProjectListParams, ProjectUpdateParams, RecipeListParams, ResumeEntry,
-    RunRequest, RunnerIdentity, RuntimeListParams, RuntimeSettingListParams, ShareCreate,
+    RunRequest, RunnerIdentity, Runtime, RuntimeListParams, RuntimeSettingListParams, ShareCreate,
     ShareListParams, ShareResourceType, ShareUpdate, StringOrUuid, TagCreate, TagKind,
     TagListParams, TagUpdate, Task, TaskCancelOptions, TaskCommandListParams, TaskCommandSpec,
     TaskCommandStatus, TaskCreate, TaskKind, TaskListParams, TaskPrompt, TaskRunCreate,
     TaskRunKind, TaskRunResume, TaskStatus, TaskUpdate, Tasks, UploadSource, VariableCreateParams,
     VariableUpdateParams,
 };
+use reqwest::header::{HeaderMap, HeaderValue, COOKIE};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -68,16 +78,13 @@ const SCRIPTED_MODEL: &str = "openrouter/google/gemma-4-31b-it:free";
 const SETTLE: Duration = Duration::from_secs(120);
 const POLL: Duration = Duration::from_millis(500);
 
-/// Which credential a test drives the API with.
+/// Which bearer a test drives the API with.
 #[derive(Clone, Copy)]
 enum Credential {
-    /// The project's API key, the SDK's primary credential.
-    ApiKey,
-    /// The API key plus a member's Control Plane session, for member-authored
-    /// Control Plane routes.
-    Session,
-    /// A member's Data Plane token, for the Data Plane writes no API key
-    /// capability grants (automations, annotation tags).
+    /// The project's service account, the SDK's primary credential.
+    ServiceAccount,
+    /// An owner's Data Plane token, for the one Data Plane write no service
+    /// account scope grants: annotation tags.
     Member,
 }
 
@@ -89,31 +96,156 @@ fn setting(name: &str) -> Option<String> {
     value
 }
 
-/// The run's client, or `None` (and a note on stderr) when it should skip.
-fn live_client(credential: Credential) -> Option<IntrospectionClient> {
-    if env::var("INTROSPECTION_LIVE").ok().as_deref() != Some("1") {
+fn live() -> bool {
+    let live = env::var("INTROSPECTION_LIVE").ok().as_deref() == Some("1");
+    if !live {
         eprintln!("skipping: INTROSPECTION_LIVE is not 1");
+    }
+    live
+}
+
+/// The service account's token request, or `None` when it should skip.
+fn service_account(client_secret: Option<String>) -> Option<ServiceAccountTokenParams> {
+    if !live() {
         return None;
     }
-    let (token, cp_session) = match credential {
-        Credential::ApiKey => (setting("INTROSPECTION_TOKEN")?, None),
-        Credential::Session => (
-            setting("INTROSPECTION_TOKEN")?,
-            Some(setting("INTROSPECTION_CP_SESSION")?),
+    Some(ServiceAccountTokenParams {
+        client_id: setting("INTROSPECTION_CLIENT_ID")?,
+        client_secret: match client_secret {
+            Some(secret) => secret,
+            None => setting("INTROSPECTION_CLIENT_SECRET")?,
+        },
+        project: setting("INTROSPECTION_PROJECT")?,
+        scope: None,
+        base_api_url: Some(setting("INTROSPECTION_BASE_API_URL")?),
+    })
+}
+
+/// The Data Plane URL the Control Plane resolves for the project.
+async fn discovered_dp_url(params: ServiceAccountTokenParams) -> String {
+    service_account_token(params)
+        .await
+        .expect("service account token")
+        .dp_url
+        .expect("the token response names the Data Plane")
+}
+
+/// The run's client, or `None` (and a note on stderr) when it should skip.
+async fn live_client(credential: Credential) -> Option<IntrospectionClient> {
+    let params = service_account(None)?;
+    match credential {
+        Credential::ServiceAccount => Some(
+            IntrospectionClient::from_service_account(params, None)
+                .await
+                .expect("service account client"),
         ),
-        Credential::Member => (setting("INTROSPECTION_MEMBER_TOKEN")?, None),
-    };
-    let config = ClientConfig::builder()
-        .token(token)
-        .advanced(AdvancedOptions {
-            base_api_url: env::var("INTROSPECTION_BASE_API_URL").ok(),
-            dp_url: env::var("INTROSPECTION_DP_URL").ok(),
-            cp_session,
+        Credential::Member => {
+            let token = setting("INTROSPECTION_MEMBER_TOKEN")?;
+            let base_api_url = params.base_api_url.clone();
+            let dp_url = discovered_dp_url(params).await;
+            let config = ClientConfig::builder()
+                .token(token)
+                .advanced(AdvancedOptions {
+                    base_api_url,
+                    dp_url: Some(dp_url),
+                    ..Default::default()
+                })
+                .build()
+                .expect("client config");
+            Some(IntrospectionClient::new(config).expect("client"))
+        }
+    }
+}
+
+/// The seeded runtime a task binds to. A service account carries no runtime
+/// authority of its own, so a task names one or the Data Plane refuses it.
+async fn live_runtime(client: &IntrospectionClient) -> Option<Runtime> {
+    let runtime_group_id: Uuid = setting("INTROSPECTION_RUNTIME_GROUP_ID")?
+        .parse()
+        .expect("runtime group id");
+    let runtimes = client
+        .runtimes()
+        .list(&RuntimeListParams {
+            project: Some(setting("INTROSPECTION_PROJECT")?),
             ..Default::default()
         })
+        .collect_all(PAGES)
+        .await
+        .expect("runtimes.list");
+    let runtime = runtimes
+        .into_iter()
+        .find(|runtime| runtime.runtime_group_id == Some(runtime_group_id))
+        .expect("the seeded runtime group has a runtime");
+    Some(runtime)
+}
+
+async fn live_runtime_id(client: &IntrospectionClient) -> Option<Uuid> {
+    live_runtime(client).await.map(|runtime| runtime.id)
+}
+
+/// The Control Plane namespaces an owner's session reaches, built on a
+/// transport that sends the session cookie and no bearer.
+struct Session {
+    http: Arc<HttpClient>,
+}
+
+impl Session {
+    fn members(&self) -> Members {
+        Members::new(self.http.clone())
+    }
+    fn api_keys(&self) -> ApiKeys {
+        ApiKeys::new(self.http.clone())
+    }
+    fn applications(&self) -> Applications {
+        Applications::new(self.http.clone())
+    }
+    fn credentials(&self) -> Credentials {
+        Credentials::new(self.http.clone())
+    }
+    fn variables(&self) -> Variables {
+        Variables::new(self.http.clone())
+    }
+    fn judges(&self) -> Judges {
+        Judges::new(self.http.clone())
+    }
+    fn integrations(&self) -> Integrations {
+        Integrations::new(self.http.clone())
+    }
+    fn oidc(&self) -> Oidc {
+        Oidc::new(self.http.clone())
+    }
+}
+
+/// An owner's Control Plane session, or `None` when it should skip.
+fn live_session() -> Option<Session> {
+    if !live() {
+        return None;
+    }
+    let cookie = setting("INTROSPECTION_CP_SESSION")?;
+    let base_api_url = setting("INTROSPECTION_BASE_API_URL")?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        COOKIE,
+        HeaderValue::from_str(&format!("intro_cp_session={cookie}")).expect("cookie header"),
+    );
+    let inner = reqwest::Client::builder()
+        .default_headers(headers)
         .build()
-        .expect("client config");
-    Some(IntrospectionClient::new(config).expect("client"))
+        .expect("session transport");
+    let http = HttpClient::from_parts(
+        inner,
+        HttpConfig {
+            api_url: base_api_url,
+            token: String::new(),
+            additional_headers: HashMap::new(),
+            timeout: Duration::from_secs(30),
+            max_retries: 0,
+            retry_base: Duration::ZERO,
+        },
+    );
+    Some(Session {
+        http: Arc::new(http),
+    })
 }
 
 /// A name no other run shares, so concurrent runs against one project never
@@ -152,9 +284,11 @@ fn scripted_metadata(extra: &[(&str, Value)]) -> HashMap<String, Value> {
     metadata
 }
 
-/// A task whose first turn the scripted LLM answers per `directive`.
-fn scripted_task(title: &str, directive: Value) -> TaskCreate {
+/// A task bound to `runtime_id`, whose first turn the scripted LLM answers
+/// per `directive`.
+fn scripted_task(runtime_id: Uuid, title: &str, directive: Value) -> TaskCreate {
     TaskCreate {
+        runtime_id: Some(runtime_id),
         title: Some(unique(title)),
         prompt: Some(scripted_prompt("Reply with exactly: hi", directive)),
         idle_timeout_seconds: Some(30),
@@ -209,7 +343,7 @@ fn assert_status<T: std::fmt::Debug>(result: Result<T, IntrospectionAPIError>, e
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn files_crud_walk() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let files = client.files();
@@ -294,7 +428,7 @@ async fn files_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn upload_and_shares_crud_walk() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let files = client.files();
@@ -347,15 +481,7 @@ async fn upload_and_shares_crud_walk() {
             .await,
         422,
     );
-    // No API key capability carries `shares:delete`, so a member removes it.
-    let Some(member) = live_client(Credential::Member) else {
-        return;
-    };
-    member
-        .shares()
-        .delete(&share_id)
-        .await
-        .expect("shares.delete");
+    shares.delete(&share_id).await.expect("shares.delete");
     assert_status(shares.get(&share_id).await, 404);
 
     files.delete(&file_id).await.expect("delete");
@@ -364,14 +490,20 @@ async fn upload_and_shares_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn tags_crud_walk() {
-    let Some(client) = live_client(Credential::Member) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
-    let tags = client.tags();
+    // `annotations:write` is CLI-only, so an owner writes the annotation tag.
+    let Some(member) = live_client(Credential::Member).await else {
+        return;
+    };
+    let access_tags = client.tags();
+    let tags = member.tags();
     let access = unique("access");
     let annotation = unique("label");
 
-    tags.create(TagCreate::access(access.clone()))
+    access_tags
+        .create(TagCreate::access(access.clone()))
         .await
         .expect("create access tag");
     let created = tags
@@ -379,7 +511,8 @@ async fn tags_crud_walk() {
         .await
         .expect("create annotation tag");
 
-    tags.get(TagKind::Access, &access)
+    access_tags
+        .get(TagKind::Access, &access)
         .await
         .expect("get access");
     tags.get(TagKind::Annotation, &created.name)
@@ -406,7 +539,8 @@ async fn tags_crud_walk() {
     tags.delete(TagKind::Annotation, &created.name)
         .await
         .expect("delete annotation");
-    tags.delete(TagKind::Access, &access)
+    access_tags
+        .delete(TagKind::Access, &access)
         .await
         .expect("delete access");
     assert_status(tags.get(TagKind::Annotation, &created.name).await, 404);
@@ -415,7 +549,7 @@ async fn tags_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn automations_crud_walk() {
-    let Some(client) = live_client(Credential::Member) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     // An automation dispatches into a runtime group, so it needs a runtime the
@@ -484,7 +618,7 @@ async fn automations_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn control_plane_reads() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let Some(project) = setting("INTROSPECTION_PROJECT") else {
@@ -529,7 +663,7 @@ async fn control_plane_reads() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn telemetry_reads() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     client
@@ -551,7 +685,7 @@ async fn telemetry_reads() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn members_reads_with_session() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let members = client
@@ -567,14 +701,24 @@ async fn members_reads_with_session() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn rejected_credentials_are_typed() {
-    let Some(_) = live_client(Credential::ApiKey) else {
+    let Some(params) = service_account(None) else {
         return;
     };
+    let Some(wrong) = service_account(Some("intro_sk_not_a_real_secret".into())) else {
+        return;
+    };
+    match service_account_token(wrong).await {
+        Err(IntrospectionAPIError::Http { status, .. }) => assert_eq!(status, 401),
+        other => panic!("expected a typed HTTP 401 from the token endpoint, got {other:?}"),
+    }
+
+    let base_api_url = params.base_api_url.clone();
+    let dp_url = discovered_dp_url(params).await;
     let config = ClientConfig::builder()
         .token("intro_dev_not_a_real_key")
         .advanced(AdvancedOptions {
-            base_api_url: env::var("INTROSPECTION_BASE_API_URL").ok(),
-            dp_url: env::var("INTROSPECTION_DP_URL").ok(),
+            base_api_url,
+            dp_url: Some(dp_url),
             ..Default::default()
         })
         .build()
@@ -592,7 +736,7 @@ fn live_project() -> Option<String> {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn oidc_me_with_session() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let me = client.oidc().me().await.expect("oidc.me");
@@ -604,7 +748,7 @@ async fn oidc_me_with_session() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn api_keys_crud_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let Some(project) = live_project() else {
@@ -681,7 +825,7 @@ async fn api_keys_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn applications_crud_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let Some(project) = live_project() else {
@@ -797,7 +941,7 @@ async fn applications_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn credentials_crud_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let Some(project) = live_project() else {
@@ -851,7 +995,7 @@ async fn credentials_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn variables_crud_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let Some(project) = live_project() else {
@@ -904,7 +1048,7 @@ async fn variables_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn integrations_crud_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let integrations = client.integrations();
@@ -949,7 +1093,7 @@ async fn integrations_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn judges_read_and_update_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_session() else {
         return;
     };
     let Some(project) = live_project() else {
@@ -991,7 +1135,7 @@ async fn judges_read_and_update_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn projects_crud_walk() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let Some(slug) = live_project() else {
@@ -1053,7 +1197,7 @@ async fn projects_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn images_crud_walk() {
-    let Some(client) = live_client(Credential::Member) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let images = client.images();
@@ -1090,7 +1234,7 @@ async fn images_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_commands_reads() {
-    let Some(client) = live_client(Credential::Member) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let commands = client.tasks().commands;
@@ -1126,11 +1270,14 @@ async fn task_commands_reads() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn tasks_crud_walk() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     let tasks = client.tasks();
-    let request = scripted_task("crud", json!({"reply": "hi"}));
+    let request = scripted_task(runtime_id, "crud", json!({"reply": "hi"}));
     let tag = request.tags.clone().expect("tags")[0].clone();
     let created = tasks.create(&request).await.expect("create");
     let task_id = created.task.id.to_string();
@@ -1174,13 +1321,16 @@ async fn tasks_crud_walk() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_run_says_hi() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     let tasks = client.tasks();
     let reply = "hi from the scripted model";
     let created = tasks
-        .create(&scripted_task("hi", json!({"reply": reply})))
+        .create(&scripted_task(runtime_id, "hi", json!({"reply": reply})))
         .await
         .expect("create");
     let task_id = created.task.id.to_string();
@@ -1272,13 +1422,17 @@ async fn task_run_says_hi() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_run_cancel() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     let tasks = client.tasks();
     // A slow reply keeps the turn in flight long enough to cancel it.
     let created = tasks
         .create(&scripted_task(
+            runtime_id,
             "cancel",
             json!({"reply": "slow", "behavior": {"latency": 20}}),
         ))
@@ -1297,11 +1451,14 @@ async fn task_run_cancel() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_commands_exec() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     let tasks = client.tasks();
-    let mut request = scripted_task("commands", json!({"reply": "ready"}));
+    let mut request = scripted_task(runtime_id, "commands", json!({"reply": "ready"}));
     request.kind = Some(TaskKind::Eval);
     request.commands = Some(true);
     let created = tasks.create(&request).await.expect("create eval task");
@@ -1352,7 +1509,10 @@ async fn task_commands_exec() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_run_steer() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     if skip_on_fake_sandbox("steering a live turn") {
@@ -1361,6 +1521,7 @@ async fn task_run_steer() {
     let tasks = client.tasks();
     let created = tasks
         .create(&scripted_task(
+            runtime_id,
             "steer",
             json!({"reply": "first", "behavior": {"latency": 10}}),
         ))
@@ -1390,13 +1551,17 @@ async fn task_run_steer() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_run_model_provider_faults() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     let tasks = client.tasks();
     // Every attempt fails upstream, so whatever retries the runtime makes run out.
     let created = tasks
         .create(&scripted_task(
+            runtime_id,
             "fault",
             json!({"reply": "never", "behavior": {"errors": {"http_5xx": 1.0}}}),
         ))
@@ -1444,7 +1609,7 @@ async fn task_run_model_provider_faults() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn automation_trigger_runs_a_task() {
-    let Some(client) = live_client(Credential::Member) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let Some(runtime_group_id) = setting("INTROSPECTION_RUNTIME_GROUP_ID") else {
@@ -1483,28 +1648,23 @@ async fn automation_trigger_runs_a_task() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn runtime_run_opens_a_runner() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
-    let Some(runtime) = setting("INTROSPECTION_RUNTIME") else {
+    let Some(project) = setting("INTROSPECTION_PROJECT") else {
         return;
     };
-    let (Some(runtime_id), Some(project)) = (
-        setting("INTROSPECTION_RUNTIME_ID"),
-        setting("INTROSPECTION_PROJECT"),
-    ) else {
+    let Some(seeded) = live_runtime(&client).await else {
         return;
     };
+    let runtime_id = seeded.id;
     let fetched = client
         .runtimes()
-        .get(
-            runtime_id.parse().expect("runtime id"),
-            Some(project.into()),
-        )
+        .get(runtime_id, Some(project.into()))
         .await
         .expect("runtimes.get");
-    assert_eq!(fetched.slug, runtime);
-    let handle = client.runtime(&runtime).await.expect("resolve runtime");
+    assert_eq!(fetched.slug, seeded.slug);
+    let handle = client.runtime(&seeded.slug).await.expect("resolve runtime");
     let runner = handle
         .run(RunRequest::default())
         .await
@@ -1516,7 +1676,7 @@ async fn runtime_run_opens_a_runner() {
     );
     let tasks = runner.tasks();
     let created = tasks
-        .create(&scripted_task("runner", json!({"reply": "hi"})))
+        .create(&scripted_task(runtime_id, "runner", json!({"reply": "hi"})))
         .await
         .expect("runner task");
     let task_id = created.task.id.to_string();
@@ -1529,7 +1689,10 @@ async fn runtime_run_opens_a_runner() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn ask_user_interrupt_resume() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     if skip_on_fake_sandbox("an ask-user interrupt") {
@@ -1540,6 +1703,7 @@ async fn ask_user_interrupt_resume() {
     // pauses the run; once resumed with the answer, the model replies.
     let created = tasks
         .create(&scripted_task(
+            runtime_id,
             "ask",
             json!({
                 "tool": {
@@ -1603,7 +1767,7 @@ async fn ask_user_interrupt_resume() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn experiment_lifecycle() {
-    let Some(client) = live_client(Credential::Session) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
         return;
     };
     let (Some(project), Some(runtime_id), Some(runtime_group_id), Some(judge_id)) = (
@@ -1695,7 +1859,10 @@ async fn experiment_lifecycle() {
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
 async fn task_run_recovers_from_a_transient_provider_fault() {
-    let Some(client) = live_client(Credential::ApiKey) else {
+    let Some(client) = live_client(Credential::ServiceAccount).await else {
+        return;
+    };
+    let Some(runtime_id) = live_runtime_id(&client).await else {
         return;
     };
     // The fake dials the model once per turn and does not retry.
@@ -1706,6 +1873,7 @@ async fn task_run_recovers_from_a_transient_provider_fault() {
     // The first call fails; the runtime's retry gets the reply.
     let created = tasks
         .create(&scripted_task(
+            runtime_id,
             "retry",
             json!({
                 "reply": "recovered",
