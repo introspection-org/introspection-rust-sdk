@@ -52,8 +52,13 @@ impl Runtimes {
             .await
     }
 
-    /// `PATCH /v1/runtimes/{id}?project=...` — steer the group's lanes, yank
-    /// or restore this version, or edit its settings. Needs `runtimes:write`.
+    /// `PATCH /v1/runtimes/{id}` — steer the group's lanes, yank or restore
+    /// this version, or edit its settings. Needs `runtimes:write`.
+    ///
+    /// `project` is needed only when the credential does not already name
+    /// one: an API key or a project-scoped access token carries its project
+    /// as a claim, while a session cookie or an org-wide token does not, and
+    /// without one the route answers 422.
     ///
     /// Only the fields set on `params` are sent; the rest stay unchanged.
     /// Lanes move through [`RuntimeUpdateParams::environment_ref`]; the
@@ -67,14 +72,14 @@ impl Runtimes {
     pub async fn update(
         &self,
         runtime_id: Uuid,
-        project: impl Into<StringOrUuid>,
+        project: Option<StringOrUuid>,
         params: &RuntimeUpdateParams,
     ) -> ApiResult<Runtime> {
-        let path = format!(
-            "/v1/runtimes/{}?project={}",
-            runtime_id,
-            crate::api::encoding::encode(&project.into().to_string())
-        );
+        let mut path = format!("/v1/runtimes/{}", runtime_id);
+        if let Some(project) = project {
+            path.push_str("?project=");
+            path.push_str(&crate::api::encoding::encode(&project.to_string()));
+        }
         self.http.patch_json(&path, params).await
     }
 

@@ -13,7 +13,7 @@ use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{LaneRef, RuntimeLlmMode, RuntimeUpdateParams, Runtimes};
 use serde_json::{json, Value};
 use uuid::Uuid;
-use wiremock::matchers::{body_json, method, path, query_param};
+use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const RUNTIME_ID: &str = "11111111-1111-1111-1111-111111111111";
@@ -191,7 +191,7 @@ async fn update_patches_the_runtime_in_the_project() {
     let runtime = Runtimes::new(build_http(&server))
         .update(
             Uuid::parse_str(RUNTIME_ID).unwrap(),
-            "support desk",
+            Some("support desk".into()),
             &RuntimeUpdateParams::pin_ref("staging", "pr/12"),
         )
         .await
@@ -205,10 +205,11 @@ async fn update_patches_the_runtime_in_the_project() {
 }
 
 #[tokio::test]
-async fn update_surfaces_a_rejected_ref() {
+async fn update_leaves_the_project_to_the_credential_and_surfaces_a_rejected_ref() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
         .and(path(format!("/v1/runtimes/{RUNTIME_ID}")))
+        .and(query_param_is_missing("project"))
         .respond_with(ResponseTemplate::new(400).set_body_json(json!({
             "detail": "A 'pr/' ref must be 'pr/N' with a positive integer.",
         })))
@@ -219,7 +220,7 @@ async fn update_surfaces_a_rejected_ref() {
     let err = Runtimes::new(build_http(&server))
         .update(
             Uuid::parse_str(RUNTIME_ID).unwrap(),
-            "support",
+            None,
             &RuntimeUpdateParams::pin_ref("staging", "pr/0"),
         )
         .await
