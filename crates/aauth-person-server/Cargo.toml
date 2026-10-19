@@ -37,6 +37,9 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+# The agent side, for tests/client.rs.
+aauth-protocol = { workspace = true, features = ["client"] }
+reqwest = { workspace = true }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

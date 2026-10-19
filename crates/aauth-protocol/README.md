@@ -73,7 +73,7 @@ match client.propose_mission(&agent, &metadata, &json!({ "description": "Sydney,
 
 ## Interop
 
-CI checks this crate against the JavaScript implementations. [`@hellocoop/httpsig`](https://www.npmjs.com/package/@hellocoop/httpsig), by the spec's author, verifies what this crate signs, and this crate verifies what it signs. CI also drives [`@introspection-sdk/person-server`](https://www.npmjs.com/package/@introspection-sdk/person-server) through this crate's client.
+The tests pin this crate's signatures to [`@hellocoop/httpsig`](https://www.npmjs.com/package/@hellocoop/httpsig), by the spec's author, with fixed vectors in `tests/vectors/hellocoop.json`: requests it signed verify here, and what this crate signs is exactly what it verified.
 
 ## Status
 

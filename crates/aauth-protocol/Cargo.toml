@@ -2,7 +2,6 @@
 name = "aauth-protocol"
 description = "AAuth (draft-hardt-oauth-aauth-protocol): HTTP message signatures, agent, person and auth tokens, and an agent-side Person Server client"
 readme = "README.md"
-exclude = ["interop/"]
 documentation = "https://docs.rs/aauth-protocol"
 version = "0.1.0"
 edition.workspace = true
@@ -40,4 +39,4 @@ reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true }
