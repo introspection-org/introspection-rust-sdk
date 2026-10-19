@@ -1,10 +1,8 @@
-//! `client.projects` (CP) — read the org's projects.
+//! `client.projects` (CP) — the org's projects, addressed by slug or id.
 //!
-//! Read-only. Creating, renaming or deleting a project is project
-//! administration and lives in the CLI; reading one is what a tool needs to
-//! turn a project id into the slug its dashboard URLs use.
-//!
-//! Both calls need `projects:read`.
+//! Gated on `projects:read` / `projects:write` / `projects:delete`; a write
+//! needs an org credential. A delete also revokes the project's API keys and
+//! sessions.
 
 use std::sync::Arc;
 
@@ -14,7 +12,9 @@ use crate::api::encoding::encode;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{Project, ProjectListParams, StringOrUuid};
+use crate::api::schemas::{
+    Project, ProjectCreateParams, ProjectListParams, ProjectUpdateParams, StringOrUuid,
+};
 
 /// `client.projects` namespace. Holds a CP-bound HTTP client.
 #[derive(Clone)]
@@ -39,7 +39,34 @@ impl Projects {
     pub async fn get(&self, project: impl Into<StringOrUuid>) -> ApiResult<Project> {
         #[derive(Serialize)]
         struct Q {}
-        let path = format!("/v1/projects/{}", encode(&project.into().to_string()));
-        self.http.get_json(&path, &Q {}).await
+        self.http
+            .get_json(&project_path(project.into()), &Q {})
+            .await
     }
+
+    /// `POST /v1/projects` — on a deployment that can take new projects, and
+    /// within the plan's project limit (403 past it).
+    pub async fn create(&self, params: &ProjectCreateParams) -> ApiResult<Project> {
+        self.http.post_json("/v1/projects", params).await
+    }
+
+    /// `PATCH /v1/projects/{project}`.
+    pub async fn update(
+        &self,
+        project: impl Into<StringOrUuid>,
+        params: &ProjectUpdateParams,
+    ) -> ApiResult<Project> {
+        self.http
+            .patch_json(&project_path(project.into()), params)
+            .await
+    }
+
+    /// `DELETE /v1/projects/{project}`.
+    pub async fn delete(&self, project: impl Into<StringOrUuid>) -> ApiResult<()> {
+        self.http.delete_empty(&project_path(project.into())).await
+    }
+}
+
+fn project_path(project: StringOrUuid) -> String {
+    format!("/v1/projects/{}", encode(&project.to_string()))
 }

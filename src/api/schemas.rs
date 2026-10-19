@@ -3607,6 +3607,1109 @@ pub struct ConnectPage {
     pub expires_at: Option<String>,
 }
 
+// ----- project administration (CP) ------------------------------------------
+//
+// API keys, Applications, credentials, variables, integrations, judges,
+// projects and the signed-in member (`/v1/oidc/me`). Each route needs an org
+// credential carrying its `*:read` / `*:write` / `*:delete` scope; a project
+// API key carries none of them.
+
+/// A plaintext secret the API returns once or takes on write. `Debug` prints
+/// `<redacted>`, so logging a request or response never leaks it; read it with
+/// [`Secret::expose`].
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The plaintext.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Secret(<redacted>)")
+    }
+}
+
+impl From<String> for Secret {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for Secret {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+/// The `?project=` selector most project-scoped Control Plane routes take: a
+/// slug or id, needed only when the credential does not already name one.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProjectSelector {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+}
+
+impl ProjectSelector {
+    pub fn new(project: Option<StringOrUuid>) -> Self {
+        Self { project }
+    }
+}
+
+// api keys
+
+open_wire_enum! {
+    /// What a project API key may do beyond the runner set.
+    pub enum ApiKeyCapability {
+        Runtimes => "runtimes",
+        Evals => "evals",
+    }
+}
+
+open_wire_enum! {
+    pub enum ApiKeyStatus {
+        Active => "active",
+        /// Deleted with a grace period: still valid until `expires_at`.
+        Rotating => "rotating",
+        Expired => "expired",
+        Revoked => "revoked",
+    }
+}
+
+/// A project API key. The plaintext key is never readable after create; see
+/// [`ApiKeyCreated`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApiKey {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub environment: Lane,
+    #[serde(default)]
+    pub allow: Vec<ApiKeyCapability>,
+    pub scope: String,
+    /// The agent member the key acts as, when it is not the default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    pub key_prefix: String,
+    pub key_suffix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redacted_key: Option<String>,
+    pub status: ApiKeyStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    /// Set once [`crate::ApiKeys::acknowledge`] records the key as saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acknowledged_at: Option<String>,
+    pub key_display: String,
+    pub prefix: String,
+}
+
+/// Response of `POST /v1/api-keys`: the key, plus its plaintext — the only
+/// time the API returns it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApiKeyCreated {
+    #[serde(flatten)]
+    pub key: ApiKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<Secret>,
+}
+
+/// Filters supported by `GET /v1/api-keys`. Not paginated.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApiKeyListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    /// Only keys close to expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiring: Option<bool>,
+}
+
+/// Body of `POST /v1/api-keys`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApiKeyCreateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Defaults to `production`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow: Option<Vec<ApiKeyCapability>>,
+    /// Act as this external-credential agent rather than the default one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
+/// Body of `PATCH /v1/api-keys/{id}`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApiKeyUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow: Option<Vec<ApiKeyCapability>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+}
+
+/// Query of `DELETE /v1/api-keys/{id}`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApiKeyDeleteParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    /// Keep the key working this many more seconds (a rotation); `None` or `0`
+    /// revokes it at once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<u64>,
+}
+
+/// Response of `POST /v1/api-keys/{id}/acknowledge`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApiKeyAcknowledgement {
+    pub acknowledged: bool,
+}
+
+// applications
+
+open_wire_enum! {
+    pub enum ApplicationType {
+        Native => "native",
+        Spa => "spa",
+        Jwks => "jwks",
+        ServiceAccount => "service_account",
+    }
+}
+
+open_wire_enum! {
+    pub enum ApplicationGrant {
+        AuthorizationCode => "authorization_code",
+        RefreshToken => "refresh_token",
+        ClientCredentials => "client_credentials",
+        DeviceCode => "device_code",
+        EmailCode => "email_code",
+    }
+}
+
+/// An OAuth client registered in a project.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Application {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub name: String,
+    pub application_type: ApplicationType,
+    pub environment: Lane,
+    #[serde(default)]
+    pub redirect_uris: Vec<String>,
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    #[serde(default)]
+    pub allowed_scopes: Vec<String>,
+    pub client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub allowed_grants: Vec<ApplicationGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    pub created_by_member_id: Uuid,
+}
+
+/// Filters supported by `GET /v1/applications`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApplicationListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+}
+
+/// Body of `POST /v1/applications`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ApplicationCreateParams {
+    pub name: String,
+    pub application_type: ApplicationType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_uris: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_origins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_scopes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_member_id: Option<Uuid>,
+}
+
+impl ApplicationCreateParams {
+    pub fn new(name: impl Into<String>, application_type: ApplicationType) -> Self {
+        Self {
+            name: name.into(),
+            application_type,
+            environment: None,
+            redirect_uris: None,
+            allowed_origins: None,
+            allowed_scopes: None,
+            agent_member_id: None,
+        }
+    }
+}
+
+/// Body of `PATCH /v1/applications/{id}`. A list replaces the whole value.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApplicationUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_uris: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_origins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_scopes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_member_id: Option<Uuid>,
+}
+
+open_wire_enum! {
+    pub enum ApplicationIdpProvider {
+        Auth0 => "auth0",
+        Okta => "okta",
+        Supabase => "supabase",
+        Neon => "neon",
+        Generic => "generic",
+        Zitadel => "zitadel",
+    }
+}
+
+open_wire_enum! {
+    pub enum ApplicationIdpStatus {
+        Pending => "pending",
+        Active => "active",
+        Failed => "failed",
+    }
+}
+
+/// An identity provider brokered into an Application, whose users sign in as
+/// customer members.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApplicationIdp {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub application_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub idp_provider: ApplicationIdpProvider,
+    pub issuer: String,
+    pub client_id: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_org_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_idp_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience_client_id: Option<String>,
+    pub status: ApplicationIdpStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<Secret>,
+    pub is_active: bool,
+}
+
+/// Body of `POST /v1/applications/{id}/idps`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApplicationIdpCreateParams {
+    /// Defaults to `generic`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idp_provider: Option<ApplicationIdpProvider>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<Secret>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audience_client_id: Option<String>,
+}
+
+open_wire_enum! {
+    pub enum ApplicationSecretStatus {
+        Active => "active",
+        Disabled => "disabled",
+        Expired => "expired",
+    }
+}
+
+/// A client secret of a confidential Application. `secret` is set only on the
+/// create response.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApplicationSecret {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub application_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub secret_prefix: String,
+    pub secret_suffix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    pub created_by_member_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<Secret>,
+    pub status: ApplicationSecretStatus,
+}
+
+/// Body of `POST /v1/applications/{id}/secrets`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApplicationSecretCreateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// A signing key of a `jwks` Application: the public half, published at the
+/// Application's JWKS URL.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApplicationKey {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub application_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub kid: String,
+    pub algorithm: String,
+    pub public_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_member_id: Option<Uuid>,
+}
+
+// credentials and variables
+
+/// A runtime credential. The secret is write-only: reads report only whether
+/// one is set and a display hint.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Credential {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    /// `None` applies to every lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+    #[serde(default)]
+    pub has_secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_display: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_set_at: Option<String>,
+    pub created_by_member_id: Uuid,
+}
+
+/// Filters supported by `GET /v1/credentials` and `GET /v1/variables`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RuntimeSettingListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    /// A runtime slug.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+}
+
+/// Body of `POST /v1/credentials`. With neither `runtime_id` nor
+/// `runtime_group_id` the credential is project-wide.
+#[derive(Debug, Clone, Serialize)]
+pub struct CredentialCreateParams {
+    pub name: String,
+    pub secret: Secret,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+}
+
+impl CredentialCreateParams {
+    pub fn new(name: impl Into<String>, secret: impl Into<Secret>) -> Self {
+        Self {
+            name: name.into(),
+            secret: secret.into(),
+            runtime_id: None,
+            runtime_group_id: None,
+            environment: None,
+        }
+    }
+}
+
+/// Body of `PATCH /v1/credentials/{id}`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CredentialUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret: Option<Secret>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+}
+
+open_wire_enum! {
+    pub enum VariableKind {
+        /// A plain value, returned on read.
+        Value => "value",
+        /// A reference to a credential by name.
+        Credential => "credential",
+    }
+}
+
+/// A runtime environment variable.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Variable {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub name: String,
+    pub kind: VariableKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+    pub created_by_member_id: Uuid,
+}
+
+/// Body of `POST /v1/variables`.
+#[derive(Debug, Clone, Serialize)]
+pub struct VariableCreateParams {
+    pub name: String,
+    /// Defaults to `value`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<VariableKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+}
+
+impl VariableCreateParams {
+    /// A plain `value` variable.
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            kind: None,
+            value: Some(value.into()),
+            runtime_id: None,
+            runtime_group_id: None,
+            environment: None,
+        }
+    }
+}
+
+/// Body of `PATCH /v1/variables/{id}`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VariableUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<VariableKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Lane>,
+}
+
+// integrations
+
+open_wire_enum! {
+    pub enum IntegrationType {
+        Github => "github",
+        Slack => "slack",
+        Linear => "linear",
+        Jira => "jira",
+        Notion => "notion",
+        Vercel => "vercel",
+        Custom => "custom",
+    }
+}
+
+open_wire_enum! {
+    pub enum IntegrationStatus {
+        Pending => "pending",
+        Active => "active",
+        Error => "error",
+        Disabled => "disabled",
+    }
+}
+
+/// The org's own install of a provider (a GitHub App installation, a Slack
+/// workspace). At most one live integration per type per org.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Integration {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(rename = "type")]
+    pub integration_type: IntegrationType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The provider's id for the install, set once it is activated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
+    pub status: IntegrationStatus,
+    pub created_by_member_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Body of `POST /v1/integrations`. The row is always created `pending`; the
+/// provider's activation flow then sets `external_id` with an update.
+#[derive(Debug, Clone, Serialize)]
+pub struct IntegrationCreateParams {
+    #[serde(rename = "type")]
+    pub integration_type: IntegrationType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
+}
+
+impl IntegrationCreateParams {
+    pub fn new(integration_type: IntegrationType) -> Self {
+        Self {
+            integration_type,
+            name: None,
+            external_id: None,
+        }
+    }
+}
+
+/// Body of `PATCH /v1/integrations/{id}`. `code` and `redirect_uri` complete
+/// a provider's OAuth activation.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct IntegrationUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<IntegrationStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<Secret>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+    /// Only `false` is accepted: turns Slack interactivity off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slack_interactivity_enabled: Option<bool>,
+}
+
+// judges
+
+/// A judge a Recipe declares. Its definition is authored in the Recipe; only
+/// `enabled` and `sample_rate` are operational and changeable here.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Judge {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub runtime_group_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub enabled: bool,
+    pub sample_rate: f64,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_git_commit_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    pub definition_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_member_id: Option<Uuid>,
+}
+
+/// Filters supported by `GET /v1/judges`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct JudgeListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_group_id: Option<Uuid>,
+}
+
+/// Body of `PATCH /v1/judges/{id}`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct JudgeUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// The fraction of conversations judged, `0.0`–`1.0`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_rate: Option<f64>,
+}
+
+// projects
+
+/// The prefix of each display id (`T-12`) a project mints.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DisplayIdPrefixes {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issue: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+}
+
+/// Body of `POST /v1/projects`. `slug` is derived from `name` when omitted.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectCreateParams {
+    pub name: String,
+    pub deployment_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_id_prefixes: Option<DisplayIdPrefixes>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl ProjectCreateParams {
+    pub fn new(name: impl Into<String>, deployment_id: Uuid) -> Self {
+        Self {
+            name: name.into(),
+            deployment_id,
+            slug: None,
+            description: None,
+            display_id_prefixes: None,
+            settings: None,
+        }
+    }
+}
+
+/// Body of `PATCH /v1/projects/{project}`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProjectUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_id_prefixes: Option<DisplayIdPrefixes>,
+    /// Replaces the settings map wholesale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<HashMap<String, serde_json::Value>>,
+}
+
+// signed-in member
+
+/// A feature flag's resolved value.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum FeatureFlagValue {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+}
+
+/// Response of `GET /v1/oidc/me`: who the credential is.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Me {
+    #[serde(default = "default_true")]
+    pub authenticated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
+    #[serde(default)]
+    pub feature_flags: HashMap<String, FeatureFlagValue>,
+    /// Set while an operator impersonates this member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impersonating_member_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impersonator_email: Option<String>,
+}
+
+// ----- images (DP) -----------------------------------------------------------
+
+open_wire_enum! {
+    /// What produced an image.
+    pub enum ImageKind {
+        /// A Recipe bake.
+        Runtime => "runtime",
+        /// A caller's `POST /v1/images`.
+        Service => "service",
+    }
+}
+
+open_wire_enum! {
+    pub enum ImageStatus {
+        Queued => "queued",
+        Building => "building",
+        Ready => "ready",
+        Failed => "failed",
+        Cancelled => "cancelled",
+        Evicted => "evicted",
+    }
+}
+
+open_wire_enum! {
+    pub enum ImageScanStatus {
+        Pending => "pending",
+        Passed => "passed",
+        Findings => "findings",
+        Failed => "failed",
+        Skipped => "skipped",
+    }
+}
+
+open_wire_enum! {
+    pub enum ImageSourceKind {
+        Context => "context",
+        Mirror => "mirror",
+        Bake => "bake",
+    }
+}
+
+/// An image in the plane's registry, which is what an eval task's compose
+/// services run as.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Image {
+    pub id: Uuid,
+    pub kind: ImageKind,
+    pub name: String,
+    /// What the create dedupes on: a repeat create of the same content
+    /// returns this row.
+    pub content_id: String,
+    pub source_kind: ImageSourceKind,
+    pub source: HashMap<String, serde_json::Value>,
+    pub build_platform: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_image_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_image_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_artifacts: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_image_name: Option<String>,
+    pub status: ImageStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_status: Option<ImageScanStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanned_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_db_built_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_summary: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_report_file_id: Option<Uuid>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evicted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retired_at: Option<String>,
+}
+
+impl Image {
+    /// The digest-pinned reference a compose service names, once ready.
+    pub fn pull_reference(&self) -> Option<String> {
+        match (&self.image_ref, &self.image_digest) {
+            (Some(image_ref), Some(digest)) => Some(format!("{image_ref}@{digest}")),
+            _ => None,
+        }
+    }
+}
+
+/// Filters supported by `GET /v1/images`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ImageListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ImageKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<ImageStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
+}
+
+/// Where an image's bytes come from.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImageSource {
+    /// Build from a Dockerfile inside a `.tar.gz` uploaded through the Files
+    /// API.
+    Context {
+        file_id: Uuid,
+        /// A path inside the archive; defaults to `Dockerfile`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dockerfile: Option<String>,
+        /// `linux/amd64` or `linux/arm64`; defaults to the plane's sandbox
+        /// platform.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        platform: Option<String>,
+    },
+    /// Copy an upstream image, pinned by digest (`…@sha256:…`), into the
+    /// plane's registry.
+    Mirror { reference: String },
+}
+
+/// Where a Recipe publish built an image from, and the compose service it
+/// runs as.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ImageProvenance {
+    /// The compose service name, a DNS label.
+    pub service: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Body of `POST /v1/images`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageCreate {
+    /// Lowercase path segments, e.g. `hello-mcp/mcp-server`.
+    pub name: String,
+    pub source: ImageSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ImageProvenance>,
+    /// Ask for (`true`) or opt out of (`false`) a vulnerability scan within
+    /// what the plane's policy allows; `None` takes the policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scan: Option<bool>,
+}
+
+impl ImageCreate {
+    pub fn new(name: impl Into<String>, source: ImageSource) -> Self {
+        Self {
+            name: name.into(),
+            source,
+            provenance: None,
+            scan: None,
+        }
+    }
+}
+
+// ----- task commands (DP) ----------------------------------------------------
+
+open_wire_enum! {
+    pub enum TaskCommandKind {
+        Exec => "exec",
+        Upload => "upload",
+        Download => "download",
+    }
+}
+
+open_wire_enum! {
+    pub enum TaskCommandStatus {
+        Queued => "queued",
+        Running => "running",
+        Completed => "completed",
+        Failed => "failed",
+    }
+}
+
+impl TaskCommandStatus {
+    /// Whether the command has finished, either way.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
+    }
+}
+
+/// A command against an eval task's live sandbox. `service` names a compose
+/// service; `None` (or `main`) is the agent's own container.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskCommandSpec {
+    /// Run an argv (never a shell string) and record its exit and output.
+    Exec {
+        command: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+        /// Defaults to 300.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        service: Option<String>,
+    },
+    /// Copy a Files API object to an absolute `path` inside the sandbox.
+    Upload { file_id: Uuid, path: String },
+    /// Copy the file at an absolute `path` out into a new Files API object,
+    /// reported as [`TaskCommand::output_file_id`].
+    Download {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        service: Option<String>,
+    },
+}
+
+impl TaskCommandSpec {
+    /// An `exec` of `command` in the agent's container, with the defaults.
+    pub fn exec<I, S>(command: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::Exec {
+            command: command.into_iter().map(Into::into).collect(),
+            cwd: None,
+            timeout_seconds: None,
+            service: None,
+        }
+    }
+}
+
+/// A recorded command and, once terminal, its outcome.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TaskCommand {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub kind: TaskCommandKind,
+    /// The spec as the API normalized it.
+    pub spec: HashMap<String, serde_json::Value>,
+    pub status: TaskCommandStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_file_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+}
+
+/// Filters supported by `GET /v1/tasks/{id}/commands`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TaskCommandListParams {
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<TaskCommandStatus>,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing
