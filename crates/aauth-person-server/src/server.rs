@@ -1059,7 +1059,7 @@ impl PersonServer {
     ) -> Approval {
         let created = self.now();
         Approval {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: uuid::Uuid::now_v7().to_string(),
             kind,
             status: ApprovalStatus::Pending,
             agent,
