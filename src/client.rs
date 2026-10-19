@@ -27,7 +27,7 @@ use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
     Annotations, Automations, Connectors, Endpoints, ExperimentHandle, Experiments,
-    MemberConnections, Members, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
+    MemberConnections, Members, Projects, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
 };
 use crate::types::{self, ClientConfig};
 
@@ -73,6 +73,7 @@ pub struct IntrospectionClient {
     connectors: Connectors,
     endpoints: Endpoints,
     members: Members,
+    projects: Projects,
     annotations: Annotations,
     tags: Tags,
     dp_http: Arc<HttpClient>,
@@ -149,6 +150,7 @@ impl IntrospectionClient {
             connectors: Connectors::new(cp_http.clone()),
             endpoints: Endpoints::new(cp_http.clone()),
             members: Members::new(cp_http.clone()),
+            projects: Projects::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             tags: Tags::new(dp_http.clone()),
             dp_http,
@@ -196,6 +198,11 @@ impl IntrospectionClient {
     /// and `metadata` labels on a member.
     pub fn members(&self) -> &Members {
         &self.members
+    }
+
+    /// `GET /v1/projects` — the org's projects, read-only.
+    pub fn projects(&self) -> &Projects {
+        &self.projects
     }
 
     /// Data Plane `/v1/tasks`, with each task's runs under `.runs`.
