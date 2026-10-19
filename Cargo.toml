@@ -1,3 +1,32 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+
+# Shared by the AAuth crates; introspection-sdk declares its own.
+[workspace.package]
+edition = "2021"
+rust-version = "1.89"
+license = "Apache-2.0"
+repository = "https://github.com/introspection-org/introspection-rust-sdk"
+keywords = ["aauth", "oauth", "agents", "http-signatures", "authorization"]
+categories = ["authentication", "web-programming", "cryptography"]
+
+[workspace.dependencies]
+aauth-protocol = { path = "crates/aauth-protocol", version = "0.1.0", default-features = false }
+async-trait = "0.1"
+base64 = "0.22"
+bytes = "1"
+ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem"] }
+getrandom = "0.3"
+hmac = "0.12"
+http = "1"
+ipnet = "2"
+p256 = { version = "0.13", features = ["ecdsa"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "net", "io-util", "sync"] }
+url = "2"
+uuid = { version = "1.22", features = ["v4"] }

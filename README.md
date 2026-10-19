@@ -650,6 +650,15 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 - [Rust SDK reference](https://docs.introspection.dev/sdk/rust/reference)
 - [Authentication](https://docs.introspection.dev/sdk/authentication)
 
+## Also in this repository
+
+Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth), the protocol Introspection's egress uses when an agent acts for a person:
+
+- [`aauth-protocol`](crates/aauth-protocol): HTTP Message Signatures under the AAuth profile, agent, person and auth tokens, key discovery, and an agent-side Person Server client.
+- [`aauth-person-server`](crates/aauth-person-server): a Person Server you can run, for missions, budgets and approvals.
+
+Neither depends on this SDK.
+
 ## License
 
 Apache-2.0

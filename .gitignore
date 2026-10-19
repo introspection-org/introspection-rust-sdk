@@ -22,3 +22,7 @@ Cargo.lock
 # env
 .env
 .claude/
+
+# The AAuth interop suite's JavaScript dependencies
+node_modules/
+package-lock.json
