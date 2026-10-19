@@ -82,6 +82,9 @@ impl Serialize for StringOrUuid {
 pub enum TaskKind {
     #[default]
     Agent,
+    /// The agent shape run as an evaluation trial; the only kind that takes
+    /// task commands.
+    Eval,
     Process,
     /// Forward-compatible escape hatch for kinds the DP adds later.
     Other(String),
@@ -92,6 +95,7 @@ impl TaskKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Agent => "agent",
+            Self::Eval => "eval",
             Self::Process => "process",
             Self::Other(s) => s,
         }
@@ -102,6 +106,7 @@ impl From<&str> for TaskKind {
     fn from(s: &str) -> Self {
         match s {
             "agent" => Self::Agent,
+            "eval" => Self::Eval,
             "process" => Self::Process,
             other => Self::Other(other.to_string()),
         }
@@ -359,6 +364,13 @@ pub struct TaskCreate {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    /// `None` is an agent task. [`TaskKind::Eval`] needs the `evals`
+    /// capability; [`TaskKind::Process`] is internal and refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<TaskKind>,
+    /// Consent to `tasks.commands` against the live sandbox; eval tasks only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commands: Option<bool>,
     /// Recipe agent to run; `None` uses the recipe default (`agents/agent.yaml`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
@@ -6311,7 +6323,11 @@ mod tests {
 
     #[test]
     fn task_kind_round_trips_known_variants() {
-        for (wire, kind) in [("agent", TaskKind::Agent), ("process", TaskKind::Process)] {
+        for (wire, kind) in [
+            ("agent", TaskKind::Agent),
+            ("eval", TaskKind::Eval),
+            ("process", TaskKind::Process),
+        ] {
             let parsed: TaskKind = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
             assert_eq!(parsed, kind);
             assert_eq!(

@@ -224,7 +224,8 @@ pub const MAX_COMMAND_WAIT_SECONDS: u32 = 25;
 /// returns it `queued`, and [`Self::get`] reads its outcome, optionally
 /// holding the read until it finishes. Eval tasks only, behind `tasks:exec`
 /// (an org admin or owner, or the `operator` role), on a plane with evals
-/// enabled.
+/// enabled; create the task with [`crate::TaskKind::Eval`] and
+/// [`TaskCreate::commands`] set.
 #[derive(Clone)]
 pub struct TaskCommands {
     http: Arc<HttpClient>,
