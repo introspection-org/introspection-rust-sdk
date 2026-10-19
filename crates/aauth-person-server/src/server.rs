@@ -860,8 +860,10 @@ impl PersonServer {
         let resource = trim(unverified.claim_str("iss").unwrap_or_default()).to_string();
         // The mission's approved resources are the only issuers whose keys are fetched.
         let tenant = tenant_of(params);
-        // The presented token names the tenant it was issued under.
-        if presented.claim_str("tenant") != tenant {
+        // A tenant the agent names must be the one the presented token was
+        // issued under. Naming none scopes the lookup to no tenant, where
+        // another tenant's mission is not found.
+        if tenant.is_some() && presented.claim_str("tenant") != tenant {
             return Err(invalid("tenant does not match the presented token"));
         }
         let mission = match unverified.claim_str("mission_s256") {

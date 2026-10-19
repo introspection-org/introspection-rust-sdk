@@ -36,8 +36,11 @@ impl Directory for People {
             "user:dana@acme.example" => ("dana", "Dana"),
             _ => return None,
         };
+        // As a company's own directory does: its people are its tenant's,
+        // whether or not the agent names one.
         Some(Person {
             name: Some(name.into()),
+            tenant: Some("acme".into()),
             ..Person::new(id)
         })
     }
@@ -1056,6 +1059,13 @@ async fn each_tenant_keeps_its_own_missions() {
     let (status, body, _) = charge("globex").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"], "invalid_resource_token");
+    let (status, body, _) = charge("").await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "naming no tenant finds no tenant's mission: {body}"
+    );
+    assert_eq!(body["error"], "mission_not_found");
     let (status, body, _) = charge("acme").await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
