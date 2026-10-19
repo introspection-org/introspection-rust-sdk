@@ -182,3 +182,34 @@ impl Store for MemoryStore {
         self.with(|s| s.approvals.values().cloned().collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mission(person: &str) -> Mission {
+        Mission {
+            s256: "h".into(),
+            mission: "{}".into(),
+            agent_id: "aauth:travel@agents.example".into(),
+            person: Person::new(person),
+            resources: Vec::new(),
+            budget: None,
+            spent: 0,
+            log: Vec::new(),
+            expires_at: i64::MAX,
+            completed_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_mission_is_never_replaced() {
+        let store = MemoryStore::default();
+        assert!(store.insert_mission(&mission("sam")).await);
+        store.end_mission("h", 10).await;
+        assert!(!store.insert_mission(&mission("dana")).await);
+        let kept = store.mission("h").await.unwrap();
+        assert_eq!(kept.person.id, "sam");
+        assert_eq!(kept.completed_at, Some(10));
+    }
+}

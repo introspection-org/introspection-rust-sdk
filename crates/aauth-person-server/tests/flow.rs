@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use aauth_person_server::{
-    Approval, ApprovalKind, ApprovalStatus, Config, Decision, Directory, Hooks, Person,
-    PersonServer,
+    Approval, ApprovalKind, ApprovalStatus, Config, Decision, Directory, Hooks, LogEntry,
+    MemoryStore, Mission, Person, PersonServer, Spend, Store,
 };
 use aauth_protocol::discovery::{JwksResolver, StaticFetch};
 use aauth_protocol::httpsig::{sign_jwt, Outgoing};
@@ -73,6 +73,10 @@ struct TestAgent {
 
 impl World {
     fn new() -> Self {
+        Self::with_store(None)
+    }
+
+    fn with_store(store: Option<Arc<dyn Store>>) -> Self {
         let ap = SigningKey::generate();
         let resource_key = SigningKey::generate();
         let ps_key = SigningKey::generate();
@@ -104,8 +108,12 @@ impl World {
         let clock = Arc::new(AtomicI64::new(T0));
         let seen = Seen::default();
         let now = clock.clone();
+        let mut config = Config::new(PS, People, [AP]);
+        if let Some(store) = store {
+            config = config.store(store);
+        }
         let ps = PersonServer::new(
-            Config::new(PS, People, [AP])
+            config
                 .signing_key(ps_key)
                 .subject_secret("test-secret")
                 .admin_token("admin")
@@ -823,4 +831,82 @@ async fn identical_missions_approved_together_stay_apart() {
     let still = world.ps.terminate(&sams).await.unwrap();
     assert_eq!(still.person.id, "sam");
     assert_eq!(still.completed_at, ended.completed_at);
+}
+
+/// A store whose next approval transition loses, as when another decision
+/// lands between this one's read and its write.
+#[derive(Default)]
+struct LosesNextTransition {
+    inner: MemoryStore,
+    lose: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl Store for LosesNextTransition {
+    async fn binding(&self, jkt: &str) -> Option<Person> {
+        self.inner.binding(jkt).await
+    }
+    async fn bind(&self, jkt: &str, person: &Person) -> Person {
+        self.inner.bind(jkt, person).await
+    }
+    async fn mission(&self, s256: &str) -> Option<Mission> {
+        self.inner.mission(s256).await
+    }
+    async fn insert_mission(&self, mission: &Mission) -> bool {
+        self.inner.insert_mission(mission).await
+    }
+    async fn log_mission(&self, s256: &str, entry: LogEntry, now: i64) -> bool {
+        self.inner.log_mission(s256, entry, now).await
+    }
+    async fn end_mission(&self, s256: &str, at: i64) -> Option<Mission> {
+        self.inner.end_mission(s256, at).await
+    }
+    async fn spend(&self, s256: &str, amount: u64, rule: Spend, now: i64) -> Option<Mission> {
+        self.inner.spend(s256, amount, rule, now).await
+    }
+    async fn missions(&self) -> Vec<Mission> {
+        self.inner.missions().await
+    }
+    async fn approval(&self, id: &str) -> Option<Approval> {
+        self.inner.approval(id).await
+    }
+    async fn insert_approval(&self, approval: &Approval) {
+        self.inner.insert_approval(approval).await
+    }
+    async fn transition_approval(&self, expected: ApprovalStatus, next: &Approval) -> bool {
+        !self.lose.swap(false, Ordering::SeqCst)
+            && self.inner.transition_approval(expected, next).await
+    }
+    async fn approvals(&self) -> Vec<Approval> {
+        self.inner.approvals().await
+    }
+}
+
+#[tokio::test]
+async fn a_decision_that_loses_the_race_ends_the_mission_it_made() {
+    let store = Arc::new(LosesNextTransition::default());
+    let world = World::with_store(Some(store.clone()));
+    world
+        .call(
+            &world.agent(),
+            Method::POST,
+            &format!("{PS}/mission"),
+            Some(json!({ "description": "Sydney", "resources": [BOOKING], "login_hint": "user:sam@acme.example" })),
+        )
+        .await;
+    let id = world.last_approval().id;
+    store.lose.store(true, Ordering::SeqCst);
+    let lost = world.ps.decide(&id, Decision::approve()).await.unwrap_err();
+    assert_eq!(lost.status, StatusCode::CONFLICT);
+    let missions = store.missions().await;
+    assert_eq!(missions.len(), 1);
+    assert!(
+        missions[0].completed_at.is_some(),
+        "the mission it made is ended"
+    );
+    assert_eq!(
+        store.approval(&id).await.unwrap().status,
+        ApprovalStatus::Pending,
+        "the decision did not land"
+    );
 }
