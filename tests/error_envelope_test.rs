@@ -41,7 +41,7 @@ const ROUTE: &str = "/v1/runtimes/11111111-1111-4111-8111-111111111111";
 async fn get_error(server: &MockServer) -> IntrospectionAPIError {
     client(server)
         .runtimes()
-        .get(RUNTIME_ID, "proj")
+        .get(RUNTIME_ID, Some("proj".into()))
         .await
         .expect_err("the mock only answers with errors")
 }
@@ -176,7 +176,7 @@ async fn a_caller_supplied_user_agent_is_not_overwritten() {
             .unwrap(),
     )
     .unwrap();
-    let _ = client.runtimes().get(RUNTIME_ID, "proj").await;
+    let _ = client.runtimes().get(RUNTIME_ID, Some("proj".into())).await;
 
     let request = &server.received_requests().await.unwrap()[0];
     assert_eq!(

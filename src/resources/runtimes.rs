@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::api::encoding::encode;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
@@ -31,25 +32,16 @@ impl Runtimes {
             .expect("RuntimeListParams must serialize to a JSON object")
     }
 
-    /// `GET /v1/runtimes/{id}?project=...`.
-    pub async fn get(
-        &self,
-        runtime_id: Uuid,
-        project: impl Into<StringOrUuid>,
-    ) -> ApiResult<Runtime> {
+    /// `GET /v1/runtimes/{id}[?project=...]`. `project` is needed only when
+    /// the credential does not already name one; see [`Self::update`].
+    pub async fn get(&self, runtime_id: Uuid, project: Option<StringOrUuid>) -> ApiResult<Runtime> {
         #[derive(Serialize)]
         struct Q {
-            project: StringOrUuid,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            project: Option<StringOrUuid>,
         }
         let path = format!("/v1/runtimes/{}", runtime_id);
-        self.http
-            .get_json(
-                &path,
-                &Q {
-                    project: project.into(),
-                },
-            )
-            .await
+        self.http.get_json(&path, &Q { project }).await
     }
 
     /// `PATCH /v1/runtimes/{id}` — steer the group's lanes, yank or restore
@@ -78,7 +70,7 @@ impl Runtimes {
         let mut path = format!("/v1/runtimes/{}", runtime_id);
         if let Some(project) = project {
             path.push_str("?project=");
-            path.push_str(&crate::api::encoding::encode(&project.to_string()));
+            path.push_str(&encode(&project.to_string()));
         }
         self.http.patch_json(&path, params).await
     }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use introspection_sdk::api::{HttpClient, HttpConfig};
-use introspection_sdk::{LaneRef, RuntimeLlmMode, RuntimeUpdateParams, Runtimes};
+use introspection_sdk::{Lane, LaneRef, RuntimeLlmMode, RuntimeUpdateParams, Runtimes};
 use serde_json::{json, Value};
 use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
@@ -91,8 +91,8 @@ fn one_map_carries_all_three_lane_states() {
     // because it is absent.
     let params = RuntimeUpdateParams {
         environment_ref: BTreeMap::from([
-            ("production".into(), LaneRef::Ref("main".into())),
-            ("staging".into(), LaneRef::Unpin),
+            (Lane::Staging, LaneRef::Unpin),
+            (Lane::Production, LaneRef::Ref("main".into())),
         ]),
         ..Default::default()
     };
@@ -148,10 +148,10 @@ fn every_field_has_its_wire_name() {
         description: Some(Some("Answers tickets".into())),
         llm_mode: Some(RuntimeLlmMode::Byok),
         config_json: Some(HashMap::from([("timeout".into(), json!(30))])),
-        environment: Some("staging".into()),
+        environment: Some(Lane::Staging),
         yanked: Some(true),
         yanked_reason: Some("bad build".into()),
-        environment_ref: BTreeMap::from([("staging".into(), LaneRef::Ref("main".into()))]),
+        environment_ref: BTreeMap::from([(Lane::Staging, LaneRef::Ref("main".into()))]),
     };
     assert_eq!(
         wire(&params),
@@ -170,10 +170,27 @@ fn every_field_has_its_wire_name() {
 
 #[test]
 fn a_lane_ref_reads_back_from_null_or_a_string() {
-    let lanes: BTreeMap<String, LaneRef> =
+    let lanes: BTreeMap<Lane, LaneRef> =
         serde_json::from_value(json!({"staging": null, "production": "main"})).unwrap();
-    assert_eq!(lanes["staging"], LaneRef::Unpin);
-    assert_eq!(lanes["production"].as_ref_str(), Some("main"));
+    assert_eq!(lanes[&Lane::Staging], LaneRef::Unpin);
+    assert_eq!(lanes[&Lane::Production].git_ref(), Some("main"));
+}
+
+#[test]
+fn a_lane_round_trips_its_wire_value_and_keeps_an_unknown_one() {
+    for (lane, wire_value) in [
+        (Lane::Development, "development"),
+        (Lane::Staging, "staging"),
+        (Lane::Production, "production"),
+        (Lane::Other("canary".into()), "canary"),
+    ] {
+        assert_eq!(serde_json::to_value(&lane).unwrap(), json!(wire_value));
+        assert_eq!(Lane::from(wire_value), lane);
+    }
+    assert_eq!(
+        wire(&RuntimeUpdateParams::unpin(Lane::Production)),
+        wire(&RuntimeUpdateParams::unpin("production"))
+    );
 }
 
 #[tokio::test]

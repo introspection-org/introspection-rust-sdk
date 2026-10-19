@@ -294,7 +294,7 @@ async fn from_service_account_wires_the_minted_token_and_the_minting_host() {
         .runtimes()
         .get(
             "11111111-1111-1111-1111-111111111111".parse().unwrap(),
-            "proj_1",
+            Some("proj_1".into()),
         )
         .await;
 

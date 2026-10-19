@@ -220,7 +220,7 @@ pub use schemas::{
     ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
     FeedbackEvent, FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate,
     FileVersionListParams, HavingTerm, IntrospectionEventName, JudgeGoalComponent, JudgementEvent,
-    JudgementPayload, LaneRef, Member, MemberConnection, MemberConnectionCreate,
+    JudgementPayload, Lane, LaneRef, Member, MemberConnection, MemberConnectionCreate,
     MemberConnectionListParams, MemberCreateParams, MemberListParams, MemberType,
     MemberUpdateParams, MetricDimensionValue, MetricFilter, MetricRow, MetricSpec, MetricValue,
     MetricsConfig, MetricsMeta, MetricsQuery, MetricsResponse, MetricsWindow, ObservationEvent,

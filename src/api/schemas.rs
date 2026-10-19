@@ -1368,6 +1368,73 @@ pub struct RuntimeListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// A runtime group's environment lane: a key of its `environment_ref` map and
+/// of [`RuntimeUpdateParams::environment_ref`].
+///
+/// Ordered by its wire value, so a map of lanes serializes in a stable order.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Lane {
+    Development,
+    Staging,
+    Production,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl Lane {
+    /// The on-the-wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Development => "development",
+            Self::Staging => "staging",
+            Self::Production => "production",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<&str> for Lane {
+    fn from(value: &str) -> Self {
+        match value {
+            "development" => Self::Development,
+            "staging" => Self::Staging,
+            "production" => Self::Production,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for Lane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl PartialOrd for Lane {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Lane {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl Serialize for Lane {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Lane {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(d)?;
+        Ok(Self::from(value.as_str()))
+    }
+}
+
 /// What a `PATCH /v1/runtimes/{id}` does to one lane of the group's
 /// `environment_ref` map.
 ///
@@ -1401,7 +1468,7 @@ pub enum LaneRef {
 
 impl LaneRef {
     /// The ref, or `None` for [`LaneRef::Unpin`].
-    pub fn as_ref_str(&self) -> Option<&str> {
+    pub fn git_ref(&self) -> Option<&str> {
         match self {
             Self::Unpin => None,
             Self::Ref(git_ref) => Some(git_ref),
@@ -1448,14 +1515,14 @@ pub struct RuntimeUpdateParams {
     /// `connectors` entry is validated by the server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_json: Option<HashMap<String, serde_json::Value>>,
-    /// The older way to place a lane on this version. Only `"staging"` is
-    /// accepted (anything else is a 400; production moves through
+    /// The older way to place a lane on this version. Only [`Lane::Staging`]
+    /// is accepted (anything else is a 400; production moves through
     /// [`Self::environment_ref`]). Unless this request also gives the lane a
     /// ref in [`Self::environment_ref`], the server drops the lane from the
     /// group's map and points it at this version; see
     /// [`Self::pin_staging_to_this_version`] for how long that lasts.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
+    pub environment: Option<Lane>,
     /// `true` withdraws this version: it stops resolving as a lane's active
     /// runtime (in-flight sticky runs keep it), running experiments pinned to
     /// it are halted, and every lane it served moves to the newest non-yanked
@@ -1468,11 +1535,11 @@ pub struct RuntimeUpdateParams {
     /// Recorded only with `yanked: Some(true)`; ignored otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub yanked_reason: Option<String>,
-    /// Lane (`"staging"` / `"production"`) to [`LaneRef`], merged per key onto
+    /// Lane to [`LaneRef`], merged per key onto
     /// the group's map. A lane missing here is left as it is. Empty, the field
     /// is not sent.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub environment_ref: BTreeMap<String, LaneRef>,
+    pub environment_ref: BTreeMap<Lane, LaneRef>,
 }
 
 impl RuntimeUpdateParams {
@@ -1480,7 +1547,7 @@ impl RuntimeUpdateParams {
     /// branch or `pr/N` makes the lane follow that ref's newest build; a
     /// commit sha holds it on the version in the request path. See
     /// [`LaneRef::Ref`].
-    pub fn pin_ref(lane: impl Into<String>, git_ref: impl Into<String>) -> Self {
+    pub fn pin_ref(lane: impl Into<Lane>, git_ref: impl Into<String>) -> Self {
         Self {
             environment_ref: BTreeMap::from([(lane.into(), LaneRef::Ref(git_ref.into()))]),
             ..Default::default()
@@ -1492,7 +1559,7 @@ impl RuntimeUpdateParams {
     ///
     /// The runtime in the request path only names the group; the lane moves
     /// to the group's newest default-branch build, not to that runtime.
-    pub fn unpin(lane: impl Into<String>) -> Self {
+    pub fn unpin(lane: impl Into<Lane>) -> Self {
         Self {
             environment_ref: BTreeMap::from([(lane.into(), LaneRef::Unpin)]),
             ..Default::default()
@@ -1509,8 +1576,8 @@ impl RuntimeUpdateParams {
     /// [`Self::pin_ref`]`("staging", sha)` on the version built from `sha`.
     pub fn pin_staging_to_this_version() -> Self {
         Self {
-            environment: Some("staging".into()),
-            environment_ref: BTreeMap::from([("staging".into(), LaneRef::Unpin)]),
+            environment: Some(Lane::Staging),
+            environment_ref: BTreeMap::from([(Lane::Staging, LaneRef::Unpin)]),
             ..Default::default()
         }
     }

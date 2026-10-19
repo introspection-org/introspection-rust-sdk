@@ -145,7 +145,7 @@ pub use api::{
     GenAiInput, GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool,
     GenAiToolCall, GenAiUsage, HavingTerm, IdRef, IntrospectionAPIError, IntrospectionAttributes,
     IntrospectionConversation, IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime,
-    JudgeGoalComponent, JudgementEvent, JudgementPayload, LaneRef, Member, MemberConnection,
+    JudgeGoalComponent, JudgementEvent, JudgementPayload, Lane, LaneRef, Member, MemberConnection,
     MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams, MemberListParams,
     MemberType, MemberUpdateParams, MetricDimensionValue, MetricFilter, MetricRow, MetricSpec,
     MetricValue, Metrics, MetricsConfig, MetricsMeta, MetricsQuery, MetricsResponse, MetricsWindow,
