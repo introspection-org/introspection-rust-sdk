@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -16,11 +17,12 @@ pub enum Spend {
 
 /// Where a Person Server keeps its state.
 ///
-/// Two methods must be atomic, because concurrent requests race on them:
+/// Three methods must be atomic, because concurrent requests race on them:
 /// [`Store::spend`] checks and spends in one step, so two bookings cannot
-/// both fit in what is left; and [`Store::transition_approval`] changes an
+/// both fit in what is left; [`Store::transition_approval`] changes an
 /// approval only from the status it was read in, so a decision, a
-/// withdrawal or a collection happens once.
+/// withdrawal or a collection happens once; and [`Store::insert_mission`]
+/// inserts only when no mission has that hash, so it never replaces one.
 #[async_trait]
 pub trait Store: Send + Sync {
     /// The person an agent key is bound to.
@@ -29,8 +31,9 @@ pub trait Store: Send + Sync {
     async fn bind(&self, jkt: &str, person: &Person) -> Person;
     /// The mission `s256` names.
     async fn mission(&self, s256: &str) -> Option<Mission>;
-    /// Save a newly approved mission.
-    async fn insert_mission(&self, mission: &Mission);
+    /// Save a newly approved mission, unless one with its hash exists.
+    /// Returns whether it did: an existing mission is never replaced.
+    async fn insert_mission(&self, mission: &Mission) -> bool;
     /// Append `entry` to a live mission's log. Returns whether it was live.
     async fn log_mission(&self, s256: &str, entry: LogEntry, now: i64) -> bool;
     /// Mark a mission completed at `at`, unless it already was. Returns the
@@ -103,8 +106,14 @@ impl Store for MemoryStore {
         self.with(|s| s.missions.get(s256).cloned())
     }
 
-    async fn insert_mission(&self, mission: &Mission) {
-        self.with(|s| s.missions.insert(mission.s256.clone(), mission.clone()));
+    async fn insert_mission(&self, mission: &Mission) -> bool {
+        self.with(|s| match s.missions.entry(mission.s256.clone()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(slot) => {
+                slot.insert(mission.clone());
+                true
+            }
+        })
     }
 
     async fn log_mission(&self, s256: &str, entry: LogEntry, now: i64) -> bool {

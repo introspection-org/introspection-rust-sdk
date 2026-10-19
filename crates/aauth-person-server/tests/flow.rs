@@ -791,3 +791,36 @@ async fn an_unsigned_jwks_uri_request_fetches_nothing() {
         "{body}"
     );
 }
+
+#[tokio::test]
+async fn identical_missions_approved_together_stay_apart() {
+    let world = World::new();
+    let propose = |agent: TestAgent, hint: &'static str| {
+        let world = &world;
+        async move {
+            world
+                .call(
+                    &agent,
+                    Method::POST,
+                    &format!("{PS}/mission"),
+                    Some(json!({ "description": "Sydney", "resources": [BOOKING], "login_hint": hint })),
+                )
+                .await;
+            world
+                .ps
+                .decide(&world.last_approval().id, Decision::approve())
+                .await
+                .unwrap()
+                .mission_s256
+                .unwrap()
+        }
+    };
+    // The same agent, description and resources, approved in the same second.
+    let sams = propose(world.agent(), "user:sam@acme.example").await;
+    let ended = world.ps.terminate(&sams).await.unwrap();
+    let danas = propose(world.agent(), "user:dana@acme.example").await;
+    assert_ne!(sams, danas);
+    let still = world.ps.terminate(&sams).await.unwrap();
+    assert_eq!(still.person.id, "sam");
+    assert_eq!(still.completed_at, ended.completed_at);
+}

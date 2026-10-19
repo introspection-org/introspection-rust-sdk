@@ -113,8 +113,9 @@
 //!
 //! - [`MemoryStore`] is one process's memory, and keeps missions and key
 //!   bindings forever. For more than one process, implement [`Store`] on a
-//!   database: its `spend` and `transition_approval` must be atomic, which
-//!   is what makes each budget spend and each decision happen once.
+//!   database: its `spend`, `transition_approval` and `insert_mission` must
+//!   be atomic, which is what makes each budget spend and each decision
+//!   happen once, and keeps one mission from replacing another.
 //! - Bound request bodies before handing them over (the example caps them
 //!   at 256 KiB), and rate-limit in front: this crate does neither.
 //! - Only a trusted agent provider's keys, a mission's resources' keys, and

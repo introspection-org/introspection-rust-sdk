@@ -1219,16 +1219,23 @@ impl PersonServer {
                 )
             })?);
         }
+        // The mission goes in first, so a decision never points at a mission
+        // it did not create.
+        if let Some(mission) = &new_mission {
+            if !self.store.insert_mission(mission).await {
+                return Err(already());
+            }
+        }
         // The transition is the decision: whatever it does happens only once.
         if !self
             .store
             .transition_approval(ApprovalStatus::Pending, &decided)
             .await
         {
+            if let Some(mission) = &new_mission {
+                self.store.end_mission(&mission.s256, now).await;
+            }
             return Err(already());
-        }
-        if let Some(mission) = &new_mission {
-            self.store.insert_mission(mission).await;
         }
         if let Some(mission) = existing {
             if approval.kind == ApprovalKind::Completion {
@@ -1258,7 +1265,9 @@ impl PersonServer {
             .filter_map(|r| r.as_str().map(str::to_string))
             .collect();
         let expires_at = now + self.mission_ttl;
+        // The approval's id makes each mission's hash its own.
         let mut document = json!({
+            "approval": approval.id,
             "agent": approval.agent.id,
             "approved_at": rfc3339(now),
             "expires_at": rfc3339(expires_at),
