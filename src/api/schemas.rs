@@ -4838,7 +4838,9 @@ pub struct RunnerContext {
     pub runtime_group_id: Option<Uuid>,
     #[serde(default)]
     pub experiment_id: Option<Uuid>,
-    pub recipe_id: Uuid,
+    /// `None` for a runtime that pins no Recipe, such as the platform Operator.
+    #[serde(default)]
+    pub recipe_id: Option<Uuid>,
     #[serde(default)]
     pub recipe_repository_id: Option<Uuid>,
     #[serde(default)]
@@ -6469,6 +6471,18 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+        assert_eq!(
+            context.recipe_id.unwrap().to_string(),
+            "00000000-0000-0000-0000-000000000043"
+        );
+
+        let operator: RunnerContext = serde_json::from_value(json!({
+            "runtime_id": "00000000-0000-0000-0000-000000000041",
+            "recipe_id": null,
+            "identity": {}
+        }))
+        .unwrap();
+        assert!(operator.recipe_id.is_none());
     }
 
     #[test]

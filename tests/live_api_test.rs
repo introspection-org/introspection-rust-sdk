@@ -593,8 +593,7 @@ async fn automations_crud_walk() {
         .await
         .expect("update");
     automations.delete(created.id).await.expect("delete");
-    // A deleted automation still reads back by id, but leaves the list and
-    // refuses edits.
+    // A deleted automation leaves the list and answers 404 to a read or an edit.
     let listed = automations
         .list(&AutomationListParams::default())
         .collect_all(PAGES)
@@ -611,8 +610,9 @@ async fn automations_crud_walk() {
                 },
             )
             .await,
-        409,
+        404,
     );
+    assert_status(automations.get(created.id).await, 404);
 }
 
 #[tokio::test]
