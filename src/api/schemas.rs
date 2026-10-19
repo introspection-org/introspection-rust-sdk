@@ -12,7 +12,7 @@
 use serde::de::Deserializer;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use uuid::Uuid;
 
@@ -1366,6 +1366,172 @@ pub struct RuntimeListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// What a `PATCH /v1/runtimes/{id}` does to one lane of the group's
+/// `environment_ref` map.
+///
+/// A lane has three states on the wire, and this type plus its key's presence
+/// in [`RuntimeUpdateParams::environment_ref`] expresses each one:
+///
+/// | in the map              | wire                       | effect                  |
+/// |-------------------------|----------------------------|-------------------------|
+/// | key absent              | (key absent)               | the lane is left as is  |
+/// | [`LaneRef::Unpin`]      | `"staging": null`          | unpinned                |
+/// | [`LaneRef::Ref`]        | `"staging": "pr/12"`       | pinned to that ref      |
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneRef {
+    /// `null`: unpin the lane. The server drops it from the group's map and
+    /// re-points it at the newest non-yanked default-branch build of the
+    /// group, if there is one. From then on each default-branch build moves
+    /// the lane onto itself, and an unpinned staging lane can be claimed by
+    /// the next PR preview that opens.
+    Unpin,
+    /// A git ref: the default branch or another branch name, `pr/N`, or a
+    /// 7-40 character lowercase hex commit sha.
+    ///
+    /// A branch or `pr/N` makes the lane follow that ref: the server points
+    /// it at the newest non-yanked build of the ref now, and each later build
+    /// of the ref advances it. A sha holds the lane on the runtime named in
+    /// the request path (unless that runtime is yanked) until the lane is
+    /// changed again. The server does not check that the sha is that
+    /// runtime's commit, so send it on the version built from the sha.
+    Ref(String),
+}
+
+impl LaneRef {
+    /// The ref, or `None` for [`LaneRef::Unpin`].
+    pub fn as_ref_str(&self) -> Option<&str> {
+        match self {
+            Self::Unpin => None,
+            Self::Ref(git_ref) => Some(git_ref),
+        }
+    }
+}
+
+impl Serialize for LaneRef {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Unpin => s.serialize_none(),
+            Self::Ref(git_ref) => s.serialize_str(git_ref),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LaneRef {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match Option::<String>::deserialize(d)? {
+            None => Self::Unpin,
+            Some(git_ref) => Self::Ref(git_ref),
+        })
+    }
+}
+
+/// `PATCH /v1/runtimes/{id}` body. A field left `None` (or a lane left out of
+/// [`Self::environment_ref`]) is not sent and stays unchanged.
+///
+/// `name`, `description` and `environment_ref` belong to the runtime group, so
+/// they change every version of the Runtime, not only the one in the path.
+/// The other fields apply to that version.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RuntimeUpdateParams {
+    /// Renames the runtime group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `Some(Some(_))` sets the group's description and `Some(None)` sends
+    /// `null`, which clears it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_mode: Option<RuntimeLlmMode>,
+    /// Replaces this version's `config_json` wholesale; it is not merged. Its
+    /// `connectors` entry is validated by the server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_json: Option<HashMap<String, serde_json::Value>>,
+    /// The older way to place a lane on this version. Only `"staging"` is
+    /// accepted (anything else is a 400; production moves through
+    /// [`Self::environment_ref`]). Unless this request also gives the lane a
+    /// ref in [`Self::environment_ref`], the server drops the lane from the
+    /// group's map and points it at this version; see
+    /// [`Self::pin_staging_to_this_version`] for how long that lasts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// `true` withdraws this version: it stops resolving as a lane's active
+    /// runtime (in-flight sticky runs keep it), running experiments pinned to
+    /// it are halted, and every lane it served moves to the newest non-yanked
+    /// default-branch build, with any pin of those lanes cleared. `false`
+    /// restores it and clears `yanked_at` and `yanked_reason`, and each
+    /// unpinned lane returns to the newest default-branch build, which may be
+    /// this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yanked: Option<bool>,
+    /// Recorded only with `yanked: Some(true)`; ignored otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yanked_reason: Option<String>,
+    /// Lane (`"staging"` / `"production"`) to [`LaneRef`], merged per key onto
+    /// the group's map. A lane missing here is left as it is. Empty, the field
+    /// is not sent.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub environment_ref: BTreeMap<String, LaneRef>,
+}
+
+impl RuntimeUpdateParams {
+    /// `{"environment_ref": {lane: git_ref}}`: pin `lane` to `git_ref`. A
+    /// branch or `pr/N` makes the lane follow that ref's newest build; a
+    /// commit sha holds it on the version in the request path. See
+    /// [`LaneRef::Ref`].
+    pub fn pin_ref(lane: impl Into<String>, git_ref: impl Into<String>) -> Self {
+        Self {
+            environment_ref: BTreeMap::from([(lane.into(), LaneRef::Ref(git_ref.into()))]),
+            ..Default::default()
+        }
+    }
+
+    /// `{"environment_ref": {lane: null}}`: unpin `lane` back to the default
+    /// branch. See [`LaneRef::Unpin`].
+    ///
+    /// The runtime in the request path only names the group; the lane moves
+    /// to the group's newest default-branch build, not to that runtime.
+    pub fn unpin(lane: impl Into<String>) -> Self {
+        Self {
+            environment_ref: BTreeMap::from([(lane.into(), LaneRef::Unpin)]),
+            ..Default::default()
+        }
+    }
+
+    /// `{"environment": "staging", "environment_ref": {"staging": null}}`:
+    /// put staging on the version in the request path now.
+    ///
+    /// Staging is left out of the group's map afterwards, which is the
+    /// unpinned state: the next default-branch build moves staging onto
+    /// itself, and a PR preview that opens may claim it. To keep staging on
+    /// one version until it is changed by hand, use
+    /// [`Self::pin_ref`]`("staging", sha)` on the version built from `sha`.
+    pub fn pin_staging_to_this_version() -> Self {
+        Self {
+            environment: Some("staging".into()),
+            environment_ref: BTreeMap::from([("staging".into(), LaneRef::Unpin)]),
+            ..Default::default()
+        }
+    }
+
+    /// `{"yanked": true, "yanked_reason": reason}`: withdraw this version. See
+    /// [`Self::yanked`].
+    pub fn yank(reason: Option<String>) -> Self {
+        Self {
+            yanked: Some(true),
+            yanked_reason: reason,
+            ..Default::default()
+        }
+    }
+
+    /// `{"yanked": false}`: restore a withdrawn version. See [`Self::yanked`].
+    pub fn unyank() -> Self {
+        Self {
+            yanked: Some(false),
+            ..Default::default()
+        }
+    }
 }
 
 // ----- experiments (CP) ------------------------------------------------------
@@ -2906,6 +3072,40 @@ pub struct EndpointListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+// ----- projects (CP) ---------------------------------------------------------
+
+/// A project, as `GET /v1/projects` and `GET /v1/projects/{project}` return
+/// it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Project {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    /// The Data Plane deployment the project lives on.
+    pub deployment_id: Uuid,
+    pub name: String,
+    /// The stable identifier the CLI and dashboard URLs use. The CP declares
+    /// it nullable; a project created before slugs existed may have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_member_id: Option<Uuid>,
+}
+
+/// Filters supported by `GET /v1/projects`. The route lists the projects of
+/// the credential's org.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProjectListParams {
+    /// Only the project with this slug or id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
 }
 
 // ----- automations (DP) ------------------------------------------------------

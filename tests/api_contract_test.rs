@@ -44,7 +44,7 @@
 //! instead of the published one, for the window where an API change has landed
 //! but the reference it generates has not been published yet.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use introspection_sdk::api::schemas::{
     AgentInfo, Automation, AutomationCondition, AutomationConditionType, AutomationCreateParams,
@@ -61,14 +61,15 @@ use introspection_sdk::api::schemas::{
     ConversationSentiment, ConversationStatus, CustomerMemberCreate, Dimension, Endpoint,
     EndpointKind, EndpointListParams, EndpointMetadata, EntityUid, Event, EventListParams,
     ExperimentListParams, ExperimentStatus, FeedbackEvent, FeedbackPayload, File, FileListParams,
-    FileType, FileUpdate, HavingTerm, IntrospectionEventName, Member, MemberCreateParams,
+    FileType, FileUpdate, HavingTerm, IntrospectionEventName, LaneRef, Member, MemberCreateParams,
     MemberListParams, MemberType, MemberUpdateParams, MetricDimensionValue, MetricFilter,
     MetricRow, MetricSpec, MetricValue, MetricsConfig, MetricsMeta, MetricsQuery, MetricsWindow,
-    OrderTerm, PaginationParams, PolicyEntity, RecipeListParams, Repository, RepositoryListParams,
-    RepositoryProvider, RepositoryProvisioningStatus, ResourceShare, RunnerIdentity,
-    RuntimeListParams, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, SortDirection,
-    StringOrUuid, Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams,
-    TaskPrompt, TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
+    OrderTerm, PaginationParams, PolicyEntity, Project, ProjectListParams, RecipeListParams,
+    Repository, RepositoryListParams, RepositoryProvider, RepositoryProvisioningStatus,
+    ResourceShare, RunnerIdentity, RuntimeListParams, RuntimeLlmMode, RuntimeUpdateParams,
+    ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, SortDirection, StringOrUuid,
+    Task, TaskCancelOptions, TaskCreate, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
+    TaskRepoRequest, TaskRunCreate, TaskRunKind, TaskStatus, TimeDimension,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -495,6 +496,36 @@ fn sdk_surface_matches_the_published_reference() {
         limit: Some(1),
         next: Some("cursor".into()),
         filters: None,
+    };
+
+    let runtime_update = RuntimeUpdateParams {
+        name: Some("Support".into()),
+        description: Some(Some("Answers tickets".into())),
+        llm_mode: Some(RuntimeLlmMode::Byok),
+        config_json: Some(HashMap::new()),
+        environment: Some("staging".into()),
+        yanked: Some(true),
+        yanked_reason: Some("bad build".into()),
+        environment_ref: BTreeMap::from([("staging".into(), LaneRef::Ref("main".into()))]),
+    };
+
+    let project_list = ProjectListParams {
+        project: Some("proj".into()),
+        pagination: PaginationParams {
+            limit: Some(1),
+            next: Some("cursor".into()),
+        },
+    };
+
+    let project = Project {
+        id: Uuid::nil(),
+        org_id: Uuid::nil(),
+        deployment_id: Uuid::nil(),
+        name: "Support".into(),
+        slug: Some("support".into()),
+        description: Some("Answers tickets".into()),
+        settings: Some(HashMap::new()),
+        created_by_member_id: Some(Uuid::nil()),
     };
 
     let recipe_list = RecipeListParams {
@@ -1196,6 +1227,33 @@ fn sdk_surface_matches_the_published_reference() {
             &["project_id"],
             "sent as a query parameter the API does not accept",
             "accepted by the API but not exposed here",
+            true,
+        ),
+        compare(
+            "RuntimeUpdate — PATCH /v1/runtimes/{id} body",
+            wire_fields(&runtime_update),
+            schema_properties(&cp_spec, "RuntimeUpdate"),
+            &[],
+            "sent but not declared by the API",
+            "accepted by the API but unavailable to callers of this SDK",
+            true,
+        ),
+        compare(
+            "project list filters — GET /v1/projects query parameters",
+            wire_fields(&project_list),
+            query_parameters(&cp_spec, "/v1/projects", "get"),
+            &[],
+            "sent as a query parameter the API does not accept",
+            "accepted by the API but not exposed here",
+            true,
+        ),
+        compare(
+            "Project — the project read model",
+            wire_fields(&project),
+            schema_properties(&cp_spec, "ProjectResponse"),
+            &[],
+            "declared here but not returned by the API",
+            "returned by the API but not surfaced by this SDK",
             true,
         ),
         compare(

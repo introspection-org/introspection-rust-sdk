@@ -1,4 +1,4 @@
-//! `client.runtimes` (CP) — read, resolve, and run runtimes.
+//! `client.runtimes` (CP) — read, resolve, update, and run runtimes.
 
 use std::sync::Arc;
 
@@ -8,7 +8,9 @@ use uuid::Uuid;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{RunRequest, RunnerSpec, Runtime, RuntimeListParams, StringOrUuid};
+use crate::api::schemas::{
+    RunRequest, RunnerSpec, Runtime, RuntimeListParams, RuntimeUpdateParams, StringOrUuid,
+};
 use crate::runner::{Runner, RunnerSource};
 
 /// `client.runtimes` namespace. Holds a CP-bound HTTP client.
@@ -48,6 +50,32 @@ impl Runtimes {
                 },
             )
             .await
+    }
+
+    /// `PATCH /v1/runtimes/{id}?project=...` — steer the group's lanes, yank
+    /// or restore this version, or edit its settings. Needs `runtimes:write`.
+    ///
+    /// Only the fields set on `params` are sent; the rest stay unchanged.
+    /// Lanes move through [`RuntimeUpdateParams::environment_ref`]; the
+    /// constructors [`RuntimeUpdateParams::pin_ref`],
+    /// [`RuntimeUpdateParams::unpin`],
+    /// [`RuntimeUpdateParams::pin_staging_to_this_version`],
+    /// [`RuntimeUpdateParams::yank`] and [`RuntimeUpdateParams::unyank`]
+    /// build the common requests. A malformed ref or an `environment` other
+    /// than `staging` answers 400, an unknown id 404, and a concurrent lane
+    /// change 409, which is safe to retry.
+    pub async fn update(
+        &self,
+        runtime_id: Uuid,
+        project: impl Into<StringOrUuid>,
+        params: &RuntimeUpdateParams,
+    ) -> ApiResult<Runtime> {
+        let path = format!(
+            "/v1/runtimes/{}?project={}",
+            runtime_id,
+            crate::api::encoding::encode(&project.into().to_string())
+        );
+        self.http.patch_json(&path, params).await
     }
 
     /// Look up a runtime by runtime group slug or ID and return a [`RuntimeHandle`].
