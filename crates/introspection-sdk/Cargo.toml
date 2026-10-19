@@ -1,0 +1,141 @@
+[package]
+name = "introspection-sdk"
+version = "0.29.0"
+edition = "2021"
+description = "Rust SDK for Introspection — continuously improve your AI systems with production feedback and frontier practices"
+license = "Apache-2.0"
+repository = "https://github.com/introspection-org/introspection-rust-sdk"
+keywords = ["ai", "llm", "opentelemetry", "otlp", "introspection"]
+categories = ["development-tools", "api-bindings"]
+readme = "../../README.md"
+
+# docs.rs builds with all features so intra-doc links to the
+# `otel`-gated surface (IntrospectionLogs, IntrospectionSpanProcessor)
+# resolve correctly.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# Default: REST-only client (runtimes / experiments / Runner / tasks / files).
+# Add the `otel` feature for the OTLP exporter, `track` / `feedback` /
+# `identify`, and the span processor.
+default = []
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
+# Optional Apache Arrow IPC decode for the runner-scoped Data-Plane telemetry
+# reads (`conversations` / `events`). Off by default so REST-only installs
+# don't pull the (heavy) Arrow dependency tree; enable to use the
+# `list_arrow` variants that request the `application/vnd.apache.arrow.stream`
+# response and decode it into `RecordBatch`es.
+arrow = ["dep:arrow"]
+testing = ["otel", "opentelemetry_sdk/testing"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }
+
+# OpenTelemetry — gated by the `otel` feature so REST-only installs don't pull them.
+opentelemetry = { version = "0.33.0", default-features = false, features = ["logs", "trace"], optional = true }
+opentelemetry_sdk = { version = "0.33.0", default-features = false, features = ["rt-tokio", "logs", "trace"], optional = true }
+opentelemetry-otlp = { version = "0.33.0", default-features = false, features = ["logs", "trace", "http-proto", "reqwest-blocking-client"], optional = true }
+
+# HTTP client — async + multipart + streaming for the REST API; `blocking`
+# is required by the OTLP `reqwest-blocking-client` exporter under the
+# `otel` feature (the BatchSpanProcessor runs on a non-tokio thread).
+# Pinned to 0.13 to match opentelemetry-otlp 0.32 (avoids a duplicate
+# reqwest in the dep graph and the resulting HttpClient trait-bound
+# mismatch).
+# `gzip` makes the client advertise `Accept-Encoding: gzip` and decompress
+# responses transparently — the DP gateway compresses JSON when offered
+# (Arrow stream responses are never compressed and arrive unchanged).
+percent-encoding = "2"
+# `system-proxy` is what makes 0.13 honour HTTPS_PROXY / NO_PROXY; 0.12 did so
+# unconditionally, and a client behind a corporate proxy otherwise never connects.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs", "gzip", "system-proxy"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+uuid = { version = "1.22", features = ["v4", "v7", "serde"] }
+thiserror = "2"
+tracing = "0.1"
+bytes = "1"
+async-stream = "0.3"
+mime_guess = "2"
+fastrand = "2"
+
+# Builder pattern support — used by `ClientConfig` (REST) and
+# `IntrospectionLogs` (otel) builders alike.
+derive_builder = "0.20"
+
+
+# Optional: Apache Arrow IPC-stream decode for the telemetry reads (gated by
+# the `arrow` feature). `ipc` alone keeps the dependency tree lean — no
+# csv/json/prettyprint/pyarrow.
+arrow = { version = "60", default-features = false, features = ["ipc"], optional = true }
+
+# Streaming support (StreamExt)
+futures = "0.3"
+
+# `Retry-After` may carry an HTTP-date instead of delta-seconds, and RFC 9110
+# admits three date formats. Zero further dependencies, and the JS and Python
+# SDKs both understand the date form via their standard libraries.
+httpdate = "1.0.3"
+
+[dev-dependencies]
+ring = "0.17"
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+# In-memory span / log exporters for the in-crate tests. As a dev-dependency
+# they are available under every feature set, so `cargo test --features otel`
+# builds the same tests as `--features testing`.
+opentelemetry_sdk = { version = "0.33.0", default-features = false, features = ["testing"] }
+insta = { version = "1", features = ["json", "redactions"] }
+wiremock = "0.6"
+flate2 = "1"
+dotenvy = "0.15"
+
+[[example]]
+name = "connectors-slack"
+path = "examples/api/connectors_slack.rs"
+
+[[example]]
+name = "connectors-pipedream"
+path = "examples/api/connectors_pipedream.rs"
+
+[[example]]
+name = "connectors-custom-app"
+path = "examples/api/connectors_custom_app.rs"
+
+[[example]]
+name = "runtimes"
+path = "examples/api/runtimes.rs"
+
+[[example]]
+name = "native-email-code"
+path = "examples/api/native_email_code.rs"
+
+# These drive the OTel surface through the in-memory exporters, so they only
+# compile with `testing`. Cargo cannot feature-gate an integration test from
+# inside the file, so declare the requirement here: a plain `cargo test` skips
+# them instead of failing to build.
+[[test]]
+name = "span_attributes_test"
+path = "tests/span_attributes_test.rs"
+required-features = ["testing"]
+
+# Drives the span processor against a slow mock collector, so it needs the
+# OTel surface for the same reason as the test above.
+[[test]]
+name = "export_timeout_test"
+path = "tests/export_timeout_test.rs"
+required-features = ["otel"]
+
+# Linting configuration
+# Run: cargo clippy -- -W clippy::all -W clippy::pedantic
+# Or use: cargo clippy --all-targets -- -W warnings

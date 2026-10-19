@@ -501,7 +501,7 @@ colour to set and an annotation tag cannot omit one.
 
 See [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence) for transcripts,
 typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
-for durable inputs and grants, and [`examples/`](examples/) for end-to-end
+for durable inputs and grants, and [`examples/`](crates/introspection-sdk/examples/) for end-to-end
 programs.
 
 ## Read a repository's files
@@ -630,7 +630,7 @@ let page = auth
 - `sign_out` clears the local session first, then revokes it on the Control
   Plane.
 
-See [`examples/api/native_email_code.rs`](examples/api/native_email_code.rs).
+See [`examples/api/native_email_code.rs`](crates/introspection-sdk/examples/api/native_email_code.rs).
 
 ## Environment variables
 
