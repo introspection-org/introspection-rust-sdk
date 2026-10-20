@@ -1,0 +1,57 @@
+{
+  "about": "RFC 9421 requests under the AAuth profile, for tests/hellocoop.rs. signed_by_hellocoop was signed by the generated_with library; signed_here_verified_by_hellocoop was signed by this crate and verified by that library. Ed25519 is deterministic, so these are exact. Regenerate them when the signer changes on purpose or the library is upgraded.",
+  "generated_with": "@hellocoop/httpsig 2.6.0",
+  "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "jwt": "eyJhbGciOiJFZERTQSIsInR5cCI6ImFhLWFnZW50K2p3dCJ9.eyJjbmYiOnsiandrIjp7ImFsZyI6IkVkMjU1MTkiLCJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkE2RUh2X1BPRUw0ZGNOMFk1MHZBbVdmazFqQ2JwUTFmSGR5R1pCSlZNYmcifX0sImV4cCI6MTc5MTAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hZ2VudHMuZXhhbXBsZSJ9.sig",
+  "created": 1791000000,
+  "signed_by_hellocoop": [
+    {
+      "method": "POST",
+      "url": "https://ps.example/mission",
+      "body": "{\"description\":\"Sydney\"}",
+      "headers": {
+        "content-digest": "sha-256=:LSMDidPLUvimucguXVhMRnGWr1+PQ/8Oib3VxN63EdY=:",
+        "content-type": "application/json",
+        "signature": "sig=:HXndA/ycXeoCY8Lok/N5r9Duzj/jc/4GXPFFNxu8LZt/8hAW9nvjoT1zTyOFXQCBk7ysTr+rwAMnhqcqDnjPAA==:",
+        "signature-input": "sig=(\"@method\" \"@authority\" \"@path\" \"content-type\" \"signature-key\" \"content-digest\");created=1791000000",
+        "signature-key": "sig=jwt;jwt=\"eyJhbGciOiJFZERTQSIsInR5cCI6ImFhLWFnZW50K2p3dCJ9.eyJjbmYiOnsiandrIjp7ImFsZyI6IkVkMjU1MTkiLCJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkE2RUh2X1BPRUw0ZGNOMFk1MHZBbVdmazFqQ2JwUTFmSGR5R1pCSlZNYmcifX0sImV4cCI6MTc5MTAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hZ2VudHMuZXhhbXBsZSJ9.sig\""
+      }
+    },
+    {
+      "method": "GET",
+      "url": "https://ps.example/pending/1",
+      "body": null,
+      "headers": {
+        "signature": "sig=:xtnY6M7qO+yJe9fVLWYckLELRv80YGe2McNDazUKr9AI7kvVlKMAHmajj7DErVP0FGahGUNCMd6VQ5QbIerFAQ==:",
+        "signature-input": "sig=(\"@method\" \"@authority\" \"@path\" \"signature-key\");created=1791000000",
+        "signature-key": "sig=jwt;jwt=\"eyJhbGciOiJFZERTQSIsInR5cCI6ImFhLWFnZW50K2p3dCJ9.eyJjbmYiOnsiandrIjp7ImFsZyI6IkVkMjU1MTkiLCJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkE2RUh2X1BPRUw0ZGNOMFk1MHZBbVdmazFqQ2JwUTFmSGR5R1pCSlZNYmcifX0sImV4cCI6MTc5MTAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hZ2VudHMuZXhhbXBsZSJ9.sig\""
+      }
+    }
+  ],
+  "signed_here_verified_by_hellocoop": [
+    {
+      "body": "{\"description\":\"Sydney\"}",
+      "content_type": "application/json",
+      "headers": {
+        "content-digest": "sha-256=:LSMDidPLUvimucguXVhMRnGWr1+PQ/8Oib3VxN63EdY=:",
+        "content-type": "application/json",
+        "signature": "sig=:XqqztJ20Ltswj94hgFtOwAIR3fCKXVfbQ3uFKRiRGkOhcBpiTCHko7S5XlyVikCcpwSpryf21lJHXOGoRxmdAA==:",
+        "signature-input": "sig=(\"@method\" \"@authority\" \"@path\" \"signature-key\" \"content-digest\" \"content-type\");created=1791000000",
+        "signature-key": "sig=jwt;jwt=\"eyJhbGciOiJFZERTQSIsInR5cCI6ImFhLWFnZW50K2p3dCJ9.eyJjbmYiOnsiandrIjp7ImFsZyI6IkVkMjU1MTkiLCJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkE2RUh2X1BPRUw0ZGNOMFk1MHZBbVdmazFqQ2JwUTFmSGR5R1pCSlZNYmcifX0sImV4cCI6MTc5MTAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hZ2VudHMuZXhhbXBsZSJ9.sig\""
+      },
+      "method": "POST",
+      "url": "https://ps.example/mission"
+    },
+    {
+      "body": null,
+      "content_type": null,
+      "headers": {
+        "signature": "sig=:xtnY6M7qO+yJe9fVLWYckLELRv80YGe2McNDazUKr9AI7kvVlKMAHmajj7DErVP0FGahGUNCMd6VQ5QbIerFAQ==:",
+        "signature-input": "sig=(\"@method\" \"@authority\" \"@path\" \"signature-key\");created=1791000000",
+        "signature-key": "sig=jwt;jwt=\"eyJhbGciOiJFZERTQSIsInR5cCI6ImFhLWFnZW50K2p3dCJ9.eyJjbmYiOnsiandrIjp7ImFsZyI6IkVkMjU1MTkiLCJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkE2RUh2X1BPRUw0ZGNOMFk1MHZBbVdmazFqQ2JwUTFmSGR5R1pCSlZNYmcifX0sImV4cCI6MTc5MTAwMzYwMCwiaXNzIjoiaHR0cHM6Ly9hZ2VudHMuZXhhbXBsZSJ9.sig\""
+      },
+      "method": "GET",
+      "url": "https://ps.example/pending/1"
+    }
+  ]
+}

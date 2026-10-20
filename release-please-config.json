@@ -1,12 +1,50 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "release-type": "simple",
   "packages": {
-    ".": {
+    "crates/introspection-sdk": {
       "release-type": "simple",
+      "component": "introspection-sdk",
+      "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.package.version"
+        }
+      ]
+    },
+    "crates/aauth-protocol": {
+      "release-type": "simple",
+      "component": "aauth-protocol",
+      "include-component-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "release-as": "0.1.0",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "/Cargo.toml",
+          "jsonpath": "$.workspace.dependencies.aauth-protocol.version"
+        }
+      ]
+    },
+    "crates/aauth-person-server": {
+      "release-type": "simple",
+      "component": "aauth-person-server",
+      "include-component-in-tag": true,
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "release-as": "0.1.0",
       "extra-files": [
         {
           "type": "toml",

@@ -1,0 +1,42 @@
+[package]
+name = "aauth-protocol"
+description = "AAuth (draft-hardt-oauth-aauth-protocol): HTTP message signatures, agent, person and auth tokens, and an agent-side Person Server client"
+readme = "README.md"
+documentation = "https://docs.rs/aauth-protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["client"]
+# The agent's HTTP side: discovery over reqwest, the Person Server client, and
+# the SSRF guard its HTTP client resolves through.
+client = ["dep:reqwest", "dep:ipnet", "dep:tokio"]
+
+[dependencies]
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+ed25519-dalek = { workspace = true }
+getrandom = { workspace = true }
+http = { workspace = true }
+p256 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+ipnet = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

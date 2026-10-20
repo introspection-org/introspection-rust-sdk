@@ -501,7 +501,7 @@ colour to set and an annotation tag cannot omit one.
 
 See [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence) for transcripts,
 typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
-for durable inputs and grants, and [`examples/`](examples/) for end-to-end
+for durable inputs and grants, and [`examples/`](crates/introspection-sdk/examples/) for end-to-end
 programs.
 
 ## Read a repository's files
@@ -630,7 +630,7 @@ let page = auth
 - `sign_out` clears the local session first, then revokes it on the Control
   Plane.
 
-See [`examples/api/native_email_code.rs`](examples/api/native_email_code.rs).
+See [`examples/api/native_email_code.rs`](crates/introspection-sdk/examples/api/native_email_code.rs).
 
 ## Environment variables
 
@@ -649,6 +649,15 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 - [Platform operations](https://docs.introspection.dev/sdk/rust/platform-operations)
 - [Rust SDK reference](https://docs.introspection.dev/sdk/rust/reference)
 - [Authentication](https://docs.introspection.dev/sdk/authentication)
+
+## Also in this repository
+
+Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth), the protocol Introspection's egress uses when an agent acts for a person:
+
+- [`aauth-protocol`](crates/aauth-protocol): HTTP Message Signatures under the AAuth profile, agent, person and auth tokens, key discovery, and an agent-side Person Server client.
+- [`aauth-person-server`](crates/aauth-person-server): a Person Server you can run, for missions, budgets and approvals.
+
+Neither depends on this SDK.
 
 ## License
 

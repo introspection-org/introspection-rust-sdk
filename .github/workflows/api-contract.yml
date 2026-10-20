@@ -30,4 +30,4 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Compare the SDK surface against the reference
-        run: cargo test --test api_contract_test -- --ignored --nocapture
+        run: cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture

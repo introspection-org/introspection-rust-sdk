@@ -76,6 +76,13 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+      # Without its `client` feature aauth-protocol makes no network calls
+      # and pulls in no HTTP client; keep that combination building.
+      - name: Run clippy (AAuth crates without HTTP)
+        run: |
+          cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
+          cargo clippy -p aauth-person-server --no-default-features -- -D warnings
+
   test:
     name: Tests
     runs-on: ubuntu-latest
