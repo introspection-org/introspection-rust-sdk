@@ -109,7 +109,7 @@ async fn continue_control(
 }
 
 async fn files_shares(runner: &Runner) -> Result<(), Box<dyn Error>> {
-    // #region docs:reference/rust/files-shares
+    // #region docs:reference/rust/files
     use introspection_sdk::{FileType, FileUpload, TaskCreate, TaskFileRef};
 
     let uploaded = runner
@@ -127,7 +127,7 @@ async fn files_shares(runner: &Runner) -> Result<(), Box<dyn Error>> {
             ..Default::default()
         })
         .await?;
-    // #endregion docs:reference/rust/files-shares
+    // #endregion docs:reference/rust/files
     Ok(())
 }
 
