@@ -4,6 +4,7 @@
 //! Run with:
 //! ```sh
 //! INTROSPECTION_TOKEN=intro_xxx CONNECTOR_ID=<connector-uuid> \
+//!   USER_SESSION_TOKEN=<application-session-token> DATA_PLANE_URL=<dp-url> \
 //!   cargo run --example docs_per_user_tools
 //! ```
 
@@ -11,8 +12,8 @@ use std::error::Error;
 
 use futures::TryStreamExt;
 use introspection_sdk::{
-    ClientConfig, ConnectorAuthorizeParams, IntrospectionClient, MemberConnectionCreate,
-    MemberConnectionListParams, RunnerIdentity,
+    AdvancedOptions, ClientConfig, ConnectorAuthorizeParams, IntrospectionClient,
+    MemberConnectionCreate, MemberConnectionListParams, RunnerIdentity,
 };
 use uuid::Uuid;
 
@@ -43,10 +44,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // #endregion docs:patterns/per-user-tools/mint-link
     println!("{authorize_url}");
 
-    // The Connect button runs as a signed-in end user (an application
-    // session token), so the connections listed and created are their own.
+    let session_token = std::env::var("USER_SESSION_TOKEN")?;
+    let data_plane_url = std::env::var("DATA_PLANE_URL")?;
+
     // #region docs:patterns/per-user-tools/verify
-    let mine: Vec<_> = client
+    // Authenticate as the signed-in end user, not with your backend token,
+    // so the connections listed and created are their own.
+    let user = IntrospectionClient::new(ClientConfig {
+        token: Some(session_token),
+        advanced: Some(AdvancedOptions {
+            dp_url: Some(data_plane_url),
+            ..Default::default()
+        }),
+    })?;
+    let mine: Vec<_> = user
         .connections()
         .list(&MemberConnectionListParams {
             app: Some("<app>".into()),
@@ -54,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         })
         .try_collect()
         .await?;
-    let authorize_url = client
+    let authorize_url = user
         .connections()
         .create(&MemberConnectionCreate {
             runtime: Some("support-agent".into()),
