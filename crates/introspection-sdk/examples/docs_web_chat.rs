@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let id_token = std::env::var("ID_TOKEN")?;
     let runtime_id = std::env::var("RUNTIME_ID")?;
 
-    // #region docs:patterns/web-chat/verify
+    // #region docs:patterns/web-chat/federated-broker
     let token = token_exchange(
         TokenExchangeParams::builder()
             .subject_token(id_token)
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "runtimeId": runtime_id,
         "dpUrl": token.dp_url,
     });
-    // #endregion docs:patterns/web-chat/verify
+    // #endregion docs:patterns/web-chat/federated-broker
 
     println!("{body}");
     Ok(())
