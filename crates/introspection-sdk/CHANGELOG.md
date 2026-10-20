@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.29.0...v0.30.0) (2026-10-20)
+
+
+### Features
+
+* add the aauth-protocol and aauth-person-server crates in a Cargo workspace ([#124](https://github.com/introspection-org/introspection-rust-sdk/issues/124)) ([fe9ce52](https://github.com/introspection-org/introspection-rust-sdk/commit/fe9ce5256e2ac6e39aa4b278a1a03fc2324757f6))
+* **sdk:** client.aauth() approvals and missions, experimental ([#130](https://github.com/introspection-org/introspection-rust-sdk/issues/130)) ([bacf636](https://github.com/introspection-org/introspection-rust-sdk/commit/bacf63631272884091934c70946d4d4363ea7e83))
+
 ## [0.29.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.28.0...v0.29.0) (2026-10-15)
 
 
