@@ -296,14 +296,6 @@ fn ok(body: &impl Serialize) -> Response<Bytes> {
     json_response(StatusCode::OK, body)
 }
 
-fn mission_not_found() -> AAuthError {
-    AAuthError::new(
-        StatusCode::NOT_FOUND,
-        "mission_not_found",
-        "no such mission",
-    )
-}
-
 /// What a tenant escapes to in a pending URL's path segment.
 const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.');
 
@@ -537,9 +529,7 @@ impl PersonServer {
             AAuthError::signature(code, e.detail)
         })?;
         if token.ps().is_some_and(|ps| trim(ps) != self.config.issuer) {
-            return Err(AAuthError::new(
-                StatusCode::FORBIDDEN,
-                "invalid_request",
+            return Err(AAuthError::forbidden(
                 "this agent's Person Server is another",
             ));
         }
@@ -552,53 +542,47 @@ impl PersonServer {
         })
     }
 
-    /// The person the agent acts for. Each agent key is bound to the first person it names.
+    /// The person the agent acts for, under `tenant`. Each agent key is
+    /// bound to the first person it names. Tokens carry the directory's
+    /// tenant, else the one the agent `named`.
     async fn person_for(
         &self,
+        tenant: &str,
+        named: Option<&str>,
         agent: &Agent,
-        params: &Map<String, Value>,
+        login_hint: Option<&str>,
     ) -> Result<Person, AAuthError> {
-        let tenant = self.tenant(named(params))?;
-        let tenant = tenant.as_str();
-        if let Some(hint) = str_of(params, "login_hint") {
-            let Some(hinted) = self.config.directory.person(hint, tenant).await else {
-                return Err(AAuthError::invalid_request(
-                    "not someone this Person Server speaks for",
-                ));
-            };
-            // The directory's tenant is the person's; a request can only be
-            // under it, never change it.
-            if hinted
-                .tenant
-                .as_deref()
-                .is_some_and(|theirs| theirs != tenant)
-            {
-                return Err(AAuthError::new(
-                    StatusCode::FORBIDDEN,
-                    "invalid_request",
-                    "this person is not in that tenant",
-                ));
-            }
-            // Tokens name a tenant the directory gave or the agent named.
-            let hinted = Person {
-                tenant: hinted.tenant.or_else(|| named(params).map(str::to_string)),
-                ..hinted
-            };
-            let bound = self.config.store.bind(tenant, &agent.jkt, &hinted).await?;
-            if bound.id != hinted.id {
-                return Err(AAuthError::new(
-                    StatusCode::FORBIDDEN,
-                    "invalid_request",
-                    "this agent acts for another person",
-                ));
-            }
-            return Ok(hinted);
+        let Some(hint) = login_hint else {
+            return self
+                .config
+                .store
+                .binding(tenant, &agent.jkt)
+                .await?
+                .ok_or_else(|| AAuthError::invalid_request("name the person: login_hint"));
+        };
+        let Some(hinted) = self.config.directory.person(hint, tenant).await else {
+            return Err(AAuthError::invalid_request(
+                "not someone this Person Server speaks for",
+            ));
+        };
+        // The directory's tenant is the person's; a request can only be
+        // under it, never change it.
+        if hinted
+            .tenant
+            .as_deref()
+            .is_some_and(|theirs| theirs != tenant)
+        {
+            return Err(AAuthError::forbidden("this person is not in that tenant"));
         }
-        self.config
-            .store
-            .binding(tenant, &agent.jkt)
-            .await?
-            .ok_or_else(|| AAuthError::invalid_request("name the person: login_hint"))
+        let hinted = Person {
+            tenant: hinted.tenant.or_else(|| named.map(str::to_string)),
+            ..hinted
+        };
+        let bound = self.config.store.bind(tenant, &agent.jkt, &hinted).await?;
+        if bound.id != hinted.id {
+            return Err(AAuthError::forbidden("this agent acts for another person"));
+        }
+        Ok(hinted)
     }
 
     /// The person's identifier at one audience: no two audiences can correlate it.
@@ -709,16 +693,21 @@ impl PersonServer {
         if !resource.starts_with("https://") {
             return Err(AAuthError::invalid_request("resource is an https origin"));
         }
-        let person = self.person_for(&agent, &params).await?;
+        let tenant = self.tenant(named(&params))?;
+        let person = self
+            .person_for(
+                &tenant,
+                named(&params),
+                &agent,
+                str_of(&params, "login_hint"),
+            )
+            .await?;
         let mission = match params.get("mission_s256") {
             None | Some(Value::Null) => None,
-            Some(hash) => Some(
-                self.live_mission(&self.tenant(named(&params))?, &agent, hash.as_str())
-                    .await?,
-            ),
+            Some(hash) => Some(self.live_mission(&tenant, &agent, hash.as_str()).await?),
         };
         if mission.as_ref().is_some_and(|m| m.person.id != person.id) {
-            return Err(mission_not_found());
+            return Err(AAuthError::mission_not_found());
         }
         Ok(ok(&self
             .person_token(&agent, &person, &resource, mission.as_ref())
@@ -737,7 +726,7 @@ impl PersonServer {
             None => None,
         };
         let Some(mission) = mission.filter(|m| m.agent_id == agent.id) else {
-            return Err(mission_not_found());
+            return Err(AAuthError::mission_not_found());
         };
         // The agent identifier is the provider's; the person is the key's.
         // Another key under the same identifier, bound to someone else, gets
@@ -750,21 +739,13 @@ impl PersonServer {
             .map(|p| p.id)
             != Some(mission.person.id.clone())
         {
-            return Err(mission_not_found());
+            return Err(AAuthError::mission_not_found());
         }
         if mission.completed_at.is_some() {
-            return Err(AAuthError::new(
-                StatusCode::FORBIDDEN,
-                "mission_terminated",
-                "mission completed",
-            ));
+            return Err(AAuthError::mission_terminated("mission completed"));
         }
         if self.now() >= mission.expires_at {
-            return Err(AAuthError::new(
-                StatusCode::FORBIDDEN,
-                "mission_terminated",
-                "mission expired",
-            ));
+            return Err(AAuthError::mission_terminated("mission expired"));
         }
         Ok(mission)
     }
@@ -776,7 +757,15 @@ impl PersonServer {
     ) -> Result<Response<Bytes>, AAuthError> {
         let agent = self.verify_agent(request, path).await?;
         let params = read_body(request.body())?;
-        let person = self.person_for(&agent, &params).await?;
+        let tenant = self.tenant(named(&params))?;
+        let person = self
+            .person_for(
+                &tenant,
+                named(&params),
+                &agent,
+                str_of(&params, "login_hint"),
+            )
+            .await?;
         let description = str_of(&params, "description").unwrap_or_default();
         if description.is_empty() {
             return Err(AAuthError::invalid_request("describe the mission"));
@@ -794,7 +783,7 @@ impl PersonServer {
         let mut grant = Map::new();
         grant.insert("resources".into(), Value::Array(resources));
         let approval = self.approval(
-            &self.tenant(named(&params))?,
+            &tenant,
             ApprovalKind::Mission,
             agent,
             person,
@@ -827,11 +816,7 @@ impl PersonServer {
                     .log_mission(tenant, &mission.s256, LogEntry { at: now, entry }, now)
                     .await?
                 {
-                    return Err(AAuthError::new(
-                        StatusCode::FORBIDDEN,
-                        "mission_terminated",
-                        "mission ended",
-                    ));
+                    return Err(AAuthError::mission_terminated("mission ended"));
                 }
                 Ok(ok(&json!({ "s256": hash })))
             }
@@ -1207,6 +1192,13 @@ impl PersonServer {
                 Some("no such pending request"),
             ));
         };
+        let collected = || {
+            problem(
+                StatusCode::GONE,
+                "collected",
+                Some("this approval's token was already collected"),
+            )
+        };
         if request.method() == Method::DELETE {
             if approval.status == ApprovalStatus::Pending {
                 let withdrawn = Approval {
@@ -1241,13 +1233,7 @@ impl PersonServer {
                 ));
             }
             ApprovalStatus::Pending => return Ok(self.still_pending(tenant, id)),
-            ApprovalStatus::Collected => {
-                return Ok(problem(
-                    StatusCode::GONE,
-                    "collected",
-                    Some("this approval's token was already collected"),
-                ));
-            }
+            ApprovalStatus::Collected => return Ok(collected()),
             ApprovalStatus::Approved => {}
         }
         if approval.kind == ApprovalKind::Completion {
@@ -1272,7 +1258,7 @@ impl PersonServer {
         }
         let grant = approval.grant.clone();
         let asked = approval.budget.clone();
-        let collected = Approval {
+        let collecting = Approval {
             status: ApprovalStatus::Collected,
             ..approval.clone()
         };
@@ -1280,14 +1266,10 @@ impl PersonServer {
         if !self
             .config
             .store
-            .transition_approval(tenant, ApprovalStatus::Approved, &collected)
+            .transition_approval(tenant, ApprovalStatus::Approved, &collecting)
             .await?
         {
-            return Ok(problem(
-                StatusCode::GONE,
-                "collected",
-                Some("this approval's token was already collected"),
-            ));
+            return Ok(collected());
         }
         let mut mission = mission;
         // A request in another unit than the mission's budget is approved
@@ -1316,11 +1298,7 @@ impl PersonServer {
                         .transition_approval(tenant, ApprovalStatus::Collected, &approval)
                         .await;
                     unspent?;
-                    return Err(AAuthError::new(
-                        StatusCode::FORBIDDEN,
-                        "mission_terminated",
-                        "the mission has ended",
-                    ));
+                    return Err(AAuthError::mission_terminated("the mission has ended"));
                 }
             }
         }
@@ -1369,32 +1347,31 @@ impl PersonServer {
                 ApprovalStatus::Denied
             },
             decided_budget: decision.budget.clone(),
-            decided_by: decision.decided_by.clone().or(approval.decided_by.clone()),
+            decided_by: decision.decided_by,
             decided_at: Some(now),
             ..approval.clone()
         };
-        let mut new_mission = None;
-        let mut existing = None;
-        if approved && approval.kind == ApprovalKind::Mission {
-            let mission = self.mission_from(&approval, decision.budget.clone(), now);
+        let created = (approved && approval.kind == ApprovalKind::Mission)
+            .then(|| self.mission_from(&approval, decision.budget, now));
+        if let Some(mission) = &created {
             decided.mission_s256 = Some(mission.s256.clone());
-            new_mission = Some(mission);
         } else if approved {
+            // A request or a completion is approved only under a live mission.
             let mission = match &approval.mission_s256 {
                 Some(s256) => self.config.store.mission(tenant, s256).await?,
                 None => None,
             };
-            existing = Some(mission.filter(|m| m.is_live(now)).ok_or_else(|| {
-                AAuthError::new(
+            if !mission.is_some_and(|m| m.is_live(now)) {
+                return Err(AAuthError::new(
                     StatusCode::CONFLICT,
                     "mission_terminated",
                     "the mission has ended",
-                )
-            })?);
+                ));
+            }
         }
         // The mission goes in first, so a decision never points at a mission
         // it did not create.
-        if let Some(mission) = &new_mission {
+        if let Some(mission) = &created {
             if !self.config.store.insert_mission(tenant, mission).await? {
                 return Err(already());
             }
@@ -1406,7 +1383,7 @@ impl PersonServer {
             .transition_approval(tenant, ApprovalStatus::Pending, &decided)
             .await?
         {
-            if let Some(mission) = &new_mission {
+            if let Some(mission) = &created {
                 self.config
                     .store
                     .end_mission(tenant, &mission.s256, now)
@@ -1416,11 +1393,10 @@ impl PersonServer {
         }
         // An approved auth token request is spent when its token is
         // collected, so no token is out before its spend.
-        if let Some(mission) = existing.filter(|_| approval.kind == ApprovalKind::Completion) {
-            self.config
-                .store
-                .end_mission(tenant, &mission.s256, now)
-                .await?;
+        if let (true, ApprovalKind::Completion, Some(s256)) =
+            (approved, approval.kind, &approval.mission_s256)
+        {
+            self.config.store.end_mission(tenant, s256, now).await?;
         }
         self.config.hooks.on_decision(&decided).await;
         Ok(decided)
@@ -1472,7 +1448,7 @@ impl PersonServer {
             .store
             .end_mission(tenant, s256, self.now())
             .await?
-            .ok_or_else(mission_not_found)
+            .ok_or_else(AAuthError::mission_not_found)
     }
 
     fn admitted(&self, request: &Request<Bytes>) -> Result<(), AAuthError> {
@@ -1482,7 +1458,11 @@ impl PersonServer {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
         match (&self.config.admin_token, presented) {
-            (Some(token), Some(presented)) if constant_time_eq(token, presented) => Ok(()),
+            (Some(token), Some(presented))
+                if aauth_protocol::constant_time_eq(token, presented) =>
+            {
+                Ok(())
+            }
             _ => Err(AAuthError::new(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
@@ -1499,7 +1479,13 @@ impl PersonServer {
         request: &Request<Bytes>,
         segments: &[&str],
     ) -> Result<Option<Response<Bytes>>, AAuthError> {
-        let method = request.method();
+        if !matches!(
+            segments,
+            ["consent"] | ["consent", _, "decision"] | ["missions"] | ["missions", _]
+        ) {
+            return Ok(None);
+        }
+        self.admitted(request)?;
         let query = |name: &str| {
             request.uri().query().and_then(|q| {
                 url::form_urlencoded::parse(q.as_bytes())
@@ -1509,16 +1495,8 @@ impl PersonServer {
         };
         let tenant = self.tenant(query("tenant").filter(|t| !t.is_empty()).as_deref())?;
         let tenant = tenant.as_str();
-        let response = match segments {
-            ["consent"] => {
-                self.admitted(request)?;
-                if method != Method::GET {
-                    return Ok(Some(problem(
-                        StatusCode::METHOD_NOT_ALLOWED,
-                        "method_not_allowed",
-                        None,
-                    )));
-                }
+        let response = match (request.method(), segments) {
+            (&Method::GET, ["consent"]) => {
                 let status = query("status");
                 let approvals: Vec<Approval> = self
                     .config
@@ -1537,15 +1515,7 @@ impl PersonServer {
                     .collect();
                 ok(&approvals)
             }
-            ["consent", id, "decision"] => {
-                self.admitted(request)?;
-                if method != Method::POST {
-                    return Ok(Some(problem(
-                        StatusCode::METHOD_NOT_ALLOWED,
-                        "method_not_allowed",
-                        None,
-                    )));
-                }
+            (&Method::POST, ["consent", id, "decision"]) => {
                 let params = read_body(request.body())?;
                 let verdict = str_of(&params, "decision").or_else(|| str_of(&params, "status"));
                 let status = match verdict {
@@ -1562,40 +1532,18 @@ impl PersonServer {
                 };
                 ok(&self.decide(tenant, id, decision).await?)
             }
-            ["missions"] => {
-                self.admitted(request)?;
-                if method != Method::GET {
-                    return Ok(Some(problem(
-                        StatusCode::METHOD_NOT_ALLOWED,
-                        "method_not_allowed",
-                        None,
-                    )));
-                }
-                ok(&self.config.store.missions(tenant).await?)
-            }
-            ["missions", s256] => {
-                self.admitted(request)?;
-                match *method {
-                    Method::GET => match self.config.store.mission(tenant, s256).await? {
-                        Some(mission) => ok(&mission),
-                        None => json_response(StatusCode::NOT_FOUND, &Value::Null),
-                    },
-                    Method::PATCH => ok(&self.terminate(tenant, s256).await?),
-                    _ => problem(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", None),
+            (&Method::GET, ["missions"]) => ok(&self.config.store.missions(tenant).await?),
+            (&Method::GET, ["missions", s256]) => {
+                match self.config.store.mission(tenant, s256).await? {
+                    Some(mission) => ok(&mission),
+                    None => json_response(StatusCode::NOT_FOUND, &Value::Null),
                 }
             }
-            _ => return Ok(None),
+            (&Method::PATCH, ["missions", s256]) => ok(&self.terminate(tenant, s256).await?),
+            _ => problem(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", None),
         };
         Ok(Some(response))
     }
-}
-
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-            == 0
 }
 
 #[cfg(feature = "reqwest")]

@@ -189,14 +189,6 @@ fn aud_matches(aud: Option<&Value>, resource: &str) -> bool {
     }
 }
 
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    a.len() == b.len()
-        && a.bytes()
-            .zip(b.bytes())
-            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-            == 0
-}
-
 /// Verify an agent, person or auth token presented in `Signature-Key`.
 ///
 /// In order: the `typ` is recognised and accepted here; the claims every
@@ -301,7 +293,7 @@ pub async fn verify_token(
     let thumbprint = cnf
         .thumbprint()
         .map_err(|e| TokenError::new(code, e.to_string()))?;
-    if !constant_time_eq(&thumbprint, options.http_signature_thumbprint) {
+    if !crate::constant_time_eq(&thumbprint, options.http_signature_thumbprint) {
         return Err(TokenError::new(
             "key_binding_failed",
             "cnf.jwk thumbprint does not match the HTTP signature key",

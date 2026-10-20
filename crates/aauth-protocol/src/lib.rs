@@ -160,6 +160,16 @@ pub(crate) fn random_id() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// Whether `a` equals `b`, in time that depends on their lengths alone:
+/// for a secret a peer presents, such as a thumbprint or a bearer token.
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
+}
+
 /// Seconds since the Unix epoch.
 pub fn now_unix() -> i64 {
     std::time::SystemTime::now()

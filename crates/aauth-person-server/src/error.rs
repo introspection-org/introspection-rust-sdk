@@ -31,6 +31,26 @@ impl AAuthError {
         Self::new(StatusCode::BAD_REQUEST, "invalid_request", detail)
     }
 
+    /// A `403`: the agent may not do what it asked.
+    pub(crate) fn forbidden(detail: impl Into<String>) -> Self {
+        Self::new(StatusCode::FORBIDDEN, "invalid_request", detail)
+    }
+
+    /// A `403 mission_terminated`: nothing is issued under an ended mission.
+    pub(crate) fn mission_terminated(detail: impl Into<String>) -> Self {
+        Self::new(StatusCode::FORBIDDEN, "mission_terminated", detail)
+    }
+
+    /// The same `404` for a mission that does not exist, is not this agent's,
+    /// or is not this key's person's.
+    pub(crate) fn mission_not_found() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "mission_not_found",
+            "no such mission",
+        )
+    }
+
     /// A `401` naming the signature problem in `Signature-Error`.
     pub(crate) fn signature(code: &str, detail: impl Into<String>) -> Self {
         let mut error = Self::new(StatusCode::UNAUTHORIZED, code, detail);
