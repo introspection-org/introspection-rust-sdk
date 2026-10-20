@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let pdf = std::fs::read("contract.pdf")?;
     let file_id = std::env::var("OUTPUT_FILE_ID")?;
 
-    // #region docs:patterns/files/verify
+    // #region docs:patterns/files/sdk-upload
     let f = runner
         .files()
         .upload(FileUpload::from_bytes(pdf, "contract.pdf").with_file_type(FileType::Upload))
@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         })
         .await?;
     let bytes = runner.files().download(&file_id).await?;
-    // #endregion docs:patterns/files/verify
+    // #endregion docs:patterns/files/sdk-upload
 
     println!("{}: {} bytes", handle.run.id, bytes.len());
     Ok(())

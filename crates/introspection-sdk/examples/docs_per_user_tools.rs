@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let session_token = std::env::var("USER_SESSION_TOKEN")?;
     let data_plane_url = std::env::var("DATA_PLANE_URL")?;
 
-    // #region docs:patterns/per-user-tools/verify
+    // #region docs:patterns/per-user-tools/connect-button
     // Authenticate as the signed-in end user, not with your backend token,
     // so the connections listed and created are their own.
     let user = IntrospectionClient::new(ClientConfig {
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         })
         .await?
         .authorize_url;
-    // #endregion docs:patterns/per-user-tools/verify
+    // #endregion docs:patterns/per-user-tools/connect-button
     println!("{} connections; connect at {authorize_url}", mine.len());
 
     Ok(())
