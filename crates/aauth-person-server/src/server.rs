@@ -527,9 +527,19 @@ impl PersonServer {
                     "not someone this Person Server speaks for",
                 ));
             };
-            // Tokens carry the tenant the agent asked under.
+            // The directory's tenant is the person's; the agent can only
+            // name it, never change it.
+            if let (Some(named), Some(theirs)) = (tenant, hinted.tenant.as_deref()) {
+                if named != theirs {
+                    return Err(AAuthError::new(
+                        StatusCode::FORBIDDEN,
+                        "invalid_request",
+                        "this person is not in that tenant",
+                    ));
+                }
+            }
             let hinted = Person {
-                tenant: tenant.map(str::to_string).or(hinted.tenant),
+                tenant: hinted.tenant.or(tenant.map(str::to_string)),
                 ..hinted
             };
             let bound = self.store.bind(tenant, &agent.jkt, &hinted).await?;
@@ -1200,10 +1210,12 @@ impl PersonServer {
             })));
         }
         let grant = approval.grant.clone();
+        let asked = approval.budget.clone();
         let collected = Approval {
             status: ApprovalStatus::Collected,
-            ..approval
+            ..approval.clone()
         };
+        // Collecting claims the token, so only one poll spends it.
         if !self
             .store
             .transition_approval(tenant, ApprovalStatus::Approved, &collected)
@@ -1215,12 +1227,46 @@ impl PersonServer {
                 Some("this approval's token was already collected"),
             ));
         }
+        let mut mission = mission;
+        // A request in another unit than the mission's budget is approved
+        // without spending it.
+        if let Some(asked) =
+            asked.filter(|a| mission.budget.as_ref().is_some_and(|b| b.same_scale(a)))
+        {
+            let spent = self
+                .store
+                .spend(
+                    tenant,
+                    &mission.s256,
+                    asked.amount,
+                    Spend::Approved,
+                    self.now(),
+                )
+                .await;
+            match spent {
+                Ok(Some(spent)) => mission = spent,
+                // Unspent, nothing is issued, and the approval is collectible again.
+                unspent => {
+                    let _ = self
+                        .store
+                        .transition_approval(tenant, ApprovalStatus::Collected, &approval)
+                        .await;
+                    unspent?;
+                    return Err(AAuthError::new(
+                        StatusCode::FORBIDDEN,
+                        "mission_terminated",
+                        "the mission has ended",
+                    ));
+                }
+            }
+        }
         Ok(ok(&self.auth_token(&agent, &mission, &grant).await))
     }
 
     /// Record a decision on approval `id`, asked under `tenant`. Approving
-    /// does what was asked: creates the mission, spends the request, or
-    /// completes the mission. A decision is made once: a second, even a
+    /// does what was asked: creates the mission, or completes it; an
+    /// approved auth token request is spent when the agent collects its
+    /// token. A decision is made once: a second, even a
     /// concurrent one, is a `409`.
     pub async fn decide(
         &self,
@@ -1300,18 +1346,10 @@ impl PersonServer {
             }
             return Err(already());
         }
-        if let Some(mission) = existing {
-            if approval.kind == ApprovalKind::Completion {
-                self.store.end_mission(tenant, &mission.s256, now).await?;
-            } else if let (Some(asked), Some(budget)) = (&approval.budget, &mission.budget) {
-                // A request in another unit than the mission's budget is
-                // approved without spending it.
-                if budget.same_scale(asked) {
-                    self.store
-                        .spend(tenant, &mission.s256, asked.amount, Spend::Approved, now)
-                        .await?;
-                }
-            }
+        // An approved auth token request is spent when its token is
+        // collected, so no token is out before its spend.
+        if let Some(mission) = existing.filter(|_| approval.kind == ApprovalKind::Completion) {
+            self.store.end_mission(tenant, &mission.s256, now).await?;
         }
         self.hooks.on_decision(&decided).await;
         Ok(decided)

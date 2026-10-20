@@ -869,6 +869,7 @@ struct LosesNextTransition {
     inner: MemoryStore,
     lose: std::sync::atomic::AtomicBool,
     down: std::sync::atomic::AtomicBool,
+    fail_spend: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -913,6 +914,9 @@ impl Store for LosesNextTransition {
         rule: Spend,
         now: i64,
     ) -> StoreResult<Option<Mission>> {
+        if self.fail_spend.swap(false, Ordering::SeqCst) {
+            return Err(StoreError::new("the database is down"));
+        }
         self.inner.spend(t, s256, amount, rule, now).await
     }
     async fn missions(&self, t: Option<&str>) -> StoreResult<Vec<Mission>> {
@@ -1068,4 +1072,121 @@ async fn each_tenant_keeps_its_own_missions() {
     assert_eq!(body["error"], "mission_not_found");
     let (status, body, _) = charge("acme").await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn a_person_is_only_in_the_directorys_tenant() {
+    let world = World::new();
+    let agent = world.agent();
+    let (status, body, _) = world
+        .call(
+            &agent,
+            Method::POST,
+            &format!("{PS}/mission"),
+            Some(json!({
+                "description": "Sydney", "resources": [BOOKING],
+                "login_hint": "user:sam@acme.example", "tenant": "globex",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(world.seen.0.lock().unwrap().is_empty(), "nothing was asked");
+    assert!(
+        world
+            .ps
+            .store()
+            .binding(Some("globex"), agent.key.thumbprint())
+            .await
+            .unwrap()
+            .is_none(),
+        "the key was not bound"
+    );
+    let (status, _, _) = world
+        .call(
+            &agent,
+            Method::POST,
+            &format!("{PS}/person-token"),
+            Some(json!({ "resource": BOOKING, "login_hint": "user:sam@acme.example", "tenant": "acme" })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "naming the person's own tenant is fine"
+    );
+}
+
+/// An over-budget request, approved, under a world whose store is given.
+async fn approved_charge(world: &World, agent: &TestAgent) -> (String, String) {
+    let (s256, person_token) = approved_mission(world, agent).await;
+    let person = world
+        .as_resource(BOOKING, &person_token, agent, TokenKind::Person)
+        .await;
+    let (status, _, response) = world
+        .call(
+            agent,
+            Method::POST,
+            &format!("{PS}/token"),
+            Some(json!({ "resource_token": world.charge(BOOKING, &person, agent, 400_000), "presented_token": person_token })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    world
+        .ps
+        .decide(None, &world.last_approval().id, Decision::approve())
+        .await
+        .unwrap();
+    (s256, location(&response))
+}
+
+#[tokio::test]
+async fn an_approved_charge_is_spent_when_its_token_is_collected() {
+    let store = Arc::new(LosesNextTransition::default());
+    let world = World::with_store(Some(store.clone()));
+    let agent = world.agent();
+    let (s256, pending) = approved_charge(&world, &agent).await;
+    let spent = || async { store.mission(None, &s256).await.unwrap().unwrap().spent };
+    assert_eq!(spent().await, 0, "deciding spends nothing");
+
+    // The spend fails: no token, and the approval can be collected again.
+    store.fail_spend.store(true, Ordering::SeqCst);
+    let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert!(body.get("auth_token").is_none());
+    assert_eq!(spent().await, 0);
+    let id = world.last_approval().id;
+    assert_eq!(
+        store.approval(None, &id).await.unwrap().unwrap().status,
+        ApprovalStatus::Approved
+    );
+
+    let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["auth_token"].is_string());
+    assert_eq!(spent().await, 400_000, "spent once, with the token");
+    let (status, _, _) = world.call(&agent, Method::GET, &pending, None).await;
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(spent().await, 400_000);
+}
+
+#[tokio::test]
+async fn an_approved_charge_under_an_ended_mission_issues_and_spends_nothing() {
+    let world = World::new();
+    let agent = world.agent();
+    let (s256, pending) = approved_charge(&world, &agent).await;
+    world.ps.terminate(None, &s256).await.unwrap();
+    let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "mission_terminated");
+    assert_eq!(
+        world
+            .ps
+            .store()
+            .mission(None, &s256)
+            .await
+            .unwrap()
+            .unwrap()
+            .spent,
+        0
+    );
 }
