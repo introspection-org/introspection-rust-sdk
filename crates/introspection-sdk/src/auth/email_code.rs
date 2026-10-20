@@ -495,7 +495,7 @@ impl EmailCodeAuth {
     /// Only its Data Plane namespaces accept a native token: the
     /// [`crate::DataPlaneResources`] set (`tasks`, `files`, `shares`,
     /// `conversations`, `events`, `metrics`, `automations`,
-    /// `connections`) and `project_labels`. Control Plane calls answer `401`.
+    /// `connections`) and `tags`. Control Plane calls answer `401`.
     /// The token is not refreshed inside the client: build a new one after
     /// [`Self::refresh`], or use [`Self::with_data_plane`].
     pub async fn client(
