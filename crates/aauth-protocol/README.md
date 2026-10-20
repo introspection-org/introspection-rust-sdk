@@ -71,6 +71,10 @@ match client.propose_mission(&agent, &metadata, &json!({ "description": "Sydney,
 }
 ```
 
+## Introspection
+
+The [Introspection Rust SDK](https://docs.introspection.dev/reference/rust) (`introspection-sdk`) decides approvals and reads missions on Introspection's hosted Person Server with `client.aauth()`.
+
 ## Interop
 
 The tests check this crate against [`@hellocoop/httpsig`](https://www.npmjs.com/package/@hellocoop/httpsig), the RFC 9421 implementation by the AAuth draft's author, using fixed requests in `tests/vectors/hellocoop.json`. Requests that library signed must verify here, and requests this crate signs must match, byte for byte, ones that library has verified. None of them carries a query string; see `@query` below.

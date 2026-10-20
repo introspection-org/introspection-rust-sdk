@@ -36,6 +36,10 @@ PS_ADMIN_TOKEN=secret cargo run -p aauth-person-server --example server -- \
 
 The crate documentation covers the fixed policy, the routes, and what to put in front of it in production.
 
+## Introspection
+
+Introspection can host a Person Server for you instead. Your app then decides its approvals and reads its missions with `client.aauth()` in the [Introspection Rust SDK](https://docs.introspection.dev/reference/rust) (`introspection-sdk`).
+
 ## License
 
 Apache-2.0
