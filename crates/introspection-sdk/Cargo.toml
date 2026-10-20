@@ -1,10 +1,10 @@
 [package]
 name = "introspection-sdk"
 version = "0.30.0"
-edition = "2021"
+edition.workspace = true
 description = "Rust SDK for Introspection — continuously improve your AI systems with production feedback and frontier practices"
-license = "Apache-2.0"
-repository = "https://github.com/introspection-org/introspection-rust-sdk"
+license.workspace = true
+repository.workspace = true
 keywords = ["ai", "llm", "opentelemetry", "otlp", "introspection"]
 categories = ["development-tools", "api-bindings"]
 readme = "../../README.md"
@@ -36,7 +36,7 @@ testing = ["otel", "opentelemetry_sdk/testing"]
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.44", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 # OpenTelemetry — gated by the `otel` feature so REST-only installs don't pull them.
 opentelemetry = { version = "0.33.0", default-features = false, features = ["logs", "trace"], optional = true }
@@ -52,20 +52,20 @@ opentelemetry-otlp = { version = "0.33.0", default-features = false, features = 
 # `gzip` makes the client advertise `Accept-Encoding: gzip` and decompress
 # responses transparently — the DP gateway compresses JSON when offered
 # (Arrow stream responses are never compressed and arrive unchanged).
-percent-encoding = "2"
+percent-encoding = { workspace = true }
 # `system-proxy` is what makes 0.13 honour HTTPS_PROXY / NO_PROXY; 0.12 did so
 # unconditionally, and a client behind a corporate proxy otherwise never connects.
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "query", "stream", "rustls", "rustls-native-certs", "gzip", "system-proxy"] }
+reqwest = { workspace = true, features = ["blocking", "multipart", "query", "stream", "rustls-native-certs", "gzip", "system-proxy"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Utilities
-uuid = { version = "1.22", features = ["v4", "v7", "serde"] }
-thiserror = "2"
+uuid = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
 tracing = "0.1"
-bytes = "1"
+bytes = { workspace = true }
 async-stream = "0.3"
 mime_guess = "2"
 fastrand = "2"
@@ -90,7 +90,7 @@ httpdate = "1.0.3"
 
 [dev-dependencies]
 ring = "0.17"
-tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # In-memory span / log exporters for the in-crate tests. As a dev-dependency
 # they are available under every feature set, so `cargo test --features otel`
 # builds the same tests as `--features testing`.
