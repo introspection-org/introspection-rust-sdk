@@ -57,6 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     args.insert(id, arguments.into());
                 }
             }
+            AgUiEvent::RunError(e) => return Err(format!("run failed: {}", e.message).into()),
             _ => {}
         }
     }
