@@ -73,7 +73,7 @@ match client.propose_mission(&agent, &metadata, &json!({ "description": "Sydney,
 
 ## Interop
 
-The tests pin this crate's signatures to [`@hellocoop/httpsig`](https://www.npmjs.com/package/@hellocoop/httpsig), by the spec's author, with fixed vectors in `tests/vectors/hellocoop.json`: requests it signed verify here, and what this crate signs is exactly what it verified.
+The tests check this crate against [`@hellocoop/httpsig`](https://www.npmjs.com/package/@hellocoop/httpsig), the RFC 9421 implementation by the AAuth draft's author, using fixed requests in `tests/vectors/hellocoop.json`. Requests that library signed must verify here, and requests this crate signs must match, byte for byte, ones that library has verified. None of them carries a query string; see `@query` below.
 
 ## Status
 
