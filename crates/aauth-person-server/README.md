@@ -27,7 +27,7 @@ let response = ps.handle(request).await;
 ps.decide(&approval_id, Decision::approve().with_budget(budget).by("dana@acme.example")).await?;
 ```
 
-You implement `Directory`, which says who you speak for and who decides for them. `Hooks` is optional and reports approvals, decisions and issued tokens. The default `Store` is in memory; for more than one process or a restart, put a database behind it. Every `Store` call is scoped by the AAuth `tenant` the agent names, so one Person Server can serve many organisations. To run it on hyper, see [`examples/server.rs`](examples/server.rs):
+You implement `Directory`, which says who you speak for and who decides for them. `Hooks` is optional and reports approvals, decisions and issued tokens. The default `Store` is in memory; for more than one process or a restart, put a database behind it. Every `Store` call is scoped by the AAuth `tenant` the agent names, or by the server's default tenant when it names none (`"default"` unless `Config::default_tenant` sets another; `Config::require_tenant` refuses such a request), so one Person Server can serve many organisations. To run it on hyper, see [`examples/server.rs`](examples/server.rs):
 
 ```bash
 PS_ISSUER=https://ps.acme.example PS_TRUSTED=https://api.introspection.dev \

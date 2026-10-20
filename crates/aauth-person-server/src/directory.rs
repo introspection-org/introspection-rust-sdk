@@ -5,9 +5,12 @@ use crate::types::{Approval, ApprovalKind, Issued, Person};
 /// Who this Person Server speaks for, and who decides for them.
 #[async_trait]
 pub trait Directory: Send + Sync {
-    /// The person a `login_hint` names, or `None` if this Person Server does
-    /// not speak for them.
-    async fn person(&self, login_hint: &str, tenant: Option<&str>) -> Option<Person>;
+    /// The person a `login_hint` names in `tenant`, or `None` if this Person
+    /// Server does not speak for them there. A person returned with a
+    /// tenant is in that tenant alone: a request under any other is
+    /// refused. One returned without a tenant takes the request's, so a
+    /// directory that serves several tenants checks `tenant` itself.
+    async fn person(&self, login_hint: &str, tenant: &str) -> Option<Person>;
 
     /// Who decides a request; the person themself when `None`.
     async fn approver(&self, _kind: ApprovalKind, _person: &Person) -> Option<Person> {

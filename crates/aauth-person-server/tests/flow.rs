@@ -30,7 +30,7 @@ struct People;
 
 #[async_trait]
 impl Directory for People {
-    async fn person(&self, hint: &str, _tenant: Option<&str>) -> Option<Person> {
+    async fn person(&self, hint: &str, _tenant: &str) -> Option<Person> {
         let (id, name) = match hint {
             "user:sam@acme.example" => ("sam", "Sam"),
             "user:dana@acme.example" => ("dana", "Dana"),
@@ -46,7 +46,7 @@ impl Directory for People {
     }
 
     async fn approver(&self, _kind: ApprovalKind, _person: &Person) -> Option<Person> {
-        self.person("user:dana@acme.example", None).await
+        self.person("user:dana@acme.example", "acme").await
     }
 }
 
@@ -80,6 +80,10 @@ impl World {
     }
 
     fn with_store(store: Option<Arc<dyn Store>>) -> Self {
+        Self::build(store, false)
+    }
+
+    fn build(store: Option<Arc<dyn Store>>, require_tenant: bool) -> Self {
         let ap = SigningKey::generate();
         let resource_key = SigningKey::generate();
         let ps_key = SigningKey::generate();
@@ -111,9 +115,12 @@ impl World {
         let clock = Arc::new(AtomicI64::new(T0));
         let seen = Seen::default();
         let now = clock.clone();
-        let mut config = Config::new(PS, People, [AP]);
+        let mut config = Config::new(PS, People, [AP]).default_tenant("acme");
         if let Some(store) = store {
             config = config.store(store);
+        }
+        if require_tenant {
+            config = config.require_tenant();
         }
         let ps = PersonServer::new(
             config
@@ -274,7 +281,7 @@ async fn approved_mission(world: &World, agent: &TestAgent) -> (String, String) 
     world
         .ps
         .decide(
-            None,
+            "acme",
             &world.last_approval().id,
             Decision::approve().with_budget(usd(300_000)).by("dana"),
         )
@@ -337,7 +344,7 @@ async fn a_mission_is_put_to_the_approver_and_its_tokens_are_minted_once_approve
     world
         .ps
         .decide(
-            None,
+            "acme",
             &approval.id,
             Decision::approve().with_budget(usd(300_000)),
         )
@@ -394,7 +401,7 @@ async fn a_charge_within_budget_is_issued_at_once_and_one_over_it_is_put_to_the_
         world
             .ps
             .store()
-            .mission(None, &s256)
+            .mission("acme", &s256)
             .await
             .unwrap()
             .unwrap()
@@ -416,7 +423,7 @@ async fn a_charge_within_budget_is_issued_at_once_and_one_over_it_is_put_to_the_
     assert_eq!(approval.budget, Some(usd(200_000)));
     world
         .ps
-        .decide(None, &approval.id, Decision::approve())
+        .decide("acme", &approval.id, Decision::approve())
         .await
         .unwrap();
     let (status, body, _) = world
@@ -428,7 +435,7 @@ async fn a_charge_within_budget_is_issued_at_once_and_one_over_it_is_put_to_the_
         world
             .ps
             .store()
-            .mission(None, &s256)
+            .mission("acme", &s256)
             .await
             .unwrap()
             .unwrap()
@@ -501,7 +508,7 @@ async fn completing_a_mission_is_the_persons_decision_and_ends_it() {
     );
     world
         .ps
-        .decide(None, &approval.id, Decision::approve())
+        .decide("acme", &approval.id, Decision::approve())
         .await
         .unwrap();
     let (status, _, _) = world
@@ -623,7 +630,7 @@ async fn an_unanswered_approval_expires() {
     assert_eq!(status, StatusCode::REQUEST_TIMEOUT);
     let late = world
         .ps
-        .decide(None, &world.last_approval().id, Decision::approve())
+        .decide("acme", &world.last_approval().id, Decision::approve())
         .await
         .unwrap_err();
     assert_eq!(late.status, StatusCode::GONE);
@@ -688,7 +695,7 @@ async fn an_approved_charge_is_collected_once() {
     assert_eq!(status, StatusCode::ACCEPTED);
     world
         .ps
-        .decide(None, &world.last_approval().id, Decision::approve())
+        .decide("acme", &world.last_approval().id, Decision::approve())
         .await
         .unwrap();
     let pending = location(&response);
@@ -702,7 +709,7 @@ async fn an_approved_charge_is_collected_once() {
         world
             .ps
             .store()
-            .mission(None, &s256)
+            .mission("acme", &s256)
             .await
             .unwrap()
             .unwrap()
@@ -725,14 +732,14 @@ async fn a_decision_is_made_once() {
         .await;
     let id = world.last_approval().id;
     let (first, second) = tokio::join!(
-        world.ps.decide(None, &id, Decision::approve()),
-        world.ps.decide(None, &id, Decision::approve()),
+        world.ps.decide("acme", &id, Decision::approve()),
+        world.ps.decide("acme", &id, Decision::approve()),
     );
     assert!(
         first.is_ok() != second.is_ok(),
         "exactly one decision lands"
     );
-    assert_eq!(world.ps.store().missions(None).await.unwrap().len(), 1);
+    assert_eq!(world.ps.store().missions("acme").await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -749,12 +756,12 @@ async fn a_terminated_mission_issues_nothing_more() {
         .await;
     let decided = world
         .ps
-        .decide(None, &world.last_approval().id, Decision::approve())
+        .decide("acme", &world.last_approval().id, Decision::approve())
         .await
         .unwrap();
     world
         .ps
-        .terminate(None, decided.mission_s256.as_deref().unwrap())
+        .terminate("acme", decided.mission_s256.as_deref().unwrap())
         .await
         .unwrap();
     let (status, body, _) = world
@@ -845,7 +852,7 @@ async fn identical_missions_approved_together_stay_apart() {
                 .await;
             world
                 .ps
-                .decide(None, &world.last_approval().id, Decision::approve())
+                .decide("acme", &world.last_approval().id, Decision::approve())
                 .await
                 .unwrap()
                 .mission_s256
@@ -854,10 +861,10 @@ async fn identical_missions_approved_together_stay_apart() {
     };
     // The same agent, description and resources, approved in the same second.
     let sams = propose(world.agent(), "user:sam@acme.example").await;
-    let ended = world.ps.terminate(None, &sams).await.unwrap();
+    let ended = world.ps.terminate("acme", &sams).await.unwrap();
     let danas = propose(world.agent(), "user:dana@acme.example").await;
     assert_ne!(sams, danas);
-    let still = world.ps.terminate(None, &sams).await.unwrap();
+    let still = world.ps.terminate("acme", &sams).await.unwrap();
     assert_eq!(still.person.id, "sam");
     assert_eq!(still.completed_at, ended.completed_at);
 }
@@ -874,41 +881,36 @@ struct LosesNextTransition {
 
 #[async_trait]
 impl Store for LosesNextTransition {
-    async fn binding(&self, t: Option<&str>, jkt: &str) -> StoreResult<Option<Person>> {
+    async fn binding(&self, t: &str, jkt: &str) -> StoreResult<Option<Person>> {
         self.inner.binding(t, jkt).await
     }
-    async fn bind(&self, t: Option<&str>, jkt: &str, person: &Person) -> StoreResult<Person> {
+    async fn bind(&self, t: &str, jkt: &str, person: &Person) -> StoreResult<Person> {
         if self.down.load(Ordering::SeqCst) {
             return Err(StoreError::new("the database is down"));
         }
         self.inner.bind(t, jkt, person).await
     }
-    async fn mission(&self, t: Option<&str>, s256: &str) -> StoreResult<Option<Mission>> {
+    async fn mission(&self, t: &str, s256: &str) -> StoreResult<Option<Mission>> {
         self.inner.mission(t, s256).await
     }
-    async fn insert_mission(&self, t: Option<&str>, mission: &Mission) -> StoreResult<bool> {
+    async fn insert_mission(&self, t: &str, mission: &Mission) -> StoreResult<bool> {
         self.inner.insert_mission(t, mission).await
     }
     async fn log_mission(
         &self,
-        t: Option<&str>,
+        t: &str,
         s256: &str,
         entry: LogEntry,
         now: i64,
     ) -> StoreResult<bool> {
         self.inner.log_mission(t, s256, entry, now).await
     }
-    async fn end_mission(
-        &self,
-        t: Option<&str>,
-        s256: &str,
-        at: i64,
-    ) -> StoreResult<Option<Mission>> {
+    async fn end_mission(&self, t: &str, s256: &str, at: i64) -> StoreResult<Option<Mission>> {
         self.inner.end_mission(t, s256, at).await
     }
     async fn spend(
         &self,
-        t: Option<&str>,
+        t: &str,
         s256: &str,
         amount: u64,
         rule: Spend,
@@ -919,18 +921,18 @@ impl Store for LosesNextTransition {
         }
         self.inner.spend(t, s256, amount, rule, now).await
     }
-    async fn missions(&self, t: Option<&str>) -> StoreResult<Vec<Mission>> {
+    async fn missions(&self, t: &str) -> StoreResult<Vec<Mission>> {
         self.inner.missions(t).await
     }
-    async fn approval(&self, t: Option<&str>, id: &str) -> StoreResult<Option<Approval>> {
+    async fn approval(&self, t: &str, id: &str) -> StoreResult<Option<Approval>> {
         self.inner.approval(t, id).await
     }
-    async fn insert_approval(&self, t: Option<&str>, approval: &Approval) -> StoreResult<()> {
+    async fn insert_approval(&self, t: &str, approval: &Approval) -> StoreResult<()> {
         self.inner.insert_approval(t, approval).await
     }
     async fn transition_approval(
         &self,
-        t: Option<&str>,
+        t: &str,
         expected: ApprovalStatus,
         next: &Approval,
     ) -> StoreResult<bool> {
@@ -939,7 +941,7 @@ impl Store for LosesNextTransition {
         }
         self.inner.transition_approval(t, expected, next).await
     }
-    async fn approvals(&self, t: Option<&str>) -> StoreResult<Vec<Approval>> {
+    async fn approvals(&self, t: &str) -> StoreResult<Vec<Approval>> {
         self.inner.approvals(t).await
     }
 }
@@ -960,18 +962,18 @@ async fn a_decision_that_loses_the_race_ends_the_mission_it_made() {
     store.lose.store(true, Ordering::SeqCst);
     let lost = world
         .ps
-        .decide(None, &id, Decision::approve())
+        .decide("acme", &id, Decision::approve())
         .await
         .unwrap_err();
     assert_eq!(lost.status, StatusCode::CONFLICT);
-    let missions = store.missions(None).await.unwrap();
+    let missions = store.missions("acme").await.unwrap();
     assert_eq!(missions.len(), 1);
     assert!(
         missions[0].completed_at.is_some(),
         "the mission it made is ended"
     );
     assert_eq!(
-        store.approval(None, &id).await.unwrap().unwrap().status,
+        store.approval("acme", &id).await.unwrap().unwrap().status,
         ApprovalStatus::Pending,
         "the decision did not land"
     );
@@ -1013,7 +1015,7 @@ async fn each_tenant_keeps_its_own_missions() {
     let pending = location(&response);
     assert!(pending.contains("/pending/acme/"), "{pending}");
     let id = world.last_approval().id;
-    for elsewhere in [None, Some("globex")] {
+    for elsewhere in ["default", "globex"] {
         let refused = world
             .ps
             .decide(elsewhere, &id, Decision::approve())
@@ -1023,11 +1025,7 @@ async fn each_tenant_keeps_its_own_missions() {
     }
     world
         .ps
-        .decide(
-            Some("acme"),
-            &id,
-            Decision::approve().with_budget(usd(1_000)),
-        )
+        .decide("acme", &id, Decision::approve().with_budget(usd(1_000)))
         .await
         .unwrap();
     let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
@@ -1066,10 +1064,9 @@ async fn each_tenant_keeps_its_own_missions() {
     let (status, body, _) = charge("").await;
     assert_eq!(
         status,
-        StatusCode::NOT_FOUND,
-        "naming no tenant finds no tenant's mission: {body}"
+        StatusCode::OK,
+        "naming none is under the default tenant, acme: {body}"
     );
-    assert_eq!(body["error"], "mission_not_found");
     let (status, body, _) = charge("acme").await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
@@ -1095,7 +1092,7 @@ async fn a_person_is_only_in_the_directorys_tenant() {
         world
             .ps
             .store()
-            .binding(Some("globex"), agent.key.thumbprint())
+            .binding("globex", agent.key.thumbprint())
             .await
             .unwrap()
             .is_none(),
@@ -1133,7 +1130,7 @@ async fn approved_charge(world: &World, agent: &TestAgent) -> (String, String) {
     assert_eq!(status, StatusCode::ACCEPTED);
     world
         .ps
-        .decide(None, &world.last_approval().id, Decision::approve())
+        .decide("acme", &world.last_approval().id, Decision::approve())
         .await
         .unwrap();
     (s256, location(&response))
@@ -1145,7 +1142,7 @@ async fn an_approved_charge_is_spent_when_its_token_is_collected() {
     let world = World::with_store(Some(store.clone()));
     let agent = world.agent();
     let (s256, pending) = approved_charge(&world, &agent).await;
-    let spent = || async { store.mission(None, &s256).await.unwrap().unwrap().spent };
+    let spent = || async { store.mission("acme", &s256).await.unwrap().unwrap().spent };
     assert_eq!(spent().await, 0, "deciding spends nothing");
 
     // The spend fails: no token, and the approval can be collected again.
@@ -1156,7 +1153,7 @@ async fn an_approved_charge_is_spent_when_its_token_is_collected() {
     assert_eq!(spent().await, 0);
     let id = world.last_approval().id;
     assert_eq!(
-        store.approval(None, &id).await.unwrap().unwrap().status,
+        store.approval("acme", &id).await.unwrap().unwrap().status,
         ApprovalStatus::Approved
     );
 
@@ -1174,7 +1171,7 @@ async fn an_approved_charge_under_an_ended_mission_issues_and_spends_nothing() {
     let world = World::new();
     let agent = world.agent();
     let (s256, pending) = approved_charge(&world, &agent).await;
-    world.ps.terminate(None, &s256).await.unwrap();
+    world.ps.terminate("acme", &s256).await.unwrap();
     let (status, body, _) = world.call(&agent, Method::GET, &pending, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["error"], "mission_terminated");
@@ -1182,11 +1179,39 @@ async fn an_approved_charge_under_an_ended_mission_issues_and_spends_nothing() {
         world
             .ps
             .store()
-            .mission(None, &s256)
+            .mission("acme", &s256)
             .await
             .unwrap()
             .unwrap()
             .spent,
         0
     );
+}
+
+#[tokio::test]
+async fn a_server_that_requires_a_tenant_refuses_a_request_naming_none() {
+    let world = World::build(None, true);
+    let agent = world.agent();
+    let (status, body, _) = world
+        .call(
+            &agent,
+            Method::POST,
+            &format!("{PS}/mission"),
+            Some(json!({ "description": "Sydney", "resources": [BOOKING], "login_hint": "user:sam@acme.example" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(world.seen.0.lock().unwrap().is_empty());
+    let (status, _, _) = world
+        .call(
+            &agent,
+            Method::POST,
+            &format!("{PS}/mission"),
+            Some(json!({
+                "description": "Sydney", "resources": [BOOKING],
+                "login_hint": "user:sam@acme.example", "tenant": "acme",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
 }

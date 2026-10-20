@@ -55,7 +55,12 @@ pub struct Config {
     retry_after: u64,
     fetch: Option<Arc<dyn Fetch>>,
     now: Clock,
+    default_tenant: Option<String>,
 }
+
+/// The tenant a request that names none is under, unless the server is
+/// set up otherwise.
+pub const DEFAULT_TENANT: &str = "default";
 
 impl Config {
     /// `issuer` is `https://host`, with no port or path. Agents may ask only
@@ -91,7 +96,22 @@ impl Config {
             retry_after: 5,
             fetch: None,
             now: Arc::new(aauth_protocol::now_unix),
+            default_tenant: Some(DEFAULT_TENANT.to_string()),
         }
+    }
+
+    /// The tenant a request that names none is under. Default:
+    /// [`DEFAULT_TENANT`]. A company's own Person Server names its own.
+    pub fn default_tenant(mut self, tenant: impl Into<String>) -> Self {
+        self.default_tenant = Some(tenant.into());
+        self
+    }
+
+    /// Refuse a request that names no tenant: for a Person Server that
+    /// serves several.
+    pub fn require_tenant(mut self) -> Self {
+        self.default_tenant = None;
+        self
     }
 
     /// Decide trust in an agent provider by its `iss` instead of a list.
@@ -201,15 +221,12 @@ pub struct Endpoints {
 
 impl Endpoints {
     /// Where the agent polls approval `id`, asked under `tenant`.
-    pub fn pending(&self, tenant: Option<&str>, id: &str) -> String {
-        match tenant {
-            Some(tenant) => format!(
-                "{}{}/{id}",
-                self.pending_prefix,
-                utf8_percent_encode(tenant, SEGMENT)
-            ),
-            None => format!("{}{id}", self.pending_prefix),
-        }
+    pub fn pending(&self, tenant: &str, id: &str) -> String {
+        format!(
+            "{}{}/{id}",
+            self.pending_prefix,
+            utf8_percent_encode(tenant, SEGMENT)
+        )
     }
 }
 
@@ -236,6 +253,7 @@ pub struct PersonServer {
     resolver: JwksResolver,
     now: Clock,
     endpoints: Endpoints,
+    default_tenant: Option<String>,
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -279,7 +297,8 @@ fn mission_not_found() -> AAuthError {
 /// What a tenant escapes to in a pending URL's path segment.
 const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.');
 
-fn tenant_of(params: &Map<String, Value>) -> Option<&str> {
+/// The tenant a request body names, if any.
+fn named(params: &Map<String, Value>) -> Option<&str> {
     str_of(params, "tenant").filter(|t| !t.is_empty())
 }
 
@@ -332,6 +351,7 @@ impl PersonServer {
             fetch,
             now: config.now,
             endpoints,
+            default_tenant: config.default_tenant,
             issuer: config.issuer,
         })
     }
@@ -371,6 +391,14 @@ impl PersonServer {
 
     fn now(&self) -> i64 {
         (self.now)()
+    }
+
+    /// The tenant a request is under: the one it names, else the default.
+    fn tenant(&self, named: Option<&str>) -> Result<String, AAuthError> {
+        named
+            .map(str::to_string)
+            .or_else(|| self.default_tenant.clone())
+            .ok_or_else(|| AAuthError::invalid_request("name the tenant"))
     }
 
     /// Answer any request; AAuth errors become problem responses and a
@@ -418,13 +446,14 @@ impl PersonServer {
             (&Method::POST, ["person-token"]) => self.request_person_token(request, path).await?,
             (&Method::POST, ["token"]) => self.request_auth_token(request, path).await?,
             (&Method::GET | &Method::DELETE, ["pending", id]) if !id.is_empty() => {
-                self.pending_state(request, path, None, id).await?
+                let tenant = self.tenant(None)?;
+                self.pending_state(request, path, &tenant, id).await?
             }
             (&Method::GET | &Method::DELETE, ["pending", tenant, id])
                 if !tenant.is_empty() && !id.is_empty() =>
             {
                 let tenant = percent_decode_str(tenant).decode_utf8_lossy();
-                self.pending_state(request, path, Some(&tenant), id).await?
+                self.pending_state(request, path, &tenant, id).await?
             }
             _ => return self.manage(request, &segments).await,
         };
@@ -520,26 +549,30 @@ impl PersonServer {
         agent: &Agent,
         params: &Map<String, Value>,
     ) -> Result<Person, AAuthError> {
-        let tenant = tenant_of(params);
+        let tenant = self.tenant(named(params))?;
+        let tenant = tenant.as_str();
         if let Some(hint) = str_of(params, "login_hint") {
             let Some(hinted) = self.directory.person(hint, tenant).await else {
                 return Err(AAuthError::invalid_request(
                     "not someone this Person Server speaks for",
                 ));
             };
-            // The directory's tenant is the person's; the agent can only
-            // name it, never change it.
-            if let (Some(named), Some(theirs)) = (tenant, hinted.tenant.as_deref()) {
-                if named != theirs {
-                    return Err(AAuthError::new(
-                        StatusCode::FORBIDDEN,
-                        "invalid_request",
-                        "this person is not in that tenant",
-                    ));
-                }
+            // The directory's tenant is the person's; a request can only be
+            // under it, never change it.
+            if hinted
+                .tenant
+                .as_deref()
+                .is_some_and(|theirs| theirs != tenant)
+            {
+                return Err(AAuthError::new(
+                    StatusCode::FORBIDDEN,
+                    "invalid_request",
+                    "this person is not in that tenant",
+                ));
             }
+            // Tokens name a tenant the directory gave or the agent named.
             let hinted = Person {
-                tenant: hinted.tenant.or(tenant.map(str::to_string)),
+                tenant: hinted.tenant.or_else(|| named(params).map(str::to_string)),
                 ..hinted
             };
             let bound = self.store.bind(tenant, &agent.jkt, &hinted).await?;
@@ -668,7 +701,7 @@ impl PersonServer {
         let mission = match params.get("mission_s256") {
             None | Some(Value::Null) => None,
             Some(hash) => Some(
-                self.live_mission(&agent, tenant_of(&params), hash.as_str())
+                self.live_mission(&agent, &self.tenant(named(&params))?, hash.as_str())
                     .await?,
             ),
         };
@@ -684,7 +717,7 @@ impl PersonServer {
     async fn live_mission(
         &self,
         agent: &Agent,
-        tenant: Option<&str>,
+        tenant: &str,
         s256: Option<&str>,
     ) -> Result<Mission, AAuthError> {
         let mission = match s256 {
@@ -748,7 +781,7 @@ impl PersonServer {
             agent,
             person,
             description.to_string(),
-            tenant_of(&params),
+            &self.tenant(named(&params))?,
         );
         self.ask(Approval { grant, ..approval }).await
     }
@@ -761,7 +794,8 @@ impl PersonServer {
     ) -> Result<Response<Bytes>, AAuthError> {
         let agent = self.verify_agent(request, path).await?;
         let params = read_body(request.body())?;
-        let tenant = tenant_of(&params);
+        let tenant = self.tenant(named(&params))?;
+        let tenant = tenant.as_str();
         let mission = self.live_mission(&agent, tenant, Some(s256)).await?;
         match str_of(&params, "action") {
             Some("update") => {
@@ -869,11 +903,15 @@ impl PersonServer {
         }
         let resource = trim(unverified.claim_str("iss").unwrap_or_default()).to_string();
         // The mission's approved resources are the only issuers whose keys are fetched.
-        let tenant = tenant_of(params);
-        // A tenant the agent names must be the one the presented token was
-        // issued under. Naming none scopes the lookup to no tenant, where
-        // another tenant's mission is not found.
-        if tenant.is_some() && presented.claim_str("tenant") != tenant {
+        let tenant = self.tenant(named(params))?;
+        let tenant = tenant.as_str();
+        // The request is under the tenant the presented token was issued
+        // under; a token that names none was issued under the default.
+        let issued_under = presented
+            .claim_str("tenant")
+            .map(str::to_string)
+            .or_else(|| self.default_tenant.clone());
+        if issued_under.as_deref() != Some(tenant) {
             return Err(invalid("tenant does not match the presented token"));
         }
         let mission = match unverified.claim_str("mission_s256") {
@@ -1000,7 +1038,8 @@ impl PersonServer {
         let agent = self.verify_agent(request, path).await?;
         let params = read_body(request.body())?;
         let (rt, mission, resource) = self.verify_resource_token(&agent, &params).await?;
-        let tenant = tenant_of(&params);
+        let tenant = mission.tenant.clone();
+        let tenant = tenant.as_str();
         let budget = Budget::from_value(rt.get("budget")).map_err(|_| {
             AAuthError::new(
                 StatusCode::BAD_REQUEST,
@@ -1065,7 +1104,7 @@ impl PersonServer {
         agent: Agent,
         person: Person,
         description: String,
-        tenant: Option<&str>,
+        tenant: &str,
     ) -> Approval {
         let created = self.now();
         Approval {
@@ -1086,7 +1125,7 @@ impl PersonServer {
             decided_at: None,
             created_at: created,
             expires_at: created + self.approval_ttl,
-            tenant: tenant.map(str::to_string),
+            tenant: tenant.to_string(),
         }
     }
 
@@ -1100,13 +1139,13 @@ impl PersonServer {
                 approval.approver = approver;
             }
         }
-        let tenant = approval.tenant.as_deref();
+        let tenant = approval.tenant.as_str();
         self.store.insert_approval(tenant, &approval).await?;
         self.hooks.on_approval(&approval).await;
         Ok(self.still_pending(tenant, &approval.id))
     }
 
-    fn still_pending(&self, tenant: Option<&str>, id: &str) -> Response<Bytes> {
+    fn still_pending(&self, tenant: &str, id: &str) -> Response<Bytes> {
         let mut response = json_response(StatusCode::ACCEPTED, &json!({ "status": "pending" }));
         let headers = response.headers_mut();
         for (name, value) in [
@@ -1131,7 +1170,7 @@ impl PersonServer {
         &self,
         request: &Request<Bytes>,
         path: &str,
-        tenant: Option<&str>,
+        tenant: &str,
         id: &str,
     ) -> Result<Response<Bytes>, AAuthError> {
         let agent = self.verify_agent(request, path).await?;
@@ -1270,7 +1309,7 @@ impl PersonServer {
     /// concurrent one, is a `409`.
     pub async fn decide(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         id: &str,
         decision: Decision,
     ) -> Result<Approval, AAuthError> {
@@ -1396,7 +1435,7 @@ impl PersonServer {
 
     /// End mission `s256`, approved under `tenant`, now: nothing is issued
     /// under it afterwards.
-    pub async fn terminate(&self, tenant: Option<&str>, s256: &str) -> Result<Mission, AAuthError> {
+    pub async fn terminate(&self, tenant: &str, s256: &str) -> Result<Mission, AAuthError> {
         self.store
             .end_mission(tenant, s256, self.now())
             .await?
@@ -1435,8 +1474,8 @@ impl PersonServer {
                     .map(|(_, v)| v.into_owned())
             })
         };
-        let tenant = query("tenant").filter(|t| !t.is_empty());
-        let tenant = tenant.as_deref();
+        let tenant = self.tenant(query("tenant").filter(|t| !t.is_empty()).as_deref())?;
+        let tenant = tenant.as_str();
         let response = match segments {
             ["consent"] => {
                 self.admitted(request)?;

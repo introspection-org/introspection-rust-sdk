@@ -122,9 +122,8 @@ pub struct Approval {
     pub created_at: i64,
     /// When it expires undecided.
     pub expires_at: i64,
-    /// The AAuth `tenant` it was asked under.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tenant: Option<String>,
+    /// The tenant it was asked under.
+    pub tenant: String,
 }
 
 /// An update the agent logged against a mission.
@@ -162,9 +161,8 @@ pub struct Mission {
     /// When it was completed or terminated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
-    /// The AAuth `tenant` it was approved under.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tenant: Option<String>,
+    /// The tenant it was approved under.
+    pub tenant: String,
 }
 
 impl Mission {

@@ -25,11 +25,10 @@ struct Emails;
 
 #[async_trait]
 impl Directory for Emails {
-    async fn person(&self, hint: &str, tenant: Option<&str>) -> Option<Person> {
+    async fn person(&self, hint: &str, _tenant: &str) -> Option<Person> {
         let email = hint.strip_prefix("user:")?;
         Some(Person {
             email: Some(email.to_string()),
-            tenant: tenant.map(str::to_string),
             ..Person::new(email)
         })
     }

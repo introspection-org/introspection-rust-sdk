@@ -37,7 +37,7 @@
 //!
 //! #[async_trait]
 //! impl Directory for Staff {
-//!     async fn person(&self, login_hint: &str, _tenant: Option<&str>) -> Option<Person> {
+//!     async fn person(&self, login_hint: &str, _tenant: &str) -> Option<Person> {
 //!         let email = login_hint.strip_prefix("user:")?.strip_suffix("@acme.example")?;
 //!         Some(Person::new(email))
 //!     }
@@ -74,7 +74,7 @@
 //! // Later, when Dana answers an approval:
 //! # let approval_id = "an-approval-id";
 //! # let _ =
-//! ps.decide(None, approval_id, Decision::approve().by("dana@acme.example")).await;
+//! ps.decide("default", approval_id, Decision::approve().by("dana@acme.example")).await;
 //! # Ok(())
 //! # }
 //! ```
@@ -102,7 +102,7 @@
 //! | `POST /mission/{s256}` | `update` or `completion` |
 //! | `POST /person-token` | a person token |
 //! | `POST /token` | an auth token, for a resource token |
-//! | `GET`, `DELETE /pending/[{tenant}/]{id}` | poll, or withdraw, a pending request |
+//! | `GET`, `DELETE /pending/{tenant}/{id}` | poll, or withdraw, a pending request |
 //!
 //! With [`Config::admin_token`], the management routes are on too, behind
 //! `Authorization: Bearer <token>`: `GET /consent[?status=]`,
@@ -112,9 +112,14 @@
 //! # Tenants
 //!
 //! A Person Server can serve many organisations at once. An agent names its
-//! AAuth `tenant` in each request body; the pending URL carries it, tokens
-//! carry it as `tenant`, and every [`Store`] call is scoped by it, so one
-//! tenant's missions, approvals and key bindings are never another's.
+//! AAuth `tenant` in each request body, and a request that names none is
+//! under the server's default tenant ([`Config::default_tenant`],
+//! [`DEFAULT_TENANT`] unless set; [`Config::require_tenant`] refuses such a
+//! request instead). The pending URL carries the tenant, tokens carry the
+//! one the agent named or the directory gave, and every [`Store`] call is
+//! scoped by it, so one tenant's missions, approvals and key bindings are
+//! never another's. A person the directory places in a tenant is in that
+//! tenant alone.
 //!
 //! # Deploying
 //!
@@ -154,7 +159,7 @@ mod types;
 pub use aauth_protocol;
 pub use directory::{Directory, Hooks, NoHooks};
 pub use error::{problem, AAuthError};
-pub use server::{Config, Endpoints, PersonServer};
+pub use server::{Config, Endpoints, PersonServer, DEFAULT_TENANT};
 pub use store::{MemoryStore, Spend, Store, StoreError, StoreResult};
 pub use types::{
     Agent, Approval, ApprovalKind, ApprovalStatus, Decision, Issued, IssuedKind, LogEntry, Mission,

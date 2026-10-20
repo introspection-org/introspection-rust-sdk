@@ -30,7 +30,7 @@ struct Sam;
 
 #[async_trait]
 impl Directory for Sam {
-    async fn person(&self, hint: &str, _tenant: Option<&str>) -> Option<Person> {
+    async fn person(&self, hint: &str, _tenant: &str) -> Option<Person> {
         (hint == "user:sam@acme.example").then(|| Person::new("sam"))
     }
 
@@ -143,7 +143,9 @@ async fn the_agent_client_runs_a_mission_with_this_server() {
     ));
 
     let id = seen.0.lock().unwrap()[0].id.clone();
-    ps.decide(None, &id, Decision::approve()).await.unwrap();
+    ps.decide("default", &id, Decision::approve())
+        .await
+        .unwrap();
     let Answer::Granted(granted) = client.poll(&agent, &location).await.unwrap() else {
         panic!("expected the mission")
     };

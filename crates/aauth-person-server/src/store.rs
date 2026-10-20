@@ -44,8 +44,9 @@ pub type StoreResult<T> = Result<T, StoreError>;
 
 /// Where a Person Server keeps its state.
 ///
-/// Every method takes the request's `tenant`, the AAuth `tenant` the agent
-/// named (`None` when it named none), and must keep each tenant's records
+/// Every method takes the request's tenant: the AAuth `tenant` the agent
+/// named, or the server's default tenant when it named none (see
+/// [`crate::Config::default_tenant`]). A store keeps each tenant's records
 /// apart: a record is found only under the tenant it was saved with. A
 /// tenant the store cannot scope, such as one in a format it does not
 /// serve, finds nothing.
@@ -59,63 +60,58 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[async_trait]
 pub trait Store: Send + Sync {
     /// The person an agent key is bound to.
-    async fn binding(&self, tenant: Option<&str>, jkt: &str) -> StoreResult<Option<Person>>;
+    async fn binding(&self, tenant: &str, jkt: &str) -> StoreResult<Option<Person>>;
     /// Bind a key to a person unless it is bound already; returns whoever it is bound to.
-    async fn bind(&self, tenant: Option<&str>, jkt: &str, person: &Person) -> StoreResult<Person>;
+    async fn bind(&self, tenant: &str, jkt: &str, person: &Person) -> StoreResult<Person>;
     /// The mission `s256` names.
-    async fn mission(&self, tenant: Option<&str>, s256: &str) -> StoreResult<Option<Mission>>;
+    async fn mission(&self, tenant: &str, s256: &str) -> StoreResult<Option<Mission>>;
     /// Save a newly approved mission, unless one with its hash exists.
     /// Returns whether it did: an existing mission is never replaced.
-    async fn insert_mission(&self, tenant: Option<&str>, mission: &Mission) -> StoreResult<bool>;
+    async fn insert_mission(&self, tenant: &str, mission: &Mission) -> StoreResult<bool>;
     /// Append `entry` to a live mission's log. Returns whether it was live.
     async fn log_mission(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         s256: &str,
         entry: LogEntry,
         now: i64,
     ) -> StoreResult<bool>;
     /// Mark a mission completed at `at`, unless it already was. Returns the
     /// mission, or `None` when there is no such mission.
-    async fn end_mission(
-        &self,
-        tenant: Option<&str>,
-        s256: &str,
-        at: i64,
-    ) -> StoreResult<Option<Mission>>;
+    async fn end_mission(&self, tenant: &str, s256: &str, at: i64) -> StoreResult<Option<Mission>>;
     /// Add `amount` to a live mission's spend, under `rule`. Returns the
     /// mission as spent, or `None` when it was not live or `amount` did not fit.
     async fn spend(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         s256: &str,
         amount: u64,
         rule: Spend,
         now: i64,
     ) -> StoreResult<Option<Mission>>;
     /// The tenant's missions, for the management routes.
-    async fn missions(&self, tenant: Option<&str>) -> StoreResult<Vec<Mission>>;
+    async fn missions(&self, tenant: &str) -> StoreResult<Vec<Mission>>;
     /// The approval `id` names.
-    async fn approval(&self, tenant: Option<&str>, id: &str) -> StoreResult<Option<Approval>>;
+    async fn approval(&self, tenant: &str, id: &str) -> StoreResult<Option<Approval>>;
     /// Save a new approval.
-    async fn insert_approval(&self, tenant: Option<&str>, approval: &Approval) -> StoreResult<()>;
+    async fn insert_approval(&self, tenant: &str, approval: &Approval) -> StoreResult<()>;
     /// Replace approval `next.id` with `next`, only if its status is still
     /// `expected`. Returns whether it did.
     async fn transition_approval(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         expected: ApprovalStatus,
         next: &Approval,
     ) -> StoreResult<bool>;
     /// The tenant's approvals, for the management routes.
-    async fn approvals(&self, tenant: Option<&str>) -> StoreResult<Vec<Approval>>;
+    async fn approvals(&self, tenant: &str) -> StoreResult<Vec<Approval>>;
 }
 
 /// A record's key: its tenant and its own identifier.
-type Key = (Option<String>, String);
+type Key = (String, String);
 
-fn key(tenant: Option<&str>, id: &str) -> Key {
-    (tenant.map(str::to_string), id.to_string())
+fn key(tenant: &str, id: &str) -> Key {
+    (tenant.to_string(), id.to_string())
 }
 
 #[derive(Default)]
@@ -152,11 +148,11 @@ impl MemoryStore {
 
 #[async_trait]
 impl Store for MemoryStore {
-    async fn binding(&self, tenant: Option<&str>, jkt: &str) -> StoreResult<Option<Person>> {
+    async fn binding(&self, tenant: &str, jkt: &str) -> StoreResult<Option<Person>> {
         self.with(|s| s.bindings.get(&key(tenant, jkt)).cloned())
     }
 
-    async fn bind(&self, tenant: Option<&str>, jkt: &str, person: &Person) -> StoreResult<Person> {
+    async fn bind(&self, tenant: &str, jkt: &str, person: &Person) -> StoreResult<Person> {
         self.with(|s| {
             s.bindings
                 .entry(key(tenant, jkt))
@@ -165,11 +161,11 @@ impl Store for MemoryStore {
         })
     }
 
-    async fn mission(&self, tenant: Option<&str>, s256: &str) -> StoreResult<Option<Mission>> {
+    async fn mission(&self, tenant: &str, s256: &str) -> StoreResult<Option<Mission>> {
         self.with(|s| s.missions.get(&key(tenant, s256)).cloned())
     }
 
-    async fn insert_mission(&self, tenant: Option<&str>, mission: &Mission) -> StoreResult<bool> {
+    async fn insert_mission(&self, tenant: &str, mission: &Mission) -> StoreResult<bool> {
         self.with(|s| match s.missions.entry(key(tenant, &mission.s256)) {
             Entry::Occupied(_) => false,
             Entry::Vacant(slot) => {
@@ -181,7 +177,7 @@ impl Store for MemoryStore {
 
     async fn log_mission(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         s256: &str,
         entry: LogEntry,
         now: i64,
@@ -195,12 +191,7 @@ impl Store for MemoryStore {
         })
     }
 
-    async fn end_mission(
-        &self,
-        tenant: Option<&str>,
-        s256: &str,
-        at: i64,
-    ) -> StoreResult<Option<Mission>> {
+    async fn end_mission(&self, tenant: &str, s256: &str, at: i64) -> StoreResult<Option<Mission>> {
         self.with(|s| {
             let mission = s.missions.get_mut(&key(tenant, s256))?;
             mission.completed_at.get_or_insert(at);
@@ -210,7 +201,7 @@ impl Store for MemoryStore {
 
     async fn spend(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         s256: &str,
         amount: u64,
         rule: Spend,
@@ -232,21 +223,21 @@ impl Store for MemoryStore {
         })
     }
 
-    async fn missions(&self, tenant: Option<&str>) -> StoreResult<Vec<Mission>> {
+    async fn missions(&self, tenant: &str) -> StoreResult<Vec<Mission>> {
         self.with(|s| {
             s.missions
                 .iter()
-                .filter(|((t, _), _)| t.as_deref() == tenant)
+                .filter(|((t, _), _)| t == tenant)
                 .map(|(_, m)| m.clone())
                 .collect()
         })
     }
 
-    async fn approval(&self, tenant: Option<&str>, id: &str) -> StoreResult<Option<Approval>> {
+    async fn approval(&self, tenant: &str, id: &str) -> StoreResult<Option<Approval>> {
         self.with(|s| s.approvals.get(&key(tenant, id)).cloned())
     }
 
-    async fn insert_approval(&self, tenant: Option<&str>, approval: &Approval) -> StoreResult<()> {
+    async fn insert_approval(&self, tenant: &str, approval: &Approval) -> StoreResult<()> {
         self.with(|s| {
             let now = approval.created_at;
             s.approvals
@@ -258,7 +249,7 @@ impl Store for MemoryStore {
 
     async fn transition_approval(
         &self,
-        tenant: Option<&str>,
+        tenant: &str,
         expected: ApprovalStatus,
         next: &Approval,
     ) -> StoreResult<bool> {
@@ -271,11 +262,11 @@ impl Store for MemoryStore {
         })
     }
 
-    async fn approvals(&self, tenant: Option<&str>) -> StoreResult<Vec<Approval>> {
+    async fn approvals(&self, tenant: &str) -> StoreResult<Vec<Approval>> {
         self.with(|s| {
             s.approvals
                 .iter()
-                .filter(|((t, _), _)| t.as_deref() == tenant)
+                .filter(|((t, _), _)| t == tenant)
                 .map(|(_, a)| a.clone())
                 .collect()
         })
@@ -298,17 +289,23 @@ mod tests {
             log: Vec::new(),
             expires_at: i64::MAX,
             completed_at: None,
-            tenant: None,
+            tenant: "default".into(),
         }
     }
 
     #[tokio::test]
     async fn a_mission_is_never_replaced() {
         let store = MemoryStore::default();
-        assert!(store.insert_mission(None, &mission("sam")).await.unwrap());
-        store.end_mission(None, "h", 10).await.unwrap();
-        assert!(!store.insert_mission(None, &mission("dana")).await.unwrap());
-        let kept = store.mission(None, "h").await.unwrap().unwrap();
+        assert!(store
+            .insert_mission("default", &mission("sam"))
+            .await
+            .unwrap());
+        store.end_mission("default", "h", 10).await.unwrap();
+        assert!(!store
+            .insert_mission("default", &mission("dana"))
+            .await
+            .unwrap());
+        let kept = store.mission("default", "h").await.unwrap().unwrap();
         assert_eq!(kept.person.id, "sam");
         assert_eq!(kept.completed_at, Some(10));
     }
@@ -316,23 +313,17 @@ mod tests {
     #[tokio::test]
     async fn each_tenant_sees_only_its_own() {
         let store = MemoryStore::default();
+        assert!(store.insert_mission("acme", &mission("sam")).await.unwrap());
         assert!(store
-            .insert_mission(Some("acme"), &mission("sam"))
-            .await
-            .unwrap());
-        assert!(store
-            .insert_mission(Some("globex"), &mission("hank"))
+            .insert_mission("globex", &mission("hank"))
             .await
             .unwrap());
         let at = |t| store.mission(t, "h");
-        assert_eq!(at(Some("acme")).await.unwrap().unwrap().person.id, "sam");
-        assert_eq!(at(Some("globex")).await.unwrap().unwrap().person.id, "hank");
-        assert!(at(None).await.unwrap().is_none());
-        assert_eq!(store.missions(Some("acme")).await.unwrap().len(), 1);
-        store
-            .bind(Some("acme"), "k", &Person::new("sam"))
-            .await
-            .unwrap();
-        assert!(store.binding(Some("globex"), "k").await.unwrap().is_none());
+        assert_eq!(at("acme").await.unwrap().unwrap().person.id, "sam");
+        assert_eq!(at("globex").await.unwrap().unwrap().person.id, "hank");
+        assert!(at("default").await.unwrap().is_none());
+        assert_eq!(store.missions("acme").await.unwrap().len(), 1);
+        store.bind("acme", "k", &Person::new("sam")).await.unwrap();
+        assert!(store.binding("globex", "k").await.unwrap().is_none());
     }
 }
