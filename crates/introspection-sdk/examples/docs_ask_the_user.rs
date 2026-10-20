@@ -33,13 +33,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let stream = handle.stream().await?;
     tokio::pin!(stream);
     while let Some(event) = stream.next().await {
-        if let AgUiEvent::RunFinished(e) = event? {
-            if let Some(outcome) = e.outcome.filter(|o| o["type"] == "interrupt") {
-                interrupts = outcome["interrupts"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
+        match event? {
+            AgUiEvent::RunFinished(e) => {
+                if let Some(outcome) = e.outcome.filter(|o| o["type"] == "interrupt") {
+                    interrupts = outcome["interrupts"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                }
             }
+            AgUiEvent::RunError(e) => return Err(format!("run failed: {}", e.message).into()),
+            _ => {}
         }
     }
     // #endregion docs:patterns/ask-the-user/detect-pause
