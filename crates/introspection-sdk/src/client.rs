@@ -284,8 +284,8 @@ impl IntrospectionClient {
     ///
     /// The token is not auto-refreshed: it lives for `expires_in` seconds, so
     /// re-mint (call this again) for long-lived processes once it lapses.
-    /// The resolved Data Plane URL is wired into the annotation and
-    /// project-label namespaces automatically.
+    /// The resolved Data Plane URL is wired into the annotation and tag
+    /// namespaces automatically.
     ///
     /// # Example
     ///
