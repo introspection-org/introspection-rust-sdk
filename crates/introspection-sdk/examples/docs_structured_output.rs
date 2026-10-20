@@ -44,6 +44,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             AgUiEvent::ToolCallArgs(e) => {
                 args.entry(e.tool_call_id).or_default().push_str(&e.delta)
             }
+            // A reconnect behind the replay buffer sends the run so far instead.
+            AgUiEvent::MessagesSnapshot(e) => {
+                args.clear();
+                let calls = e.messages.iter().filter_map(|m| m["toolCalls"].as_array());
+                for call in calls.flatten() {
+                    let id = call["id"].as_str().unwrap_or_default().to_string();
+                    if call["function"]["name"] == "submit_result" {
+                        submit_id = Some(id.clone());
+                    }
+                    let arguments = call["function"]["arguments"].as_str().unwrap_or_default();
+                    args.insert(id, arguments.into());
+                }
+            }
             _ => {}
         }
     }
