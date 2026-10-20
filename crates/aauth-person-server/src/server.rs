@@ -250,27 +250,15 @@ impl Endpoints {
 /// A Person Server. Build one with [`PersonServer::new`] from a [`Config`],
 /// then hand it requests with [`PersonServer::handle`].
 pub struct PersonServer {
-    issuer: String,
-    authority: String,
-    base: String,
-    directory: Arc<dyn Directory>,
-    trusted: Trust,
+    config: Config,
+    // Resolved from the config: what it leaves unset is made here.
     key: SigningKey,
     secret: String,
-    store: Arc<dyn Store>,
-    hooks: Arc<dyn Hooks>,
-    admin_token: Option<String>,
-    name: Option<String>,
-    description: Option<String>,
-    token_ttl: i64,
-    mission_ttl: i64,
-    approval_ttl: i64,
-    retry_after: u64,
     fetch: Arc<dyn Fetch>,
+    // Derived from the config.
+    authority: String,
     resolver: JwksResolver,
-    now: Clock,
     endpoints: Endpoints,
-    tenancy: Tenancy,
 }
 
 /// A duration in whole seconds, as token and mission times are kept.
@@ -331,14 +319,14 @@ impl PersonServer {
     /// A Person Server as `config` describes it. Fails when the issuer is
     /// not a server identifier, or no [`Fetch`] is given without the
     /// `reqwest` feature.
-    pub fn new(config: Config) -> aauth_protocol::Result<Self> {
+    pub fn new(mut config: Config) -> aauth_protocol::Result<Self> {
         if !is_server_identifier(&config.issuer) {
             return Err(aauth_protocol::Error::Invalid(format!(
                 "issuer {} must be https://host with no port or path",
                 config.issuer
             )));
         }
-        let fetch = match config.fetch {
+        let fetch = match config.fetch.take() {
             Some(fetch) => fetch,
             None => default_fetch()?,
         };
@@ -354,33 +342,25 @@ impl PersonServer {
             pending_prefix: url("/pending/"),
         };
         Ok(Self {
-            authority,
-            base: config.base_path,
-            directory: config.directory,
-            trusted: config.trusted,
-            key: config.signing_key.unwrap_or_else(SigningKey::generate),
-            secret: config.subject_secret.unwrap_or_else(|| random_hex(32)),
-            store: config.store,
-            hooks: config.hooks,
-            admin_token: config.admin_token,
-            name: config.name,
-            description: config.description,
-            token_ttl: secs(config.token_ttl),
-            mission_ttl: secs(config.mission_ttl),
-            approval_ttl: secs(config.approval_ttl),
-            retry_after: config.retry_after.as_secs(),
+            key: config
+                .signing_key
+                .take()
+                .unwrap_or_else(SigningKey::generate),
+            secret: config
+                .subject_secret
+                .take()
+                .unwrap_or_else(|| random_hex(32)),
             resolver: JwksResolver::new(fetch.clone()),
             fetch,
-            now: config.now,
+            authority,
             endpoints,
-            tenancy: config.tenancy,
-            issuer: config.issuer,
+            config,
         })
     }
 
     /// Its server identifier.
     pub fn issuer(&self) -> &str {
-        &self.issuer
+        &self.config.issuer
     }
 
     /// The URLs it answers at.
@@ -390,19 +370,19 @@ impl PersonServer {
 
     /// Where its state is kept.
     pub fn store(&self) -> &Arc<dyn Store> {
-        &self.store
+        &self.config.store
     }
 
     /// Its `aauth-person.json`.
     pub fn metadata(&self) -> PersonServerMetadata {
         PersonServerMetadata {
-            issuer: self.issuer.clone(),
+            issuer: self.config.issuer.clone(),
             auth_token_endpoint: self.endpoints.token.clone(),
             person_token_endpoint: Some(self.endpoints.person_token.clone()),
             mission_endpoint: Some(self.endpoints.mission.clone()),
-            jwks_uri: Some(format!("{}/.well-known/jwks.json", self.issuer)),
-            name: self.name.clone(),
-            description: self.description.clone(),
+            jwks_uri: Some(format!("{}/.well-known/jwks.json", self.config.issuer)),
+            name: self.config.name.clone(),
+            description: self.config.description.clone(),
         }
     }
 
@@ -412,11 +392,11 @@ impl PersonServer {
     }
 
     fn now(&self) -> i64 {
-        (self.now)()
+        (self.config.now)()
     }
 
     fn default_tenant(&self) -> Option<&str> {
-        match &self.tenancy {
+        match &self.config.tenancy {
             Tenancy::Default(tenant) => Some(tenant),
             Tenancy::Required => None,
         }
@@ -460,10 +440,10 @@ impl PersonServer {
         if method == Method::GET && pathname == "/.well-known/jwks.json" {
             return Ok(Some(ok(&self.jwks())));
         }
-        let Some(path) = pathname.strip_prefix(self.base.as_str()) else {
+        let Some(path) = pathname.strip_prefix(self.config.base_path.as_str()) else {
             return Ok(None);
         };
-        if !self.base.is_empty() && !path.starts_with('/') {
+        if !self.config.base_path.is_empty() && !path.starts_with('/') {
             return Ok(None);
         }
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
@@ -496,7 +476,7 @@ impl PersonServer {
         request: &Request<Bytes>,
         path: &str,
     ) -> Result<Agent, AAuthError> {
-        let full_path = format!("{}{path}", self.base);
+        let full_path = format!("{}{path}", self.config.base_path);
         let body = request.body();
         let verified = httpsig::verify(
             &Incoming {
@@ -530,7 +510,7 @@ impl PersonServer {
         let decoded =
             jwt::decode(raw).map_err(|_| AAuthError::signature("invalid_jwt", "not a JWT"))?;
         let provider = trim(decoded.claim_str("iss").unwrap_or_default()).to_string();
-        if !(self.trusted)(&provider) {
+        if !(self.config.trusted)(&provider) {
             return Err(AAuthError::signature(
                 "invalid_jwt",
                 format!("{provider} is not trusted here"),
@@ -540,7 +520,7 @@ impl PersonServer {
             &VerifyTokenOptions {
                 jwt: raw,
                 http_signature_thumbprint: &verified.thumbprint,
-                resource: &self.issuer,
+                resource: &self.config.issuer,
                 accept: &[TokenKind::Agent],
                 now: self.now(),
                 clock_tolerance: 60,
@@ -556,7 +536,7 @@ impl PersonServer {
             };
             AAuthError::signature(code, e.detail)
         })?;
-        if token.ps().is_some_and(|ps| trim(ps) != self.issuer) {
+        if token.ps().is_some_and(|ps| trim(ps) != self.config.issuer) {
             return Err(AAuthError::new(
                 StatusCode::FORBIDDEN,
                 "invalid_request",
@@ -581,7 +561,7 @@ impl PersonServer {
         let tenant = self.tenant(named(params))?;
         let tenant = tenant.as_str();
         if let Some(hint) = str_of(params, "login_hint") {
-            let Some(hinted) = self.directory.person(hint, tenant).await else {
+            let Some(hinted) = self.config.directory.person(hint, tenant).await else {
                 return Err(AAuthError::invalid_request(
                     "not someone this Person Server speaks for",
                 ));
@@ -604,7 +584,7 @@ impl PersonServer {
                 tenant: hinted.tenant.or_else(|| named(params).map(str::to_string)),
                 ..hinted
             };
-            let bound = self.store.bind(tenant, &agent.jkt, &hinted).await?;
+            let bound = self.config.store.bind(tenant, &agent.jkt, &hinted).await?;
             if bound.id != hinted.id {
                 return Err(AAuthError::new(
                     StatusCode::FORBIDDEN,
@@ -614,7 +594,8 @@ impl PersonServer {
             }
             return Ok(hinted);
         }
-        self.store
+        self.config
+            .store
             .binding(tenant, &agent.jkt)
             .await?
             .ok_or_else(|| AAuthError::invalid_request("name the person: login_hint"))
@@ -636,9 +617,9 @@ impl PersonServer {
         person: &Person,
     ) -> (String, i64) {
         let iat = self.now();
-        let exp = (iat + self.token_ttl).min(not_after);
+        let exp = (iat + secs(self.config.token_ttl)).min(not_after);
         let mut all = Map::new();
-        all.insert("iss".into(), json!(self.issuer));
+        all.insert("iss".into(), json!(self.config.issuer));
         all.insert("dwk".into(), json!(dwk::PERSON));
         all.insert("jti".into(), json!(uuid::Uuid::new_v4().to_string()));
         all.insert("iat".into(), json!(iat));
@@ -666,7 +647,8 @@ impl PersonServer {
         }
         let not_after = agent.exp.min(mission.map_or(i64::MAX, |m| m.expires_at));
         let (token, expires_in) = self.issue(TokenKind::Person, claims, not_after, person);
-        self.hooks
+        self.config
+            .hooks
             .on_issued(&Issued {
                 kind: IssuedKind::PersonToken,
                 agent: agent.clone(),
@@ -686,7 +668,7 @@ impl PersonServer {
         grant: &Map<String, Value>,
     ) -> Value {
         let mut claims = Map::new();
-        claims.insert("ps".into(), json!(self.issuer));
+        claims.insert("ps".into(), json!(self.config.issuer));
         claims.insert("cnf".into(), json!({ "jwk": agent.jwk }));
         claims.insert("mission_s256".into(), json!(mission.s256));
         claims.extend(grant.clone());
@@ -696,7 +678,8 @@ impl PersonServer {
             agent.exp.min(mission.expires_at),
             &mission.person,
         );
-        self.hooks
+        self.config
+            .hooks
             .on_issued(&Issued {
                 kind: IssuedKind::AuthToken,
                 agent: agent.clone(),
@@ -750,7 +733,7 @@ impl PersonServer {
         s256: Option<&str>,
     ) -> Result<Mission, AAuthError> {
         let mission = match s256 {
-            Some(s256) => self.store.mission(tenant, s256).await?,
+            Some(s256) => self.config.store.mission(tenant, s256).await?,
             None => None,
         };
         let Some(mission) = mission.filter(|m| m.agent_id == agent.id) else {
@@ -759,7 +742,12 @@ impl PersonServer {
         // The agent identifier is the provider's; the person is the key's.
         // Another key under the same identifier, bound to someone else, gets
         // the same 404 as a stranger.
-        if self.store.binding(tenant, &agent.jkt).await?.map(|p| p.id)
+        if self
+            .config
+            .store
+            .binding(tenant, &agent.jkt)
+            .await?
+            .map(|p| p.id)
             != Some(mission.person.id.clone())
         {
             return Err(mission_not_found());
@@ -834,6 +822,7 @@ impl PersonServer {
                 let hash = aauth_protocol::s256(&entry);
                 let now = self.now();
                 if !self
+                    .config
                     .store
                     .log_mission(tenant, &mission.s256, LogEntry { at: now, entry }, now)
                     .await?
@@ -891,7 +880,7 @@ impl PersonServer {
             .ok()
             .filter(|p| p.kid() == Some(self.key.thumbprint()) || p.kid().is_none())
             .filter(|p| p.verify_signature(&self.key.public_jwk(), Algorithm::Ed25519))
-            .filter(|p| p.claim_str("iss") == Some(self.issuer.as_str()))
+            .filter(|p| p.claim_str("iss") == Some(self.config.issuer.as_str()))
             .filter(|p| {
                 [TokenKind::Person.typ(), TokenKind::Auth.typ()]
                     .contains(&p.typ().unwrap_or_default())
@@ -995,8 +984,8 @@ impl PersonServer {
         {
             return Err(invalid("resource token is not yet valid"));
         }
-        if str_of(&rt, "aud") != Some(self.issuer.as_str())
-            || trim(str_of(&rt, "ps").unwrap_or_default()) != self.issuer
+        if str_of(&rt, "aud") != Some(self.config.issuer.as_str())
+            || trim(str_of(&rt, "ps").unwrap_or_default()) != self.config.issuer
         {
             return Err(invalid("not for this Person Server"));
         }
@@ -1027,7 +1016,7 @@ impl PersonServer {
         let signed = httpsig::sign(
             &self.key,
             &SignatureKey::JwksUri {
-                id: self.issuer.clone(),
+                id: self.config.issuer.clone(),
                 dwk: dwk::PERSON.into(),
                 kid: self.key.thumbprint().into(),
             },
@@ -1094,6 +1083,7 @@ impl PersonServer {
             .is_some_and(|b| b.same_scale(&budget))
         {
             if let Some(spent) = self
+                .config
                 .store
                 .spend(
                     tenant,
@@ -1153,7 +1143,7 @@ impl PersonServer {
             decided_by: None,
             decided_at: None,
             created_at: created,
-            expires_at: created + self.approval_ttl,
+            expires_at: created + secs(self.config.approval_ttl),
             tenant: tenant.to_string(),
         }
     }
@@ -1161,6 +1151,7 @@ impl PersonServer {
     async fn ask(&self, mut approval: Approval) -> Result<Response<Bytes>, AAuthError> {
         if approval.kind != ApprovalKind::Completion {
             if let Some(approver) = self
+                .config
                 .directory
                 .approver(approval.kind, &approval.person)
                 .await
@@ -1169,8 +1160,8 @@ impl PersonServer {
             }
         }
         let tenant = approval.tenant.as_str();
-        self.store.insert_approval(tenant, &approval).await?;
-        self.hooks.on_approval(&approval).await;
+        self.config.store.insert_approval(tenant, &approval).await?;
+        self.config.hooks.on_approval(&approval).await;
         Ok(self.still_pending(tenant, &approval.id))
     }
 
@@ -1179,7 +1170,7 @@ impl PersonServer {
         let headers = response.headers_mut();
         for (name, value) in [
             ("location", self.endpoints.pending(tenant, id)),
-            ("retry-after", self.retry_after.to_string()),
+            ("retry-after", self.config.retry_after.as_secs().to_string()),
             ("cache-control", "no-store".to_string()),
             (
                 aauth_protocol::requirement::HEADER,
@@ -1204,6 +1195,7 @@ impl PersonServer {
     ) -> Result<Response<Bytes>, AAuthError> {
         let agent = self.verify_agent(request, path).await?;
         let Some(approval) = self
+            .config
             .store
             .approval(tenant, id)
             .await?
@@ -1223,7 +1215,8 @@ impl PersonServer {
                     decided_at: Some(self.now()),
                     ..approval
                 };
-                self.store
+                self.config
+                    .store
                     .transition_approval(tenant, ApprovalStatus::Pending, &withdrawn)
                     .await?;
             }
@@ -1285,6 +1278,7 @@ impl PersonServer {
         };
         // Collecting claims the token, so only one poll spends it.
         if !self
+            .config
             .store
             .transition_approval(tenant, ApprovalStatus::Approved, &collected)
             .await?
@@ -1302,6 +1296,7 @@ impl PersonServer {
             asked.filter(|a| mission.budget.as_ref().is_some_and(|b| b.same_scale(a)))
         {
             let spent = self
+                .config
                 .store
                 .spend(
                     tenant,
@@ -1316,6 +1311,7 @@ impl PersonServer {
                 // Unspent, nothing is issued, and the approval is collectible again.
                 unspent => {
                     let _ = self
+                        .config
                         .store
                         .transition_approval(tenant, ApprovalStatus::Collected, &approval)
                         .await;
@@ -1342,7 +1338,7 @@ impl PersonServer {
         id: &str,
         decision: Decision,
     ) -> Result<Approval, AAuthError> {
-        let Some(approval) = self.store.approval(tenant, id).await? else {
+        let Some(approval) = self.config.store.approval(tenant, id).await? else {
             return Err(AAuthError::new(
                 StatusCode::NOT_FOUND,
                 "not_found",
@@ -1385,7 +1381,7 @@ impl PersonServer {
             new_mission = Some(mission);
         } else if approved {
             let mission = match &approval.mission_s256 {
-                Some(s256) => self.store.mission(tenant, s256).await?,
+                Some(s256) => self.config.store.mission(tenant, s256).await?,
                 None => None,
             };
             existing = Some(mission.filter(|m| m.is_live(now)).ok_or_else(|| {
@@ -1399,27 +1395,34 @@ impl PersonServer {
         // The mission goes in first, so a decision never points at a mission
         // it did not create.
         if let Some(mission) = &new_mission {
-            if !self.store.insert_mission(tenant, mission).await? {
+            if !self.config.store.insert_mission(tenant, mission).await? {
                 return Err(already());
             }
         }
         // The transition is the decision: whatever it does happens only once.
         if !self
+            .config
             .store
             .transition_approval(tenant, ApprovalStatus::Pending, &decided)
             .await?
         {
             if let Some(mission) = &new_mission {
-                self.store.end_mission(tenant, &mission.s256, now).await?;
+                self.config
+                    .store
+                    .end_mission(tenant, &mission.s256, now)
+                    .await?;
             }
             return Err(already());
         }
         // An approved auth token request is spent when its token is
         // collected, so no token is out before its spend.
         if let Some(mission) = existing.filter(|_| approval.kind == ApprovalKind::Completion) {
-            self.store.end_mission(tenant, &mission.s256, now).await?;
+            self.config
+                .store
+                .end_mission(tenant, &mission.s256, now)
+                .await?;
         }
-        self.hooks.on_decision(&decided).await;
+        self.config.hooks.on_decision(&decided).await;
         Ok(decided)
     }
 
@@ -1433,7 +1436,7 @@ impl PersonServer {
             .flatten()
             .filter_map(|r| r.as_str().map(str::to_string))
             .collect();
-        let expires_at = now + self.mission_ttl;
+        let expires_at = now + secs(self.config.mission_ttl);
         // The approval's id makes each mission's hash its own.
         let mut document = json!({
             "approval": approval.id,
@@ -1465,7 +1468,8 @@ impl PersonServer {
     /// End mission `s256`, approved under `tenant`, now: nothing is issued
     /// under it afterwards.
     pub async fn terminate(&self, tenant: &str, s256: &str) -> Result<Mission, AAuthError> {
-        self.store
+        self.config
+            .store
             .end_mission(tenant, s256, self.now())
             .await?
             .ok_or_else(mission_not_found)
@@ -1477,7 +1481,7 @@ impl PersonServer {
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
-        match (&self.admin_token, presented) {
+        match (&self.config.admin_token, presented) {
             (Some(token), Some(presented)) if constant_time_eq(token, presented) => Ok(()),
             _ => Err(AAuthError::new(
                 StatusCode::UNAUTHORIZED,
@@ -1517,6 +1521,7 @@ impl PersonServer {
                 }
                 let status = query("status");
                 let approvals: Vec<Approval> = self
+                    .config
                     .store
                     .approvals(tenant)
                     .await?
@@ -1566,12 +1571,12 @@ impl PersonServer {
                         None,
                     )));
                 }
-                ok(&self.store.missions(tenant).await?)
+                ok(&self.config.store.missions(tenant).await?)
             }
             ["missions", s256] => {
                 self.admitted(request)?;
                 match *method {
-                    Method::GET => match self.store.mission(tenant, s256).await? {
+                    Method::GET => match self.config.store.mission(tenant, s256).await? {
                         Some(mission) => ok(&mission),
                         None => json_response(StatusCode::NOT_FOUND, &Value::Null),
                     },
