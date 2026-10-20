@@ -23,15 +23,15 @@ let ps = PersonServer::new(
 // Any framework: hand it an http::Request<Bytes>, get an http::Response<Bytes>.
 let response = ps.handle(request).await;
 
-// When the approver answers:
-ps.decide(&approval_id, Decision::approve().with_budget(budget).by("dana@acme.example")).await?;
+// When the approver answers, under the tenant it was asked under:
+ps.decide(&approval.tenant, &approval.id, Decision::approve().with_budget(budget).by("dana@acme.example")).await?;
 ```
 
-You implement `Directory`, which says who you speak for and who decides for them. `Hooks` is optional and reports approvals, decisions and issued tokens. The default `Store` is in memory; for more than one process or a restart, put a database behind it. Every `Store` call is scoped by the AAuth `tenant` the agent names, or by the server's default tenant when it names none (`"default"` unless `Config::default_tenant` sets another; `Config::require_tenant` refuses such a request), so one Person Server can serve many organisations. To run it on hyper, see [`examples/server.rs`](examples/server.rs):
+You implement `Directory`, which says who you speak for and who decides for them. `Hooks` is optional and reports approvals, decisions and issued tokens. The default `Store` is in memory; for more than one process or a restart, put a database behind it. Every `Store` call is scoped by the AAuth `tenant` the agent names, or by the server's default tenant when it names none (`"default"` unless `Config::default_tenant` sets another; `Config::require_tenant` refuses such a request), so one Person Server can serve many organisations. To run it on hyper, see [`examples/server.rs`](examples/server.rs). Each flag defaults to an environment variable (`--help` lists them); the signing key, subject secret and admin token come from the environment only (`PS_SIGNING_KEY`, `PS_SUBJECT_SECRET`, `PS_ADMIN_TOKEN`), since anything on the host can read a process's arguments:
 
 ```bash
-PS_ISSUER=https://ps.acme.example PS_TRUSTED=https://api.introspection.dev \
-PS_ADMIN_TOKEN=secret cargo run -p aauth-person-server --example server
+PS_ADMIN_TOKEN=secret cargo run -p aauth-person-server --example server -- \
+  --issuer https://ps.acme.example --default-tenant acme
 ```
 
 The crate documentation covers the fixed policy, the routes, and what to put in front of it in production.

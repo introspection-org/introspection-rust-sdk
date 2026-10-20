@@ -5,6 +5,7 @@
 //! management routes.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use aauth_protocol::discovery::{Fetch, JwksResolver, KeyResolver, NoKeys};
 use aauth_protocol::httpsig::{self, Incoming, SignatureKey, VerifyOptions};
@@ -35,27 +36,42 @@ use crate::types::{
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 type Trust = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
+/// Which tenant a request that names none is under.
+#[derive(Clone, Debug)]
+enum Tenancy {
+    /// This one.
+    Default(String),
+    /// None: such a request is refused.
+    Required,
+}
+
 /// How a Person Server is set up. `issuer`, the directory and the trusted
 /// agent providers are required; everything else has a default.
 pub struct Config {
+    // Required.
     issuer: String,
     directory: Arc<dyn Directory>,
     trusted: Trust,
+    // Keys: generated per process when unset.
     signing_key: Option<SigningKey>,
     subject_secret: Option<String>,
+    // What it runs on.
     store: Arc<dyn Store>,
-    base_path: String,
     hooks: Arc<dyn Hooks>,
+    fetch: Option<Arc<dyn Fetch>>,
+    // What it serves.
+    base_path: String,
+    tenancy: Tenancy,
     admin_token: Option<String>,
+    // Its metadata.
     name: Option<String>,
     description: Option<String>,
-    token_ttl: i64,
-    mission_ttl: i64,
-    approval_ttl: i64,
-    retry_after: u64,
-    fetch: Option<Arc<dyn Fetch>>,
+    // Timings.
+    token_ttl: Duration,
+    mission_ttl: Duration,
+    approval_ttl: Duration,
+    retry_after: Duration,
     now: Clock,
-    default_tenant: Option<String>,
 }
 
 /// The tenant a request that names none is under, unless the server is
@@ -85,32 +101,32 @@ impl Config {
             signing_key: None,
             subject_secret: None,
             store: Arc::new(MemoryStore::new()),
-            base_path: String::new(),
             hooks: Arc::new(NoHooks),
+            fetch: None,
+            base_path: String::new(),
+            tenancy: Tenancy::Default(DEFAULT_TENANT.to_string()),
             admin_token: None,
             name: None,
             description: None,
-            token_ttl: 60 * 60,
-            mission_ttl: 14 * 24 * 60 * 60,
-            approval_ttl: 24 * 60 * 60,
-            retry_after: 5,
-            fetch: None,
+            token_ttl: Duration::from_secs(60 * 60),
+            mission_ttl: Duration::from_secs(14 * 24 * 60 * 60),
+            approval_ttl: Duration::from_secs(24 * 60 * 60),
+            retry_after: Duration::from_secs(5),
             now: Arc::new(aauth_protocol::now_unix),
-            default_tenant: Some(DEFAULT_TENANT.to_string()),
         }
     }
 
     /// The tenant a request that names none is under. Default:
     /// [`DEFAULT_TENANT`]. A company's own Person Server names its own.
     pub fn default_tenant(mut self, tenant: impl Into<String>) -> Self {
-        self.default_tenant = Some(tenant.into());
+        self.tenancy = Tenancy::Default(tenant.into());
         self
     }
 
     /// Refuse a request that names no tenant: for a Person Server that
     /// serves several.
     pub fn require_tenant(mut self) -> Self {
-        self.default_tenant = None;
+        self.tenancy = Tenancy::Required;
         self
     }
 
@@ -170,26 +186,27 @@ impl Config {
     }
 
     /// How long a person or auth token lasts, at most. Default: an hour.
-    pub fn token_ttl_secs(mut self, secs: i64) -> Self {
-        self.token_ttl = secs;
+    pub fn token_ttl(mut self, ttl: Duration) -> Self {
+        self.token_ttl = ttl;
         self
     }
 
     /// How long an approved mission lasts. Default: 14 days.
-    pub fn mission_ttl_secs(mut self, secs: i64) -> Self {
-        self.mission_ttl = secs;
+    pub fn mission_ttl(mut self, ttl: Duration) -> Self {
+        self.mission_ttl = ttl;
         self
     }
 
     /// How long an approval waits for a decision. Default: 24 hours.
-    pub fn approval_ttl_secs(mut self, secs: i64) -> Self {
-        self.approval_ttl = secs;
+    pub fn approval_ttl(mut self, ttl: Duration) -> Self {
+        self.approval_ttl = ttl;
         self
     }
 
-    /// The `Retry-After` a pending answer carries. Default: 5 seconds.
-    pub fn retry_after_secs(mut self, secs: u64) -> Self {
-        self.retry_after = secs;
+    /// The `Retry-After` a pending answer carries, in whole seconds. Default:
+    /// 5 seconds.
+    pub fn retry_after(mut self, after: Duration) -> Self {
+        self.retry_after = after;
         self
     }
 
@@ -253,7 +270,12 @@ pub struct PersonServer {
     resolver: JwksResolver,
     now: Clock,
     endpoints: Endpoints,
-    default_tenant: Option<String>,
+    tenancy: Tenancy,
+}
+
+/// A duration in whole seconds, as token and mission times are kept.
+fn secs(duration: Duration) -> i64 {
+    i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -343,15 +365,15 @@ impl PersonServer {
             admin_token: config.admin_token,
             name: config.name,
             description: config.description,
-            token_ttl: config.token_ttl,
-            mission_ttl: config.mission_ttl,
-            approval_ttl: config.approval_ttl,
-            retry_after: config.retry_after,
+            token_ttl: secs(config.token_ttl),
+            mission_ttl: secs(config.mission_ttl),
+            approval_ttl: secs(config.approval_ttl),
+            retry_after: config.retry_after.as_secs(),
             resolver: JwksResolver::new(fetch.clone()),
             fetch,
             now: config.now,
             endpoints,
-            default_tenant: config.default_tenant,
+            tenancy: config.tenancy,
             issuer: config.issuer,
         })
     }
@@ -393,11 +415,18 @@ impl PersonServer {
         (self.now)()
     }
 
+    fn default_tenant(&self) -> Option<&str> {
+        match &self.tenancy {
+            Tenancy::Default(tenant) => Some(tenant),
+            Tenancy::Required => None,
+        }
+    }
+
     /// The tenant a request is under: the one it names, else the default.
     fn tenant(&self, named: Option<&str>) -> Result<String, AAuthError> {
         named
             .map(str::to_string)
-            .or_else(|| self.default_tenant.clone())
+            .or_else(|| self.default_tenant().map(str::to_string))
             .ok_or_else(|| AAuthError::invalid_request("name the tenant"))
     }
 
@@ -910,7 +939,7 @@ impl PersonServer {
         let issued_under = presented
             .claim_str("tenant")
             .map(str::to_string)
-            .or_else(|| self.default_tenant.clone());
+            .or_else(|| self.default_tenant().map(str::to_string));
         if issued_under.as_deref() != Some(tenant) {
             return Err(invalid("tenant does not match the presented token"));
         }
