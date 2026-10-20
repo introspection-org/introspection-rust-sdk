@@ -701,7 +701,7 @@ impl PersonServer {
         let mission = match params.get("mission_s256") {
             None | Some(Value::Null) => None,
             Some(hash) => Some(
-                self.live_mission(&agent, &self.tenant(named(&params))?, hash.as_str())
+                self.live_mission(&self.tenant(named(&params))?, &agent, hash.as_str())
                     .await?,
             ),
         };
@@ -716,8 +716,8 @@ impl PersonServer {
     /// The live mission `s256` names, if it is this agent's; the same 404 otherwise.
     async fn live_mission(
         &self,
-        agent: &Agent,
         tenant: &str,
+        agent: &Agent,
         s256: Option<&str>,
     ) -> Result<Mission, AAuthError> {
         let mission = match s256 {
@@ -777,11 +777,11 @@ impl PersonServer {
         let mut grant = Map::new();
         grant.insert("resources".into(), Value::Array(resources));
         let approval = self.approval(
+            &self.tenant(named(&params))?,
             ApprovalKind::Mission,
             agent,
             person,
             description.to_string(),
-            &self.tenant(named(&params))?,
         );
         self.ask(Approval { grant, ..approval }).await
     }
@@ -796,7 +796,7 @@ impl PersonServer {
         let params = read_body(request.body())?;
         let tenant = self.tenant(named(&params))?;
         let tenant = tenant.as_str();
-        let mission = self.live_mission(&agent, tenant, Some(s256)).await?;
+        let mission = self.live_mission(tenant, &agent, Some(s256)).await?;
         match str_of(&params, "action") {
             Some("update") => {
                 let entry = str_of(&params, "description")
@@ -821,11 +821,11 @@ impl PersonServer {
                 let summary =
                     str_of(&params, "summary").unwrap_or("The agent says the mission is done");
                 let approval = self.approval(
+                    tenant,
                     ApprovalKind::Completion,
                     agent,
                     mission.person.clone(),
                     summary.to_string(),
-                    tenant,
                 );
                 self.ask(Approval {
                     mission_s256: Some(mission.s256),
@@ -915,7 +915,7 @@ impl PersonServer {
             return Err(invalid("tenant does not match the presented token"));
         }
         let mission = match unverified.claim_str("mission_s256") {
-            Some(s256) => self.live_mission(agent, tenant, Some(s256)).await?,
+            Some(s256) => self.live_mission(tenant, agent, Some(s256)).await?,
             None => {
                 return Err(AAuthError::new(
                     StatusCode::FORBIDDEN,
@@ -1081,11 +1081,11 @@ impl PersonServer {
         let summary = self.proposal_summary(&rt).await;
         let description = str_of(&rt, "scope").unwrap_or("a request").to_string();
         let approval = self.approval(
+            tenant,
             ApprovalKind::AuthToken,
             agent,
             mission.person.clone(),
             description,
-            tenant,
         );
         self.ask(Approval {
             mission_s256: Some(mission.s256),
@@ -1100,11 +1100,11 @@ impl PersonServer {
 
     fn approval(
         &self,
+        tenant: &str,
         kind: ApprovalKind,
         agent: Agent,
         person: Person,
         description: String,
-        tenant: &str,
     ) -> Approval {
         let created = self.now();
         Approval {
@@ -1232,7 +1232,7 @@ impl PersonServer {
             return Ok(ok(&json!({})));
         }
         let mission = self
-            .live_mission(&agent, tenant, approval.mission_s256.as_deref())
+            .live_mission(tenant, &agent, approval.mission_s256.as_deref())
             .await?;
         if approval.kind == ApprovalKind::Mission {
             let mut tokens = Map::new();
