@@ -20,23 +20,6 @@ mod example {
         RunnerIdentity, ServiceAccountTokenParams, TaskCreate,
     };
 
-    /// What the app stores next to its own order record.
-    struct AgentBinding {
-        task_id: String,
-        user_id: String,
-    }
-
-    async fn save_agent_binding(order_id: &str, binding: &AgentBinding) {
-        println!(
-            "order {order_id} -> task {} (user {})",
-            binding.task_id, binding.user_id
-        );
-    }
-
-    async fn send_event_to_browser(event: AgUiEvent) {
-        println!("{event:?}");
-    }
-
     pub async fn run() -> Result<(), Box<dyn Error>> {
         dotenvy::dotenv().ok();
         // The signed-in user, from your server session.
@@ -73,6 +56,21 @@ mod example {
         // #endregion docs:patterns/add-to-your-app/open-runner
 
         // #region docs:patterns/add-to-your-app/start-task
+        // Your app's code: store the task next to the order and forward events to the browser.
+        struct AgentBinding {
+            task_id: String,
+            user_id: String,
+        }
+        async fn save_agent_binding(order_id: &str, binding: &AgentBinding) {
+            println!(
+                "order {order_id} -> task {} (user {})",
+                binding.task_id, binding.user_id
+            );
+        }
+        async fn send_event_to_browser(event: AgUiEvent) {
+            println!("{event:?}");
+        }
+
         let handle = runner
             .tasks()
             .start(&TaskCreate {
@@ -97,9 +95,9 @@ mod example {
         }
         // #endregion docs:patterns/add-to-your-app/start-task
 
-        reconnect(&runner, &binding).await?;
+        reconnect(&runner, &binding.task_id).await?;
 
-        record_feedback(&runner, &binding, &outcomes).await?;
+        record_feedback(&runner, &binding.task_id, &outcomes).await?;
 
         runner.close();
         outcomes.shutdown()?;
@@ -108,16 +106,21 @@ mod example {
     }
 
     /// After a page reload: find the task's run and stream it again.
-    async fn reconnect(runner: &Runner, binding: &AgentBinding) -> Result<(), Box<dyn Error>> {
+    async fn reconnect(runner: &Runner, task_id: &str) -> Result<(), Box<dyn Error>> {
         // #region docs:patterns/add-to-your-app/reconnect
-        let task = runner.tasks().get(&binding.task_id).await?;
+        // Your app's code: forward each event to the browser.
+        async fn send_event_to_browser(event: AgUiEvent) {
+            println!("{event:?}");
+        }
+
+        let task = runner.tasks().get(task_id).await?;
         let metadata = task.metadata.unwrap_or_default();
         let run_id = metadata
             .get("active_run_id")
             .or_else(|| metadata.get("latest_run_id"))
             .and_then(|id| id.as_str())
             .ok_or("task has no run")?;
-        let stream = runner.tasks().runs.stream(&binding.task_id, run_id).await?;
+        let stream = runner.tasks().runs.stream(task_id, run_id).await?;
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             send_event_to_browser(event?).await;
@@ -129,18 +132,18 @@ mod example {
     /// Record the user's thumbs-down on the agent's last answer.
     async fn record_feedback(
         runner: &Runner,
-        binding: &AgentBinding,
+        task_id: &str,
         outcomes: &IntrospectionLogs,
     ) -> Result<(), Box<dyn Error>> {
         // #region docs:patterns/add-to-your-app/feedback
-        let task = runner.tasks().get(&binding.task_id).await?;
+        let task = runner.tasks().get(task_id).await?;
         let response_id = task
             .metadata
             .as_ref()
             .and_then(|m| m.get("last_response"))
             .and_then(|r| r["response_id"].as_str());
         let mut options = FeedbackOptions::new()
-            .with_conversation_id(&binding.task_id)
+            .with_conversation_id(task_id)
             .with_comments("Missed the final-sale rule");
         if let Some(id) = response_id {
             options = options.with_previous_response_id(id);

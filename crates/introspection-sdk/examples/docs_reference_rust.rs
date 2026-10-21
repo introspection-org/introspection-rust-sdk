@@ -11,7 +11,7 @@
 
 use std::error::Error;
 
-use introspection_sdk::{AgUiEvent, IntrospectionAPIError, IntrospectionClient, RunHandle, Runner};
+use introspection_sdk::{IntrospectionClient, RunHandle, Runner};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -37,7 +37,42 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
     // #region docs:reference/rust/run-task
     use futures::StreamExt;
-    use introspection_sdk::{ClientConfig, IntrospectionClient, RunRequest, RunnerIdentity};
+    use introspection_sdk::{
+        AgUiEvent, ClientConfig, IntrospectionAPIError, IntrospectionClient, RunRequest, RunnerIdentity,
+    };
+
+    /// Applies one stream event to the assistant text read so far. A reconnect
+    /// past the replay buffer yields a `MessagesSnapshot` whose assistant messages
+    /// replace the text read before it; later deltas append to it.
+    fn append_text(text: &mut String, event: AgUiEvent) -> Result<(), Box<dyn Error>> {
+        match event {
+            AgUiEvent::MessagesSnapshot(e) => {
+                *text = e
+                    .messages
+                    .iter()
+                    .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+                    .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                    .collect();
+            }
+            AgUiEvent::TextMessageContent(m) => text.push_str(&m.delta),
+            AgUiEvent::TextMessageChunk(m) => text.push_str(m.delta.as_deref().unwrap_or_default()),
+            AgUiEvent::RunError(e) => {
+                return Err(IntrospectionAPIError::RunFailed {
+                    message: e.message,
+                    code: e.code,
+                }
+                .into());
+            }
+            AgUiEvent::Custom(e) if e.name == "resume_gap" => {
+                return Err(IntrospectionAPIError::StreamIncomplete(
+                    "The replay buffer lost output; read the conversation transcript".into(),
+                )
+                .into());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 
     let client = IntrospectionClient::new(ClientConfig::default())?;
     let runner = client
@@ -58,39 +93,6 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
     println!("{text}");
     // #endregion docs:reference/rust/run-task
     Ok((client, runner))
-}
-
-/// Applies one stream event to the assistant text read so far. A reconnect
-/// past the replay buffer yields a `MessagesSnapshot` whose assistant messages
-/// replace the text read before it; later deltas append to it.
-fn append_text(text: &mut String, event: AgUiEvent) -> Result<(), Box<dyn Error>> {
-    match event {
-        AgUiEvent::MessagesSnapshot(e) => {
-            *text = e
-                .messages
-                .iter()
-                .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
-                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
-                .collect();
-        }
-        AgUiEvent::TextMessageContent(m) => text.push_str(&m.delta),
-        AgUiEvent::TextMessageChunk(m) => text.push_str(m.delta.as_deref().unwrap_or_default()),
-        AgUiEvent::RunError(e) => {
-            return Err(IntrospectionAPIError::RunFailed {
-                message: e.message,
-                code: e.code,
-            }
-            .into());
-        }
-        AgUiEvent::Custom(e) if e.name == "resume_gap" => {
-            return Err(IntrospectionAPIError::StreamIncomplete(
-                "The replay buffer lost output; read the conversation transcript".into(),
-            )
-            .into());
-        }
-        _ => {}
-    }
-    Ok(())
 }
 
 async fn continue_control(
