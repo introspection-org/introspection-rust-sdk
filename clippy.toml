@@ -1,0 +1,10 @@
+# Complexity ratchet. The lints are enabled in [workspace.lints.clippy] in
+# Cargo.toml; CI's `cargo clippy ... -D warnings` makes them blocking.
+#
+# Each threshold is today's worst measured value, so main starts green. They
+# are a ratchet: never raise one, only lower it, whenever a refactor brings the
+# worst offender down. Targets: cognitive 15, lines 100, arguments 5, nesting 4.
+cognitive-complexity-threshold = 16
+too-many-lines-threshold = 251
+too-many-arguments-threshold = 7
+excessive-nesting-threshold = 6

@@ -16,7 +16,7 @@ mod example {
 
     use futures::StreamExt;
     use introspection_sdk::{
-        AgUiEvent, FeedbackOptions, IntrospectionClient, IntrospectionLogs, RunRequest,
+        AgUiEvent, FeedbackOptions, IntrospectionClient, IntrospectionLogs, RunRequest, Runner,
         RunnerIdentity, ServiceAccountTokenParams, TaskCreate,
     };
 
@@ -97,6 +97,18 @@ mod example {
         }
         // #endregion docs:patterns/add-to-your-app/start-task
 
+        reconnect(&runner, &binding).await?;
+
+        record_feedback(&runner, &binding, &outcomes).await?;
+
+        runner.close();
+        outcomes.shutdown()?;
+        client.shutdown()?;
+        Ok(())
+    }
+
+    /// After a page reload: find the task's run and stream it again.
+    async fn reconnect(runner: &Runner, binding: &AgentBinding) -> Result<(), Box<dyn Error>> {
         // #region docs:patterns/add-to-your-app/reconnect
         let task = runner.tasks().get(&binding.task_id).await?;
         let metadata = task.metadata.unwrap_or_default();
@@ -111,7 +123,15 @@ mod example {
             send_event_to_browser(event?).await;
         }
         // #endregion docs:patterns/add-to-your-app/reconnect
+        Ok(())
+    }
 
+    /// Record the user's thumbs-down on the agent's last answer.
+    async fn record_feedback(
+        runner: &Runner,
+        binding: &AgentBinding,
+        outcomes: &IntrospectionLogs,
+    ) -> Result<(), Box<dyn Error>> {
         // #region docs:patterns/add-to-your-app/feedback
         let task = runner.tasks().get(&binding.task_id).await?;
         let response_id = task
@@ -128,10 +148,6 @@ mod example {
         outcomes.feedback("thumbs_down", options);
         outcomes.flush()?;
         // #endregion docs:patterns/add-to-your-app/feedback
-
-        runner.close();
-        outcomes.shutdown()?;
-        client.shutdown()?;
         Ok(())
     }
 }
