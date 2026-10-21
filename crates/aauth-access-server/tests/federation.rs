@@ -902,8 +902,46 @@ async fn a_pending_request_answers_408_once_expired_and_410_once_answered() {
         world.access.handle(poll(&ps_key)).await.status(),
         StatusCode::REQUEST_TIMEOUT
     );
+    let gone = world.access.handle(poll(&ps_key)).await;
+    assert_eq!(gone.status(), StatusCode::GONE);
+    let gone: Value = serde_json::from_slice(gone.body()).unwrap();
+    assert_eq!(gone["error"], "invalid_code");
+}
+
+#[tokio::test]
+async fn the_access_server_may_grant_less_than_allowed_and_only_that_is_spent() {
+    // Budgets draft #narrowing-chain: the AS MAY lower the amount.
+    let world = World::new();
+    let agent = world.agent();
+    let (s256, person_token) = world.approved_trip(&agent, 300_000, &[RESOURCE]).await;
+    world.set_policy(|request| {
+        assert_eq!(request.allowed_budget, Some(usd(150_000)));
+        Verdict::Allow {
+            scope: None,
+            budget: Some(usd(90_000)),
+        }
+    });
+    let rt = world.challenge(&agent, &person_token, 150_000).await;
+    let (status, body, _) = world.redeem(&agent, &rt, &person_token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        world.access.handle(poll(&ps_key)).await.status(),
-        StatusCode::GONE
+        claims(body["auth_token"].as_str().unwrap())["budget"],
+        json!(usd(90_000))
     );
+    assert_eq!(world.spent(&s256).await, 90_000);
+}
+
+#[tokio::test]
+async fn it_refuses_a_budget_above_the_resource_tokens() {
+    let world = World::new();
+    let agent = world.agent();
+    let (_, person_token) = world.approved_trip(&agent, 300_000, &[RESOURCE]).await;
+    let rt = world.challenge(&agent, &person_token, 100_000).await;
+    let tokens = AuthTokenRequest::new(rt, agent.token.clone(), person_token)
+        .with_budget(Some(usd(100_001)));
+    let ps_key = SigningKey::from_bytes(&world.ps_seed);
+    let (status, body) = world.as_person_server(PS, &ps_key, &json!(tokens)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "invalid_request");
+    assert!(world.decided.lock().unwrap().is_empty());
 }

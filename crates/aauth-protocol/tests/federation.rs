@@ -13,7 +13,7 @@ use aauth_protocol::httpsig::{self, Incoming, Signer, VerifyOptions};
 use aauth_protocol::metadata::AccessServerMetadata;
 use aauth_protocol::resource::{resource_token, AuthTokenIssuers, ResourceTokenParams};
 use aauth_protocol::token::{mint, verify_token, TokenKind, VerifiedToken, VerifyTokenOptions};
-use aauth_protocol::{jwt, Requirement, SigningKey};
+use aauth_protocol::{jwt, Budget, Requirement, SigningKey};
 use async_trait::async_trait;
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
@@ -107,6 +107,11 @@ struct Case {
 
 impl Case {
     async fn new() -> Self {
+        Self::costing(None).await
+    }
+
+    /// A case whose resource token costs `budget`, which the Person Server allows in full.
+    async fn costing(budget: Option<Budget>) -> Self {
         let (ps_key, as_key, agent, resource_key) = (
             SigningKey::generate(),
             SigningKey::generate(),
@@ -124,19 +129,19 @@ impl Case {
             }),
         );
         let presented = verified_person_token(&person_token, &ps_key, &agent).await;
-        let resource_token = resource_token(
-            &resource_key,
-            &ResourceTokenParams {
-                now: NOW,
-                ..ResourceTokenParams::new(RESOURCE, &presented, agent.thumbprint(), "read write")
-                    .access_server(AS)
-            },
-        )
-        .unwrap();
+        let mut params =
+            ResourceTokenParams::new(RESOURCE, &presented, agent.thumbprint(), "read write")
+                .access_server(AS);
+        if let Some(budget) = &budget {
+            params = params.budget(budget);
+        }
+        let resource_token =
+            resource_token(&resource_key, &ResourceTokenParams { now: NOW, ..params }).unwrap();
         let rt = jwt::decode(&resource_token).unwrap().claims;
         Self {
             fetch: Scripted::with_metadata(&as_key),
-            tokens: AuthTokenRequest::new(resource_token, "the.agent.token", person_token),
+            tokens: AuthTokenRequest::new(resource_token, "the.agent.token", person_token)
+                .with_budget(budget),
             ps_key,
             as_key,
             agent,
@@ -239,9 +244,15 @@ async fn metadata_must_name_the_access_server_and_keep_its_endpoints_on_its_orig
         .await
         .unwrap_err();
     assert_eq!(refused.error(), "as_unreachable");
+    // #access-server-metadata: its URLs are https, on whichever host.
     fetch.document(
         format!("{AS}/.well-known/aauth-access.json"),
-        json!({ "issuer": AS, "auth_token_endpoint": "https://internal.example/token", "jwks_uri": format!("{AS}/jwks") }),
+        json!({ "issuer": AS, "auth_token_endpoint": "https://token.resource.example/token", "jwks_uri": format!("{AS}/jwks") }),
+    );
+    assert!(access_server_metadata(AS, fetch.as_ref()).await.is_ok());
+    fetch.document(
+        format!("{AS}/.well-known/aauth-access.json"),
+        json!({ "issuer": AS, "auth_token_endpoint": "http://as.resource.example/token", "jwks_uri": format!("{AS}/jwks") }),
     );
     let refused = access_server_metadata(AS, fetch.as_ref())
         .await
@@ -315,10 +326,14 @@ async fn an_auth_token_that_verifies_is_relayed_unchanged() {
         json!({ "auth_token": token, "expires_in": 9_999 }),
     );
     match case.federate(None).await.unwrap() {
-        AccessOutcome::Issued(issued) => {
+        AccessOutcome::Issued {
+            token: issued,
+            budget,
+        } => {
             assert_eq!(issued.auth_token, token);
             // From the token's own exp, not what the Access Server said.
             assert_eq!(issued.expires_in, 600);
+            assert_eq!(budget, None);
         }
         other => panic!("{other:?}"),
     }
@@ -494,9 +509,9 @@ async fn a_pending_answer_off_its_origin_or_asking_for_claims_is_not_followed() 
             (StatusCode::FORBIDDEN, "denied")
         );
     }
-    // Nor is a poll sent anywhere but the Access Server.
+    // Nor is a poll sent but over https.
     let refused = case
-        .federate(Some("https://internal.example/pending/1"))
+        .federate(Some("http://as.resource.example/pending/1"))
         .await
         .unwrap_err();
     assert_eq!(refused.error(), "as_unreachable");
@@ -595,4 +610,170 @@ async fn a_resource_accepts_only_its_access_servers_auth_tokens_once_it_has_one(
     let three_party = AuthTokenIssuers::PersonServers(&person_servers);
     assert!(three_party.check(&from_ps).is_ok());
     assert!(three_party.check(&from_as).is_err());
+}
+
+fn usd(amount: u64) -> Budget {
+    Budget::new(amount, "USD", 2)
+}
+
+#[tokio::test]
+async fn the_budget_sent_bounds_the_budget_granted() {
+    // Budgets draft #as-token-endpoint: the PS sends the ceiling it allows.
+    let case = Case::costing(Some(usd(5_000))).await;
+    case.fetch.answer(
+        StatusCode::OK,
+        &[],
+        json!({ "auth_token": case.auth_token(json!({ "budget": usd(2_000) })) }),
+    );
+    let outcome = case.federate(None).await.unwrap();
+    let [sent] = case.fetch.sent().try_into().unwrap();
+    let body: Value = serde_json::from_slice(sent.body()).unwrap();
+    assert_eq!(body["budget"], json!(usd(5_000)));
+    // The AS MAY lower it; what it grants is what is spent.
+    match outcome {
+        AccessOutcome::Issued { budget, .. } => assert_eq!(budget, Some(usd(2_000))),
+        other => panic!("{other:?}"),
+    }
+    // Higher, in another scale, or absent though sent: a token that fails delivery.
+    for granted in [
+        json!(usd(5_001)),
+        json!(Budget::new(2_000, "USD", 6)),
+        Value::Null,
+    ] {
+        case.fetch.answer(
+            StatusCode::OK,
+            &[],
+            json!({ "auth_token": case.auth_token(json!({ "budget": granted })) }),
+        );
+        let refused = case.federate(None).await.unwrap_err();
+        assert_eq!(refused.error(), "as_unreachable");
+        assert!(refused.detail().contains("budget"), "{}", refused.detail());
+    }
+    // None sent, none may be granted.
+    let unbudgeted = Case::new().await;
+    unbudgeted.fetch.answer(
+        StatusCode::OK,
+        &[],
+        json!({ "auth_token": unbudgeted.auth_token(json!({ "budget": usd(1) })) }),
+    );
+    assert!(unbudgeted
+        .federate(None)
+        .await
+        .unwrap_err()
+        .detail()
+        .contains("budget"));
+}
+
+#[tokio::test]
+async fn an_auth_token_living_over_an_hour_is_refused() {
+    // #auth-token-structure: no more than an hour.
+    let case = Case::new().await;
+    case.fetch.answer(
+        StatusCode::OK,
+        &[],
+        json!({ "auth_token": case.auth_token(json!({ "iat": NOW - 3_000, "exp": NOW + 601 })) }),
+    );
+    assert!(case
+        .federate(None)
+        .await
+        .unwrap_err()
+        .detail()
+        .contains("exp"));
+}
+
+#[tokio::test]
+async fn a_busy_access_server_is_polled_again_later() {
+    // #deferred-responses: 503 backs off per Retry-After; 429 slows down by 5s.
+    let case = Case::new().await;
+    case.fetch.answer(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &[("retry-after", "7")],
+        json!({}),
+    );
+    assert_eq!(
+        case.federate(Some(&format!("{AS}/pending/1")))
+            .await
+            .unwrap(),
+        AccessOutcome::Retry { retry_after: 7 }
+    );
+    case.fetch.answer(
+        StatusCode::TOO_MANY_REQUESTS,
+        &[],
+        json!({ "error": "slow_down" }),
+    );
+    assert_eq!(
+        case.federate(Some(&format!("{AS}/pending/1")))
+            .await
+            .unwrap(),
+        AccessOutcome::Retry { retry_after: 10 }
+    );
+}
+
+#[tokio::test]
+async fn an_unrecognised_requirement_is_polled_through_as_approval() {
+    // #requirement-values: the agent MAY keep polling an unrecognised 202.
+    let case = Case::new().await;
+    case.fetch.answer(
+        StatusCode::ACCEPTED,
+        &[
+            ("location", "/pending/1"),
+            ("aauth-requirement", "requirement=payment-review"),
+        ],
+        json!({}),
+    );
+    match case.federate(None).await.unwrap() {
+        AccessOutcome::Pending { requirement, .. } => {
+            assert_eq!(requirement, Requirement::Approval)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_pending_location_must_be_on_the_origin_that_answered() {
+    // #deferred-responses: the origin of the responding server, the endpoint's.
+    let case = Case::new().await;
+    case.fetch.document(
+        format!("{AS}/.well-known/aauth-access.json"),
+        json!({ "issuer": AS, "auth_token_endpoint": "https://token.resource.example/token", "jwks_uri": format!("{AS}/.well-known/jwks.json") }),
+    );
+    case.fetch.answer(
+        StatusCode::ACCEPTED,
+        &[("location", "/pending/1")],
+        json!({}),
+    );
+    match case.federate(None).await.unwrap() {
+        AccessOutcome::Pending { location, .. } => {
+            assert_eq!(location, "https://token.resource.example/pending/1")
+        }
+        other => panic!("{other:?}"),
+    }
+    case.fetch.answer(
+        StatusCode::ACCEPTED,
+        &[("location", &format!("{AS}/pending/1"))],
+        json!({}),
+    );
+    assert_eq!(
+        case.federate(None).await.unwrap_err().error(),
+        "as_unreachable"
+    );
+}
+
+#[tokio::test]
+async fn tokens_this_crate_cannot_verify_are_never_passed_on() {
+    // #ps-to-as-token-request: the AS MUST verify upstream_token; nothing here does.
+    let mut case = Case::new().await;
+    case.tokens.upstream_token = Some("an.upstream.token".into());
+    let refused = case.federate(None).await.unwrap_err();
+    assert_eq!(
+        (refused.status(), refused.error()),
+        (StatusCode::BAD_REQUEST, "invalid_request")
+    );
+    case.tokens.upstream_token = None;
+    case.tokens.subagent_token = Some("a.subagent.token".into());
+    assert_eq!(
+        case.federate(None).await.unwrap_err().error(),
+        "invalid_request"
+    );
+    assert!(case.fetch.sent().is_empty());
 }

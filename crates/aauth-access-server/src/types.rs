@@ -52,6 +52,13 @@ pub struct AccessRequest {
     /// What the call costs, from the resource token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
+    /// The most the Person Server allows ([draft-hardt-aauth-budgets]
+    /// `#as-token-endpoint`): the auth token's `budget` is never higher, and
+    /// there is none when this is unset.
+    ///
+    /// [draft-hardt-aauth-budgets]: https://github.com/dickhardt/AAuth
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_budget: Option<Budget>,
     /// The resource's one-line description of the call, from its R3
     /// proposal, when it has one this server may read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +79,10 @@ pub enum Verdict {
         /// Space-separated.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope: Option<String>,
+        /// Less than the Person Server allows, in its unit and scale; unset,
+        /// all it allows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget: Option<Budget>,
     },
     /// Refuse: the Person Server relays `403 denied` with `detail`.
     Deny {
@@ -95,7 +106,10 @@ pub enum Verdict {
 impl Verdict {
     /// Issue what was asked.
     pub fn allow() -> Self {
-        Self::Allow { scope: None }
+        Self::Allow {
+            scope: None,
+            budget: None,
+        }
     }
 
     /// Refuse, saying why.

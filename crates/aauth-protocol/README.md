@@ -80,19 +80,22 @@ A resource token whose `aud` is not the Person Server names the resource's own A
 ```rust
 use aauth_protocol::federation::{federate, AccessOutcome, AuthTokenRequest, Federate, FederationContext};
 
-let tokens = AuthTokenRequest::new(resource_token, agent_token, presented_token);
+// The budget the Person Server allows: the resource token's, or less.
+let tokens = AuthTokenRequest::new(resource_token, agent_token, presented_token).with_budget(allowed);
 let ctx = FederationContext { issuer: "https://ps.acme.example", key: &ps_key, fetch: &fetch, now };
 let mut location = None;
 loop {
     match federate(&Federate { access_server: &aud, tokens: &tokens, agent_jkt: &jkt, location: location.as_deref() }, &ctx).await? {
-        AccessOutcome::Issued(issued) => break issued,          // verified per #auth-token-delivery
-        AccessOutcome::Pending { location: next, .. } => location = Some(next),
+        // Verified per #auth-token-delivery; `budget` is what it granted, so what to spend.
+        AccessOutcome::Issued { token, budget } => break (token, budget),
+        AccessOutcome::Pending { location: next, retry_after, .. } => { location = Some(next); /* wait */ }
+        AccessOutcome::Retry { retry_after } => { /* 429 or 503: wait, then the same call */ }
         _ => unreachable!(),
     }
 }
 ```
 
-A refusal is a `FederationError::Refused` carrying the Access Server's own error and status; anything that cannot be verified is `as_unreachable` (`502`).
+A refusal is a `FederationError::Refused` carrying the Access Server's own error and status; anything that cannot be verified is `as_unreachable` (`502`). A `202` requirement other than `interaction` is relayed as `approval` and polled through, except `claims` and `clarification`, which end the request. `subagent_token` and `upstream_token` are refused `invalid_request`, since nothing here verifies them.
 
 ## Introspection
 

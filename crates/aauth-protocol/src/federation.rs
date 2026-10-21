@@ -30,6 +30,7 @@ use crate::keys::SigningKey;
 use crate::metadata::{dwk, metadata_url, AccessServerMetadata};
 use crate::requirement::{self, Requirement};
 use crate::token::TokenKind;
+use crate::Budget;
 
 /// The body of a Person Server's token request to an Access Server
 /// (`#ps-to-as-token-request`).
@@ -50,6 +51,14 @@ pub struct AuthTokenRequest {
     /// (`#call-chaining`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_token: Option<String>,
+    /// The most the Person Server will allow ([draft-hardt-aauth-budgets]
+    /// `#as-token-endpoint`): the resource token's `budget`, in its unit and
+    /// scale, with an amount no higher. The Access Server may lower it, never
+    /// raise it; omitted, it issues no `budget` claim.
+    ///
+    /// [draft-hardt-aauth-budgets]: https://github.com/dickhardt/AAuth
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<Budget>,
 }
 
 impl AuthTokenRequest {
@@ -65,7 +74,14 @@ impl AuthTokenRequest {
             presented_token: presented_token.into(),
             subagent_token: None,
             upstream_token: None,
+            budget: None,
         }
+    }
+
+    /// Allow at most `budget`.
+    pub fn with_budget(mut self, budget: Option<Budget>) -> Self {
+        self.budget = budget;
+        self
     }
 }
 
@@ -115,8 +131,15 @@ pub struct FederationContext<'a> {
 #[non_exhaustive]
 pub enum AccessOutcome {
     /// It issued an auth token, which verified (`#auth-token-delivery`):
-    /// relay it to the agent unchanged.
-    Issued(AuthTokenResponse),
+    /// relay `token` to the agent unchanged.
+    Issued {
+        /// What the agent is answered with.
+        token: AuthTokenResponse,
+        /// The budget it granted, from the token's `budget` claim: what to
+        /// spend. Present exactly when the request sent one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget: Option<Budget>,
+    },
     /// It is deciding: poll `location` after `retry_after` seconds, and tell
     /// the agent `requirement` meanwhile.
     Pending {
@@ -128,6 +151,13 @@ pub enum AccessOutcome {
         /// Its `Retry-After`, in seconds, when it sent a readable one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_after: Option<u64>,
+    },
+    /// It asked to be called again later (`429` or `503`,
+    /// `#deferred-responses`): repeat the same exchange after `retry_after`
+    /// seconds. Nothing about the request has changed.
+    Retry {
+        /// Seconds to wait.
+        retry_after: u64,
     },
 }
 
@@ -202,7 +232,7 @@ impl FederationError {
 
 /// `{access_server}/.well-known/aauth-access.json` (`#ps-as-federation`),
 /// which must name `access_server` as its `issuer` (`#metadata-documents`)
-/// and keep its `auth_token_endpoint` and `jwks_uri` on its own origin.
+/// and give `https` URLs for its `auth_token_endpoint` and `jwks_uri`.
 pub async fn access_server_metadata(
     access_server: &str,
     fetch: &dyn Fetch,
@@ -232,10 +262,10 @@ pub async fn access_server_metadata(
     }
     if [&metadata.auth_token_endpoint, &metadata.jwks_uri]
         .iter()
-        .any(|endpoint| !endpoint.starts_with("https://") || !same_origin(access_server, endpoint))
+        .any(|endpoint| Url::parse(endpoint).map_or(true, |u| u.scheme() != "https"))
     {
         return Err(FederationError::unreachable(format!(
-            "{url} puts an endpoint on another origin"
+            "{url} gives an endpoint that is not https"
         )));
     }
     Ok(metadata)
@@ -246,14 +276,26 @@ pub async fn access_server_metadata(
 /// Access Server's own error and status; anything it answers that cannot
 /// be verified is [`FederationError::Unreachable`].
 ///
-/// `requirement=claims` and `clarification`, and `402` payment, are not
-/// served yet: each is refused `403 denied`, naming what the Access Server
-/// asked for.
+/// - `requirement=claims` and `clarification`, and `402` payment, are not
+///   served yet: each is refused `403 denied`, naming what the Access Server
+///   asked for. Any other `202` requirement this crate does not know is
+///   relayed as `approval` and polled through (`#requirement-values`).
+/// - `subagent_token` and `upstream_token` are refused `400
+///   invalid_request`: this crate cannot verify them, and the Access Server
+///   would act on them (`#ps-to-as-token-request`).
 pub async fn federate(
     request: &Federate<'_>,
     ctx: &FederationContext<'_>,
 ) -> Result<AccessOutcome, FederationError> {
-    let presented = jwt::decode(&request.tokens.presented_token).map_err(|_| {
+    let tokens = request.tokens;
+    if tokens.subagent_token.is_some() || tokens.upstream_token.is_some() {
+        return Err(FederationError::refused(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "subagent_token and upstream_token are not verified here, so they are not sent",
+        ));
+    }
+    let presented = jwt::decode(&tokens.presented_token).map_err(|_| {
         FederationError::refused(
             StatusCode::BAD_REQUEST,
             "invalid_presented_token",
@@ -273,7 +315,7 @@ pub async fn federate(
             "the presented token has expired",
         ));
     }
-    let resource_token = jwt::decode(&request.tokens.resource_token)
+    let resource_token = jwt::decode(&tokens.resource_token)
         .map_err(|_| {
             FederationError::refused(
                 StatusCode::BAD_REQUEST,
@@ -282,6 +324,19 @@ pub async fn federate(
             )
         })?
         .claims;
+    // Budgets #as-token-endpoint: the resource token's unit and scale, and no more.
+    if let Some(allowed) = &tokens.budget {
+        let offered = Budget::from_value(resource_token.get("budget"))
+            .ok()
+            .flatten();
+        if !offered.is_some_and(|o| o.same_scale(allowed) && allowed.amount <= o.amount) {
+            return Err(FederationError::refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "the budget sent must be the resource token's, no higher",
+            ));
+        }
+    }
 
     let metadata = access_server_metadata(request.access_server, ctx.fetch).await?;
     let (url, body) = match request.location {
@@ -289,48 +344,63 @@ pub async fn federate(
         None => (
             metadata.auth_token_endpoint.clone(),
             Some(
-                serde_json::to_vec(request.tokens)
+                serde_json::to_vec(tokens)
                     .map_err(|e| FederationError::unreachable(e.to_string()))?,
             ),
         ),
     };
-    if !same_origin(request.access_server, &url) {
-        return Err(FederationError::unreachable(format!(
-            "{url} is not on the Access Server's origin"
-        )));
+    if !url.starts_with("https://") {
+        return Err(FederationError::unreachable(format!("{url} is not https")));
     }
     let response = send(ctx, &url, body).await?;
+    let header = |name: &str| {
+        response
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
     match response.status {
         StatusCode::OK => {
-            let issued: AuthTokenResponse = serde_json::from_slice::<Value>(&response.body)
+            let auth_token = serde_json::from_slice::<Value>(&response.body)
                 .ok()
                 .and_then(|v| {
                     v.get("auth_token")
                         .and_then(Value::as_str)
                         .map(str::to_string)
                 })
-                .map(|auth_token| AuthTokenResponse {
-                    auth_token,
-                    expires_in: 0,
-                })
                 .ok_or_else(|| {
                     FederationError::unreachable("it answered 200 without an auth_token")
                 })?;
-            let exp = verify_delivered(
-                &issued.auth_token,
+            let delivered = verify_delivered(
+                &auth_token,
                 &resource_token,
                 presented_exp,
                 request.agent_jkt,
+                tokens.budget.as_ref(),
                 &metadata,
                 ctx,
             )
             .await?;
-            Ok(AccessOutcome::Issued(AuthTokenResponse {
-                expires_in: exp - ctx.now,
-                ..issued
-            }))
+            Ok(AccessOutcome::Issued {
+                token: AuthTokenResponse {
+                    auth_token,
+                    expires_in: delivered.exp - ctx.now,
+                },
+                budget: delivered.budget,
+            })
         }
-        StatusCode::ACCEPTED => pending(&response, &url, request.access_server),
+        StatusCode::ACCEPTED => pending(&response, &url),
+        // #deferred-responses: slow down, or back off per Retry-After, and keep polling.
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => {
+            let asked = header("retry-after").and_then(|v| v.trim().parse::<u64>().ok());
+            let retry_after = match (response.status, asked) {
+                (_, Some(seconds)) => seconds,
+                (StatusCode::TOO_MANY_REQUESTS, None) => DEFAULT_POLL_SECS + 5,
+                _ => DEFAULT_POLL_SECS,
+            };
+            Ok(AccessOutcome::Retry { retry_after })
+        }
         StatusCode::PAYMENT_REQUIRED => Err(FederationError::refused(
             StatusCode::FORBIDDEN,
             "denied",
@@ -355,6 +425,9 @@ pub async fn federate(
         ))),
     }
 }
+
+/// The polling interval without a `Retry-After` (`#deferred-responses`).
+const DEFAULT_POLL_SECS: u64 = 5;
 
 /// A request to `url`, signed as the Person Server (`#keying-material`):
 /// `sig=jwks_uri;id=<issuer>;dwk="aauth-person.json"`.
@@ -397,13 +470,9 @@ async fn send(
         .map_err(|e| FederationError::unreachable(format!("{url}: {e}")))
 }
 
-/// A `202` (`#deferred-responses`): where to poll, on the Access Server's
-/// own origin, and what it waits on.
-fn pending(
-    response: &Fetched,
-    requested: &str,
-    access_server: &str,
-) -> Result<AccessOutcome, FederationError> {
+/// A `202` (`#deferred-responses`): where to poll, on the origin of the
+/// server that answered, and what it waits on.
+fn pending(response: &Fetched, requested: &str) -> Result<AccessOutcome, FederationError> {
     let header = |name: &str| {
         response
             .headers
@@ -411,16 +480,8 @@ fn pending(
             .and_then(|v| v.to_str().ok())
             .map(str::to_string)
     };
-    let requirement = match header(requirement::HEADER) {
-        None => Requirement::Approval,
-        Some(raw) => Requirement::parse(&raw).ok_or_else(|| {
-            FederationError::unreachable(format!("its AAuth-Requirement is unreadable: {raw}"))
-        })?,
-    };
-    if !matches!(
-        requirement,
-        Requirement::Approval | Requirement::Interaction { .. }
-    ) {
+    let requirement = header(requirement::HEADER).and_then(|raw| Requirement::parse(&raw));
+    if let Some(requirement @ (Requirement::Claims | Requirement::Clarification)) = &requirement {
         return Err(FederationError::refused(
             StatusCode::FORBIDDEN,
             "denied",
@@ -430,9 +491,15 @@ fn pending(
             ),
         ));
     }
+    // #requirement-values: anything else a 202 may carry that this Person
+    // Server cannot act on is polled through, and the agent told approval.
+    let requirement = match requirement {
+        Some(interaction @ Requirement::Interaction { .. }) => interaction,
+        _ => Requirement::Approval,
+    };
     let location = header("location")
         .and_then(|location| Url::parse(requested).ok()?.join(&location).ok())
-        .filter(|location| same_origin(access_server, location.as_str()))
+        .filter(|location| same_origin(requested, location.as_str()))
         .ok_or_else(|| {
             FederationError::unreachable("its pending Location is not on its own origin")
         })?;
@@ -450,16 +517,26 @@ fn scopes(value: Option<&Value>) -> Vec<&str> {
         .unwrap_or_default()
 }
 
+/// What a delivered auth token was issued for.
+struct Delivered {
+    exp: i64,
+    budget: Option<Budget>,
+}
+
+/// The longest an auth token may live (`#auth-token-structure`).
+const MAX_AUTH_TOKEN_SECS: i64 = 60 * 60;
+
 /// The checks of `#auth-token-delivery` on the auth token the Access Server
-/// issued, before the agent gets it; its `exp`.
+/// issued, before the agent gets it, and the budgets draft's on its `budget`.
 async fn verify_delivered(
     token: &str,
     resource_token: &Map<String, Value>,
     presented_exp: i64,
     agent_jkt: &str,
+    allowed: Option<&Budget>,
     metadata: &AccessServerMetadata,
     ctx: &FederationContext<'_>,
-) -> Result<i64, FederationError> {
+) -> Result<Delivered, FederationError> {
     let wrong =
         |what: &str| FederationError::unreachable(format!("its auth token has the wrong {what}"));
     let decoded = jwt::decode(token).map_err(|_| wrong("form"))?;
@@ -497,10 +574,10 @@ async fn verify_delivered(
     let text = |map: &Map<String, Value>, name: &str| {
         map.get(name).and_then(Value::as_str).map(str::to_string)
     };
-    let exp = claims
-        .get("exp")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| wrong("exp"))?;
+    let number = |name: &str| claims.get(name).and_then(Value::as_i64);
+    let (Some(exp), Some(iat)) = (number("exp"), number("iat")) else {
+        return Err(wrong("exp, iat"));
+    };
     let aud_is_resource = match (
         claims.get("aud"),
         resource_token.get("iss").and_then(Value::as_str),
@@ -515,6 +592,15 @@ async fn verify_delivered(
         .and_then(|c| c.get("jwk"))
         .and_then(|j| serde_json::from_value::<crate::Jwk>(j.clone()).ok())
         .and_then(|j| j.thumbprint().ok());
+    let granted = Budget::from_value(claims.get("budget"));
+    // Budgets #as-token-endpoint: present exactly when sent, same scale, no higher.
+    let budget_ok = match (allowed, &granted) {
+        (None, Ok(None)) => true,
+        (Some(allowed), Ok(Some(granted))) => {
+            granted.same_scale(allowed) && granted.amount <= allowed.amount
+        }
+        _ => false,
+    };
     let problems: Vec<&str> = [
         // 2. Issued by the Access Server the request went to.
         (
@@ -543,8 +629,12 @@ async fn verify_delivered(
                 .any(|s| !asked.contains(s)),
             "scope",
         ),
-        // 7. Not past the presented token, nor already expired.
-        (exp > presented_exp || exp <= ctx.now, "exp"),
+        // 7. Not past the presented token, nor already expired, nor over an hour.
+        (
+            exp > presented_exp || exp <= ctx.now || exp - iat > MAX_AUTH_TOKEN_SECS,
+            "exp",
+        ),
+        (!budget_ok, "budget"),
     ]
     .into_iter()
     .filter_map(|(failed, what)| failed.then_some(what))
@@ -552,5 +642,8 @@ async fn verify_delivered(
     if !problems.is_empty() {
         return Err(wrong(&problems.join(", ")));
     }
-    Ok(exp)
+    Ok(Delivered {
+        exp,
+        budget: granted.ok().flatten(),
+    })
 }

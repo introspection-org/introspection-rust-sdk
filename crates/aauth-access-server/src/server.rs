@@ -497,7 +497,7 @@ impl AccessServer {
         if tokens.subagent_token.is_some() || tokens.upstream_token.is_some() {
             return Err(AAuthError::bad(
                 "invalid_request",
-                "subagent_token and upstream_token are not served yet",
+                "subagent_token and upstream_token are not verified here",
             ));
         }
         let now = self.now();
@@ -521,6 +521,19 @@ impl AccessServer {
             },
         )
         .await;
+        let budget = Budget::from_value(rt.get("budget")).ok().flatten();
+        // Budgets #as-token-endpoint: the resource token's unit and scale, no higher.
+        if let Some(allowed) = &tokens.budget {
+            if !budget
+                .as_ref()
+                .is_some_and(|b| b.same_scale(allowed) && allowed.amount <= b.amount)
+            {
+                return Err(AAuthError::bad(
+                    "invalid_request",
+                    "budget must be the resource token's, no higher",
+                ));
+            }
+        }
         let grant = grant_for(&rt);
         let request = AccessRequest {
             resource: grant.aud.clone(),
@@ -530,7 +543,8 @@ impl AccessServer {
             scope: text(&rt, "scope"),
             account: grant.account.clone(),
             mission_s256: grant.mission_s256.clone(),
-            budget: Budget::from_value(rt.get("budget")).ok().flatten(),
+            budget,
+            allowed_budget: tokens.budget.clone(),
             summary,
             agent: RequestingAgent {
                 id: agent.sub.clone(),
@@ -560,6 +574,7 @@ impl AccessServer {
         jwk: &Jwk,
         not_after: i64,
         scope: Option<String>,
+        budget: Option<Budget>,
     ) -> Response<Bytes> {
         let iat = self.now();
         let exp = (iat + secs(self.config.token_ttl)).min(not_after);
@@ -575,6 +590,9 @@ impl AccessServer {
         claims.insert("exp".into(), json!(exp));
         if let Some(scope) = &scope {
             claims.insert("scope".into(), json!(scope));
+        }
+        if let Some(budget) = &budget {
+            claims.insert("budget".into(), json!(budget));
         }
         claims.insert("cnf".into(), json!({ "jwk": jwk }));
         let auth_token = mint(&self.key, TokenKind::Auth, &Value::Object(claims));
@@ -624,8 +642,26 @@ impl AccessServer {
         let ps = self.person_server(request, path).await?;
         let asked = self.read_request(&ps, request.body()).await?;
         let requirement = match self.config.policy.decide(&asked.request).await {
-            Verdict::Allow { scope } => {
+            Verdict::Allow { scope, budget } => {
                 let scope = narrowed(asked.request.scope.as_deref(), scope.as_deref())?;
+                let allowed = asked.request.allowed_budget.clone();
+                let budget = match budget {
+                    None => allowed,
+                    Some(lower)
+                        if allowed
+                            .as_ref()
+                            .is_some_and(|a| a.same_scale(&lower) && lower.amount <= a.amount) =>
+                    {
+                        Some(lower)
+                    }
+                    Some(_) => {
+                        return Err(AAuthError::new(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "server_error",
+                            "the policy granted a budget the Person Server did not allow",
+                        ))
+                    }
+                };
                 return Ok(self
                     .issue(
                         &asked.request,
@@ -633,6 +669,7 @@ impl AccessServer {
                         &asked.jwk,
                         asked.not_after,
                         scope,
+                        budget,
                     )
                     .await);
             }
@@ -696,10 +733,11 @@ impl AccessServer {
                     Some("no such pending request"),
                 ));
             };
+            // #polling-error-codes: an answered request is consumed.
             if record.answered {
                 return Ok(problem(
                     StatusCode::GONE,
-                    "invalid_request",
+                    "invalid_code",
                     Some("this request was answered already"),
                 ));
             }
@@ -729,7 +767,7 @@ impl AccessServer {
                 _ => {
                     return Ok(problem(
                         StatusCode::GONE,
-                        "invalid_request",
+                        "invalid_code",
                         Some("its auth token was issued already"),
                     ))
                 }
@@ -746,6 +784,7 @@ impl AccessServer {
                 &collecting.jwk,
                 collecting.not_after,
                 scope,
+                collecting.request.allowed_budget.clone(),
             )
             .await)
     }

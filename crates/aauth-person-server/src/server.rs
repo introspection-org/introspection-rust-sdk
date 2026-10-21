@@ -1070,11 +1070,15 @@ impl PersonServer {
             grant.insert("budget".into(), json!(budget));
         }
         if let Some(access_server) = access_server {
+            // The mission is weighed against the resource's whole offer, so
+            // that is what this Person Server allows; the Access Server may
+            // grant less.
             let tokens = AuthTokenRequest::new(
                 str_of(&params, "resource_token").unwrap_or_default(),
                 agent_token,
                 str_of(&params, "presented_token").unwrap_or_default(),
-            );
+            )
+            .with_budget(budget.clone());
             return self
                 .federated_request(
                     agent,
@@ -1698,7 +1702,7 @@ impl PersonServer {
             },
         )
         .await;
-        let issued = match outcome {
+        let (issued, granted) = match outcome {
             Err(refused) => {
                 if stored {
                     let denied = Approval {
@@ -1743,7 +1747,14 @@ impl PersonServer {
                 }
                 return Ok(self.still_pending_on(tenant, &waiting.id, &requirement));
             }
-            Ok(AccessOutcome::Issued(issued)) => issued,
+            Ok(AccessOutcome::Issued { token, budget }) => (token, budget),
+            Ok(AccessOutcome::Retry { .. }) => {
+                if !stored {
+                    self.config.store.insert_approval(tenant, &approval).await?;
+                }
+                let requirement = federation.requirement.unwrap_or(Requirement::Approval);
+                return Ok(self.still_pending_on(tenant, &approval.id, &requirement));
+            }
             Ok(_) => {
                 return Err(AAuthError::new(
                     StatusCode::BAD_GATEWAY,
@@ -1781,8 +1792,8 @@ impl PersonServer {
         };
         // A request in another unit than the mission's budget is approved
         // without spending it.
-        if let Some(asked) = approval
-            .budget
+        // What the Access Server granted is what is spent.
+        if let Some(asked) = granted
             .clone()
             .filter(|a| mission.budget.as_ref().is_some_and(|b| b.same_scale(a)))
         {
@@ -1816,7 +1827,7 @@ impl PersonServer {
                 person: mission.person.clone(),
                 resource: approval.resource.clone().unwrap_or_default(),
                 mission: Some(mission),
-                budget: approval.budget.clone(),
+                budget: granted,
                 access_server: Some(federation.access_server),
             })
             .await;

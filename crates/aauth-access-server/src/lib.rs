@@ -63,6 +63,11 @@
 //!   matching the resource token's `presented_jti`, `sub`, `mission_s256`
 //!   and `tenant` exactly.
 //!
+//! - A `budget` the Person Server sends ([draft-hardt-aauth-budgets]
+//!   `#as-token-endpoint`) must be the resource token's, no higher. The auth
+//!   token carries it, or less when the policy's [`Verdict::Allow`] lowers
+//!   it, and carries none when none was sent.
+//!
 //! Only those parties' keys, and the resource's own R3 documents, are ever
 //! fetched.
 //!
@@ -79,6 +84,7 @@
 //! carrying either is refused `invalid_request`).
 //!
 //! [draft-hardt-oauth-aauth-protocol]: https://github.com/dickhardt/AAuth
+//! [draft-hardt-aauth-budgets]: https://github.com/dickhardt/AAuth
 //! [`@introspection-sdk/access-server`]: https://www.npmjs.com/package/@introspection-sdk/access-server
 //! [`aauth-person-server`]: https://docs.rs/aauth-person-server
 
