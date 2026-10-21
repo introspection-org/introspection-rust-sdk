@@ -663,7 +663,17 @@ CI fails when the share of duplicated lines in `crates/**/*.rs` exceeds the `thr
 npx --yes jscpd@5.4.1
 ```
 
-The config sets `mode: "weak"`, so copies that differ only in comments or whitespace count, and lists `kind: ["exact", "renamed"]` with `ignoreIdentifiers: true`, so copies that differ only in variable, function or type names count too. The generated `crates/introspection-sdk/src/api/schemas.rs` is ignored.
+The config sets `mode: "weak"`, so copies that differ only in comments or whitespace count. The generated `crates/introspection-sdk/src/api/schemas.rs` is ignored.
+
+It counts only `exact` clones. The `renamed` kind (with `ignoreIdentifiers`), which catches copies that differ only in names, was measured and left out. Its hits here are declaration boilerplate, such as serde `Option<T>` field lists, the `pub use schemas::{…}` re-export lists and accessor lists, at every `minTokens` tried. Raising `minTokens` far enough to quiet them also drops the real exact copies:
+
+| `minTokens` | Clones, exact + renamed | Duplicated lines |
+| --- | --- | --- |
+| 70 | 218 | 10.85% |
+| 150 | 37 | 3.19% |
+| 250 | 9 | 1.02% |
+
+At `minTokens` 70, exact only, the measurement is 34 clones and 1.45% duplicated lines.
 
 The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
 
