@@ -9,8 +9,11 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - SDK tags stay `vX.Y.Z` (`include-component-in-tag: false`). The other two crates get component-prefixed tags.
 - Don't set `component` on `crates/introspection-sdk`. A release PR that bumps only the SDK has one bare `<summary>X.Y.Z</summary>` entry, and release-please tags it only when the SDK's branch component is empty. Its tag never uses the component, so the key would only stop the tagging.
 
-## Checks
+## CI
 
+- The last job in `.github/workflows/ci.yml`, `All green` (id `all-green`), fails when any job in its `needs` failed, was cancelled or was skipped.
+- Add every new `ci.yml` job to `all-green`'s `needs`, or `All green` passes without it.
+- List a job in `allowed-skips` only when it skips by design, like `semver-checks`, which runs on pull requests only. A job skipped because a job it needs failed must still fail `All green`.
 - CI runs `cargo clippy --all-targets --all-features -- -D warnings` at the workspace root. That compiles every member's examples, so a broken example fails CI.
 - CI never runs the examples. They need a live server.
 
