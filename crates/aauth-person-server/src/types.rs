@@ -1,4 +1,5 @@
-use aauth_protocol::{Budget, Jwk};
+use aauth_protocol::federation::AuthTokenRequest;
+use aauth_protocol::{Budget, Jwk, Requirement};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -77,6 +78,28 @@ pub enum ApprovalStatus {
     Collected,
 }
 
+/// An auth token request the resource's own Access Server decides too
+/// (AAuth `#access-server-federation`): the resource token's `aud` is the
+/// Access Server, and this Person Server redeems it there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Federation {
+    /// The Access Server: the verified resource token's `aud`.
+    pub access_server: String,
+    /// What is sent to it.
+    #[serde(flatten)]
+    pub tokens: AuthTokenRequest,
+    /// Whether the request must fit what is left of the mission's budget
+    /// when it is spent: true when the mission covered it, false once the
+    /// approver approved it.
+    pub within_budget: bool,
+    /// Where the Access Server said to poll, once it answered `202`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    /// What the Access Server waits on meanwhile, relayed to the agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirement: Option<Requirement>,
+}
+
 /// A decision this Person Server waits on. Whoever operates it makes the decision.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Approval {
@@ -109,6 +132,11 @@ pub struct Approval {
     /// For a mission: the resources it would cover. For an auth token: the claims it is minted with.
     #[serde(default)]
     pub grant: Map<String, Value>,
+    /// Set when the resource's Access Server decides too: the approval is
+    /// `approved` once the person's side is, and the Access Server's answer
+    /// is collected on the agent's poll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub federation: Option<Federation>,
     /// Approving a mission sets its budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decided_budget: Option<Budget>,
@@ -255,4 +283,7 @@ pub struct Issued {
     /// What it spent from the mission's budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
+    /// When the resource's Access Server issued it, not this Person Server: that server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_server: Option<String>,
 }

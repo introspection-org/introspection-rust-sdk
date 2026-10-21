@@ -16,11 +16,14 @@
 //! | [`token`] | Mint tokens; verify one against its issuer's keys and the request's signer |
 //! | [`discovery`] | Find an issuer's keys through its metadata document, over a [`discovery::Fetch`] you choose |
 //! | [`resource`] | A resource's side: [`resource::authenticate`] a request, mint resource tokens, challenge |
+//! | [`federation`] | Four-party: a Person Server redeeming a resource token at the resource's Access Server |
+//! | [`proposal`] | Reading a resource's R3 proposal summary, signed as a Person Server or Access Server |
 //! | [`requirement`] | The `AAuth-Requirement` header |
 //! | [`mission`], [`budget`] | What a person approved, and what it may spend |
 //! | [`client`] | The agent's side of a Person Server conversation, and an SSRF guard (feature `client`) |
 //!
-//! The Person Server itself is the [`aauth-person-server`] crate.
+//! The Person Server itself is the [`aauth-person-server`] crate, and an
+//! Access Server the [`aauth-access-server`] crate.
 //!
 //! # A request, end to end
 //!
@@ -110,6 +113,7 @@
 //! [draft-hardt-oauth-aauth-protocol]: https://github.com/dickhardt/AAuth
 //! [draft-hardt-httpbis-signature-key]: https://github.com/dickhardt/signature-key
 //! [`aauth-person-server`]: https://docs.rs/aauth-person-server
+//! [`aauth-access-server`]: https://docs.rs/aauth-access-server
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
@@ -118,6 +122,7 @@
 pub mod budget;
 pub mod discovery;
 pub mod error;
+pub mod federation;
 pub mod httpsig;
 pub mod identifier;
 pub mod jwk;
@@ -125,6 +130,7 @@ pub mod jwt;
 pub mod keys;
 pub mod metadata;
 pub mod mission;
+pub mod proposal;
 pub mod requirement;
 pub mod resource;
 pub mod token;

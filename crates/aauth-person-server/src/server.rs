@@ -8,12 +8,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aauth_protocol::discovery::{Fetch, JwksResolver, KeyResolver, NoKeys};
-use aauth_protocol::httpsig::{self, Incoming, SignatureKey, VerifyOptions};
+use aauth_protocol::federation::{
+    federate, AccessOutcome, AuthTokenRequest, Federate, FederationContext,
+};
+use aauth_protocol::httpsig::{self, Incoming, VerifyOptions};
 use aauth_protocol::identifier::{is_server_identifier, trim};
 use aauth_protocol::jwk::{Algorithm, Jwks};
 use aauth_protocol::metadata::{dwk, PersonServerMetadata};
+use aauth_protocol::proposal::{read_summary, ProposalReader};
 use aauth_protocol::token::{mint, verify_token, TokenKind, VerifyTokenOptions};
-use aauth_protocol::{jwt, Budget, SigningKey};
+use aauth_protocol::{jwt, Budget, Requirement, SigningKey};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use bytes::Bytes;
@@ -29,8 +33,8 @@ use crate::error::{problem, AAuthError};
 use crate::store::{MemoryStore, Spend, Store};
 use crate::time::rfc3339;
 use crate::types::{
-    Agent, Approval, ApprovalKind, ApprovalStatus, Decision, Issued, IssuedKind, LogEntry, Mission,
-    Person, Verdict,
+    Agent, Approval, ApprovalKind, ApprovalStatus, Decision, Federation, Issued, IssuedKind,
+    LogEntry, Mission, Person, Verdict,
 };
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -468,6 +472,16 @@ impl PersonServer {
         request: &Request<Bytes>,
         path: &str,
     ) -> Result<Agent, AAuthError> {
+        Ok(self.verify_agent_token(request, path).await?.0)
+    }
+
+    /// [`Self::verify_agent`], and the agent token as presented: what a
+    /// federated request passes on to the Access Server.
+    async fn verify_agent_token(
+        &self,
+        request: &Request<Bytes>,
+        path: &str,
+    ) -> Result<(Agent, String), AAuthError> {
         let full_path = format!("{}{path}", self.config.base_path);
         let body = request.body();
         let verified = httpsig::verify(
@@ -533,13 +547,16 @@ impl PersonServer {
                 "this agent's Person Server is another",
             ));
         }
-        Ok(Agent {
-            id: token.sub,
-            provider,
-            jkt: verified.thumbprint,
-            jwk: token.cnf_jwk,
-            exp: token.exp,
-        })
+        Ok((
+            Agent {
+                id: token.sub,
+                provider,
+                jkt: verified.thumbprint.clone(),
+                jwk: token.cnf_jwk,
+                exp: token.exp,
+            },
+            raw.to_string(),
+        ))
     }
 
     /// The person the agent acts for, under `tenant`. Each agent key is
@@ -640,6 +657,7 @@ impl PersonServer {
                 resource: resource.to_string(),
                 mission: mission.cloned(),
                 budget: None,
+                access_server: None,
             })
             .await;
         json!({ "person_token": token, "expires_in": expires_in })
@@ -677,6 +695,7 @@ impl PersonServer {
                 budget: grant
                     .get("budget")
                     .and_then(|b| serde_json::from_value(b.clone()).ok()),
+                access_server: None,
             })
             .await;
         json!({ "auth_token": token, "expires_in": expires_in })
@@ -843,12 +862,13 @@ impl PersonServer {
     }
 
     /// A resource token, verified against its issuer's keys, binding a token
-    /// this Person Server issued.
+    /// this Person Server issued; and the resource's Access Server, when its
+    /// `aud` names one rather than this Person Server (four-party).
     async fn verify_resource_token(
         &self,
         agent: &Agent,
         params: &Map<String, Value>,
-    ) -> Result<(Map<String, Value>, Mission, String), AAuthError> {
+    ) -> Result<VerifiedResourceToken, AAuthError> {
         let (Some(resource_token), Some(presented_token)) = (
             str_of(params, "resource_token"),
             str_of(params, "presented_token"),
@@ -969,10 +989,16 @@ impl PersonServer {
         {
             return Err(invalid("resource token is not yet valid"));
         }
-        if str_of(&rt, "aud") != Some(self.config.issuer.as_str())
-            || trim(str_of(&rt, "ps").unwrap_or_default()) != self.config.issuer
-        {
+        if trim(str_of(&rt, "ps").unwrap_or_default()) != self.config.issuer {
             return Err(invalid("not for this Person Server"));
+        }
+        // #ps-as-federation: an `aud` other than this Person Server is the
+        // resource's Access Server.
+        let audience = str_of(&rt, "aud").unwrap_or_default().to_string();
+        if audience != self.config.issuer && !is_server_identifier(&audience) {
+            return Err(invalid(
+                "aud is neither this Person Server nor an Access Server",
+            ));
         }
         if str_of(&rt, "agent_jkt") != Some(agent.jkt.as_str()) {
             return Err(invalid("agent_jkt is not the signer"));
@@ -986,51 +1012,28 @@ impl PersonServer {
         {
             return Err(invalid("does not match the presented token"));
         }
-        Ok((rt, mission, resource))
+        Ok(VerifiedResourceToken {
+            access_server: (audience != self.config.issuer).then_some(audience),
+            rt,
+            mission,
+            resource,
+        })
     }
 
     /// The resource's one-line description of the request, from its R3
     /// proposal; `None` if it has none or it cannot be read.
     async fn proposal_summary(&self, rt: &Map<String, Value>) -> Option<String> {
-        let (uri, expected) = (str_of(rt, "r3_uri")?, str_of(rt, "r3_s256")?);
-        // Fetched signed as this server, so only from the resource itself.
-        let resource = str_of(rt, "iss")?;
-        if !uri.starts_with("https://") || !aauth_protocol::identifier::same_origin(resource, uri) {
-            return None;
-        }
-        let signed = httpsig::sign(
-            &self.key,
-            &SignatureKey::JwksUri {
-                id: self.config.issuer.clone(),
-                dwk: dwk::PERSON.into(),
-                kid: self.key.thumbprint().into(),
-            },
-            &httpsig::Outgoing {
-                method: "GET",
-                url: uri,
-                content_type: None,
-                body: None,
-                created: self.now(),
+        read_summary(
+            rt,
+            &ProposalReader {
+                issuer: &self.config.issuer,
+                dwk: dwk::PERSON,
+                key: &self.key,
+                fetch: self.fetch.as_ref(),
+                now: self.now(),
             },
         )
-        .ok()?;
-        let mut headers = http::HeaderMap::new();
-        for (name, value) in signed {
-            headers.insert(
-                http::HeaderName::from_bytes(name.as_bytes()).ok()?,
-                HeaderValue::from_str(&value).ok()?,
-            );
-        }
-        let fetched = self.fetch.get(uri, headers).await.ok()?;
-        if !fetched.status.is_success() || aauth_protocol::s256(&fetched.body) != expected {
-            return None;
-        }
-        let document: Value = serde_json::from_slice(&fetched.body).ok()?;
-        document
-            .get("display")?
-            .get("summary")?
-            .as_str()
-            .map(str::to_string)
+        .await
     }
 
     async fn request_auth_token(
@@ -1038,9 +1041,14 @@ impl PersonServer {
         request: &Request<Bytes>,
         path: &str,
     ) -> Result<Response<Bytes>, AAuthError> {
-        let agent = self.verify_agent(request, path).await?;
+        let (agent, agent_token) = self.verify_agent_token(request, path).await?;
         let params = read_body(request.body())?;
-        let (rt, mission, resource) = self.verify_resource_token(&agent, &params).await?;
+        let VerifiedResourceToken {
+            rt,
+            mission,
+            resource,
+            access_server,
+        } = self.verify_resource_token(&agent, &params).await?;
         let tenant = mission.tenant.clone();
         let tenant = tenant.as_str();
         let budget = Budget::from_value(rt.get("budget")).map_err(|_| {
@@ -1058,10 +1066,40 @@ impl PersonServer {
                 grant.insert((*claim).into(), value.clone());
             }
         }
+        if let Some(budget) = &budget {
+            grant.insert("budget".into(), json!(budget));
+        }
+        if let Some(access_server) = access_server {
+            // The mission is weighed against the resource's whole offer, so
+            // that is what this Person Server allows; the Access Server may
+            // grant less.
+            let tokens = AuthTokenRequest::new(
+                str_of(&params, "resource_token").unwrap_or_default(),
+                agent_token,
+                str_of(&params, "presented_token").unwrap_or_default(),
+            )
+            .with_budget(budget.clone());
+            return self
+                .federated_request(
+                    agent,
+                    mission,
+                    &rt,
+                    resource,
+                    budget,
+                    grant,
+                    Federation {
+                        access_server,
+                        tokens,
+                        within_budget: true,
+                        location: None,
+                        requirement: None,
+                    },
+                )
+                .await;
+        }
         let Some(budget) = budget else {
             return Ok(ok(&self.auth_token(&agent, &mission, &grant).await));
         };
-        grant.insert("budget".into(), json!(budget));
         if mission
             .budget
             .as_ref()
@@ -1124,6 +1162,7 @@ impl PersonServer {
             resource: None,
             budget: None,
             grant: Map::new(),
+            federation: None,
             decided_budget: None,
             decided_by: None,
             decided_at: None,
@@ -1151,16 +1190,23 @@ impl PersonServer {
     }
 
     fn still_pending(&self, tenant: &str, id: &str) -> Response<Bytes> {
+        self.still_pending_on(tenant, id, &Requirement::Approval)
+    }
+
+    /// `202` while `requirement` is met: the agent polls the pending URL.
+    fn still_pending_on(
+        &self,
+        tenant: &str,
+        id: &str,
+        requirement: &Requirement,
+    ) -> Response<Bytes> {
         let mut response = json_response(StatusCode::ACCEPTED, &json!({ "status": "pending" }));
         let headers = response.headers_mut();
         for (name, value) in [
             ("location", self.endpoints.pending(tenant, id)),
             ("retry-after", self.config.retry_after.as_secs().to_string()),
             ("cache-control", "no-store".to_string()),
-            (
-                aauth_protocol::requirement::HEADER,
-                "requirement=approval".to_string(),
-            ),
+            (aauth_protocol::requirement::HEADER, requirement.to_header()),
         ] {
             if let Ok(value) = HeaderValue::from_str(&value) {
                 headers.insert(name, value);
@@ -1218,7 +1264,14 @@ impl PersonServer {
         }
         match approval.status {
             ApprovalStatus::Denied => {
-                let who = approval.approver.name.as_deref().unwrap_or("The approver");
+                let by_access_server = approval.federation.as_ref().is_some_and(|f| {
+                    approval.decided_by.as_deref() == Some(f.access_server.as_str())
+                });
+                let who = if by_access_server {
+                    "The resource's Access Server"
+                } else {
+                    approval.approver.name.as_deref().unwrap_or("The approver")
+                };
                 return Ok(problem(
                     StatusCode::FORBIDDEN,
                     "denied",
@@ -1255,6 +1308,9 @@ impl PersonServer {
                 "mission": URL_SAFE_NO_PAD.encode(mission.mission.as_bytes()),
                 "person_tokens": tokens,
             })));
+        }
+        if approval.federation.is_some() {
+            return self.redeem(tenant, &agent, mission, approval, true).await;
         }
         let grant = approval.grant.clone();
         let asked = approval.budget.clone();
@@ -1543,6 +1599,295 @@ impl PersonServer {
             _ => problem(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", None),
         };
         Ok(Some(response))
+    }
+}
+
+/// A resource token that verified, and what it is for.
+struct VerifiedResourceToken {
+    rt: Map<String, Value>,
+    mission: Mission,
+    resource: String,
+    /// The resource's Access Server, when the token's `aud` names one.
+    access_server: Option<String>,
+}
+
+impl PersonServer {
+    /// A request for a resource with its own Access Server. The mission is
+    /// weighed first, as for any resource: one over what is left goes to the
+    /// approver before the Access Server is asked anything.
+    #[allow(clippy::too_many_arguments)]
+    async fn federated_request(
+        &self,
+        agent: Agent,
+        mission: Mission,
+        rt: &Map<String, Value>,
+        resource: String,
+        budget: Option<Budget>,
+        grant: Map<String, Value>,
+        federation: Federation,
+    ) -> Result<Response<Bytes>, AAuthError> {
+        let fits = budget.as_ref().is_none_or(|asked| {
+            mission.budget.as_ref().is_some_and(|b| {
+                b.same_scale(asked) && mission.spent.saturating_add(asked.amount) <= b.amount
+            })
+        });
+        let description = str_of(rt, "scope").unwrap_or("a request").to_string();
+        let approval = Approval {
+            mission_s256: Some(mission.s256.clone()),
+            resource: Some(resource),
+            budget,
+            grant,
+            ..self.approval(
+                &mission.tenant,
+                ApprovalKind::AuthToken,
+                agent.clone(),
+                mission.person.clone(),
+                description,
+            )
+        };
+        if !fits {
+            return self
+                .ask(Approval {
+                    summary: self.proposal_summary(rt).await,
+                    federation: Some(Federation {
+                        within_budget: false,
+                        ..federation
+                    }),
+                    ..approval
+                })
+                .await;
+        }
+        let approved = Approval {
+            status: ApprovalStatus::Approved,
+            decided_at: Some(self.now()),
+            federation: Some(federation),
+            ..approval
+        };
+        let tenant = mission.tenant.clone();
+        self.redeem(&tenant, &agent, mission, approved, false).await
+    }
+
+    /// Redeem an approved request at its Access Server: its auth token, once
+    /// the spend lands, or a wait while the Access Server decides. `stored`
+    /// is whether the approval is saved already; one that is not is saved
+    /// only if it must wait. A refusal ends a saved approval as the Access
+    /// Server's denial. A spend is recorded only once it has issued.
+    async fn redeem(
+        &self,
+        tenant: &str,
+        agent: &Agent,
+        mut mission: Mission,
+        approval: Approval,
+        stored: bool,
+    ) -> Result<Response<Bytes>, AAuthError> {
+        let Some(federation) = approval.federation.clone() else {
+            return Err(AAuthError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "not a federated request",
+            ));
+        };
+        let outcome = federate(
+            &Federate {
+                access_server: &federation.access_server,
+                tokens: &federation.tokens,
+                agent_jkt: &agent.jkt,
+                location: federation.location.as_deref(),
+            },
+            &FederationContext {
+                issuer: &self.config.issuer,
+                key: &self.key,
+                fetch: self.fetch.as_ref(),
+                now: self.now(),
+            },
+        )
+        .await;
+        let (issued, granted) = match outcome {
+            Err(refused) => {
+                if stored {
+                    let denied = Approval {
+                        status: ApprovalStatus::Denied,
+                        decided_by: Some(federation.access_server.clone()),
+                        decided_at: Some(self.now()),
+                        ..approval
+                    };
+                    self.config
+                        .store
+                        .transition_approval(tenant, ApprovalStatus::Approved, &denied)
+                        .await?;
+                }
+                return Err(AAuthError::new(
+                    refused.status(),
+                    refused.error(),
+                    refused.detail(),
+                ));
+            }
+            Ok(AccessOutcome::Pending {
+                location,
+                requirement,
+                ..
+            }) => {
+                let changed = federation.location.as_deref() != Some(location.as_str())
+                    || federation.requirement.as_ref() != Some(&requirement);
+                let waiting = Approval {
+                    federation: Some(Federation {
+                        location: Some(location),
+                        requirement: Some(requirement.clone()),
+                        ..federation
+                    }),
+                    ..approval
+                };
+                if !stored {
+                    self.config.store.insert_approval(tenant, &waiting).await?;
+                } else if changed {
+                    self.config
+                        .store
+                        .transition_approval(tenant, ApprovalStatus::Approved, &waiting)
+                        .await?;
+                }
+                return Ok(self.still_pending_on(tenant, &waiting.id, &requirement));
+            }
+            Ok(AccessOutcome::Issued { token, budget }) => (token, budget),
+            Ok(AccessOutcome::Retry { .. }) => {
+                if !stored {
+                    self.config.store.insert_approval(tenant, &approval).await?;
+                }
+                let requirement = federation.requirement.unwrap_or(Requirement::Approval);
+                return Ok(self.still_pending_on(tenant, &approval.id, &requirement));
+            }
+            Ok(_) => {
+                return Err(AAuthError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "as_unreachable",
+                    "the Access Server answered something this Person Server does not act on",
+                ))
+            }
+        };
+        let collecting = Approval {
+            status: ApprovalStatus::Collected,
+            ..approval.clone()
+        };
+        if stored
+            && !self
+                .config
+                .store
+                .transition_approval(tenant, ApprovalStatus::Approved, &collecting)
+                .await?
+        {
+            return Ok(problem(
+                StatusCode::GONE,
+                "collected",
+                Some("this approval's token was already collected"),
+            ));
+        }
+        // Put back so a later poll can collect it.
+        let restore = || async {
+            if stored {
+                let _ = self
+                    .config
+                    .store
+                    .transition_approval(tenant, ApprovalStatus::Collected, &approval)
+                    .await;
+            }
+        };
+        // A request in another unit than the mission's budget is approved
+        // without spending it.
+        // What the Access Server granted is what is spent.
+        if let Some(asked) = granted
+            .clone()
+            .filter(|a| mission.budget.as_ref().is_some_and(|b| b.same_scale(a)))
+        {
+            let rule = if federation.within_budget {
+                Spend::WithinBudget
+            } else {
+                Spend::Approved
+            };
+            match self
+                .config
+                .store
+                .spend(tenant, &mission.s256, asked.amount, rule, self.now())
+                .await
+            {
+                Ok(Some(spent)) => mission = spent,
+                Ok(None) if federation.within_budget => {
+                    return self.reask(tenant, approval, stored).await;
+                }
+                unspent => {
+                    restore().await;
+                    unspent?;
+                    return Err(AAuthError::mission_terminated("the mission has ended"));
+                }
+            }
+        }
+        self.config
+            .hooks
+            .on_issued(&Issued {
+                kind: IssuedKind::AuthToken,
+                agent: agent.clone(),
+                person: mission.person.clone(),
+                resource: approval.resource.clone().unwrap_or_default(),
+                mission: Some(mission),
+                budget: granted,
+                access_server: Some(federation.access_server),
+            })
+            .await;
+        Ok(ok(&issued))
+    }
+
+    /// The budget moved between weighing and spending: the approver decides,
+    /// and the Access Server is asked again once they approve.
+    async fn reask(
+        &self,
+        tenant: &str,
+        approval: Approval,
+        stored: bool,
+    ) -> Result<Response<Bytes>, AAuthError> {
+        let Some(federation) = approval.federation.clone() else {
+            return Err(AAuthError::mission_terminated("the mission has ended"));
+        };
+        let summary = match approval.summary.clone() {
+            Some(summary) => Some(summary),
+            None => match jwt::decode(&federation.tokens.resource_token) {
+                Ok(rt) => self.proposal_summary(&rt.claims).await,
+                Err(_) => None,
+            },
+        };
+        let mut asking = Approval {
+            status: ApprovalStatus::Pending,
+            decided_at: None,
+            summary,
+            federation: Some(Federation {
+                within_budget: false,
+                location: None,
+                requirement: None,
+                ..federation
+            }),
+            ..approval
+        };
+        if let Some(approver) = self
+            .config
+            .directory
+            .approver(asking.kind, &asking.person)
+            .await
+        {
+            asking.approver = approver;
+        }
+        if !stored {
+            self.config.store.insert_approval(tenant, &asking).await?;
+        } else if !self
+            .config
+            .store
+            .transition_approval(tenant, ApprovalStatus::Collected, &asking)
+            .await?
+        {
+            return Ok(problem(
+                StatusCode::GONE,
+                "collected",
+                Some("this approval's token was already collected"),
+            ));
+        }
+        self.config.hooks.on_approval(&asking).await;
+        Ok(self.still_pending(tenant, &asking.id))
     }
 }
 

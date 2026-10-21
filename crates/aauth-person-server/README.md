@@ -1,11 +1,12 @@
 # aauth-person-server
 
-An [AAuth](https://github.com/dickhardt/AAuth) Person Server (`draft-hardt-oauth-aauth-protocol-11`, three-party) you can run instead of building one. It speaks for your people when agents want to act for them:
+An [AAuth](https://github.com/dickhardt/AAuth) Person Server (`draft-hardt-oauth-aauth-protocol-11`, three-party and four-party) you can run instead of building one. It speaks for your people when agents want to act for them:
 
 - it verifies each agent by its HTTP Message Signature and agent token, from agent providers you trust;
 - it puts each **mission** an agent proposes to whoever decides for the person, then issues **person tokens** and **auth tokens** under it;
 - it weighs each auth token request against the mission's **budget**: what fits is issued at once and spent, and what does not goes back to the approver;
-- it turns whatever needs a human into an **approval**, which you deliver however you reach people.
+- it turns whatever needs a human into an **approval**, which you deliver however you reach people;
+- for a resource with its own **Access Server** (a resource token whose `aud` is that server), it weighs the mission and budget first, then redeems the request there and relays the Access Server's auth token, wait or refusal. The `aauth-access-server` crate is one.
 
 It is a Rust port of [`@introspection-sdk/person-server`](https://www.npmjs.com/package/@introspection-sdk/person-server); an agent cannot tell the two apart.
 
