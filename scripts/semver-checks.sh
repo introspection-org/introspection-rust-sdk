@@ -20,7 +20,7 @@ set -euo pipefail
 if [ "$#" -gt 0 ]; then
   crates=("$@")
 else
-  crates=(introspection-sdk aauth-protocol aauth-person-server)
+  crates=(introspection-sdk aauth-protocol)
 fi
 base="${BASE_REV:-HEAD}"
 

@@ -108,21 +108,6 @@ impl Requirement {
     }
 }
 
-/// As its header value, so a pending request can be kept and relayed as is.
-impl serde::Serialize for Requirement {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_header())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Requirement {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw)
-            .ok_or_else(|| serde::de::Error::custom(format!("not an AAuth-Requirement: {raw}")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,13 +143,7 @@ mod tests {
         ] {
             assert_eq!(
                 Requirement::parse(&requirement.to_header()),
-                Some(requirement.clone())
-            );
-            let json = serde_json::to_value(&requirement).unwrap();
-            assert_eq!(json, serde_json::json!(requirement.to_header()));
-            assert_eq!(
-                serde_json::from_value::<Requirement>(json).unwrap(),
-                requirement
+                Some(requirement)
             );
         }
     }
