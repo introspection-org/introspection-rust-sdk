@@ -26,7 +26,7 @@ use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
-    Annotations, Automations, Connectors, Endpoints, ExperimentHandle, Experiments,
+    Aauth, Annotations, Automations, Connectors, Endpoints, ExperimentHandle, Experiments,
     MemberConnections, Members, Projects, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
 };
 use crate::types::{self, ClientConfig};
@@ -76,6 +76,7 @@ pub struct IntrospectionClient {
     projects: Projects,
     annotations: Annotations,
     tags: Tags,
+    aauth: Aauth,
     dp_http: Arc<HttpClient>,
 }
 
@@ -153,6 +154,7 @@ impl IntrospectionClient {
             projects: Projects::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             tags: Tags::new(dp_http.clone()),
+            aauth: Aauth::new(dp_http.clone()),
             dp_http,
         })
     }
@@ -181,6 +183,12 @@ impl IntrospectionClient {
 
     pub fn tags(&self) -> &Tags {
         &self.tags
+    }
+
+    /// `/v1/aauth`: the hosted Person Server's approvals and missions.
+    /// Experimental.
+    pub fn aauth(&self) -> &Aauth {
+        &self.aauth
     }
 
     /// `/v1/connectors` CRUD, its nested `connections`, and `authorize()` —
@@ -284,8 +292,8 @@ impl IntrospectionClient {
     ///
     /// The token is not auto-refreshed: it lives for `expires_in` seconds, so
     /// re-mint (call this again) for long-lived processes once it lapses.
-    /// The resolved Data Plane URL is wired into the annotation and
-    /// project-label namespaces automatically.
+    /// The resolved Data Plane URL is wired into the annotation and tag
+    /// namespaces automatically.
     ///
     /// # Example
     ///
