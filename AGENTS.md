@@ -7,6 +7,7 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - The repo is a Cargo workspace (since #124). The SDK lives in `crates/introspection-sdk`; `crates/aauth-protocol` and `crates/aauth-person-server` sit beside it.
 - release-please manages three packages: `introspection-sdk`, `aauth-protocol` and `aauth-person-server`. See `release-please-config.json`.
 - SDK tags stay `vX.Y.Z` (`include-component-in-tag: false`). The other two crates get component-prefixed tags.
+- Don't set `component` on `crates/introspection-sdk`. A release PR that bumps only the SDK has one bare `<summary>X.Y.Z</summary>` entry, and release-please tags it only when the SDK's branch component is empty. Its tag never uses the component, so the key would only stop the tagging.
 
 ## Checks
 
