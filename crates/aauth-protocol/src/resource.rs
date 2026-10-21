@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::budget::Budget;
 use crate::discovery::KeyResolver;
-use crate::error::{Error, Result, SignatureError};
+use crate::error::{Error, Result};
 use crate::httpsig::{self, Incoming, Verified, VerifyOptions};
 use crate::identifier::is_server_identifier;
 use crate::keys::SigningKey;
@@ -75,10 +75,6 @@ pub struct ResourceTokenParams<'a> {
     pub r3: Option<(&'a str, &'a str)>,
     /// When the presented token's mission ends: no token outlives it.
     pub mission_expires_at: Option<i64>,
-    /// This resource's own Access Server, when it has one (four-party): the
-    /// token's `aud` (AAuth §Resource Token, `#resource-token`). Unset, the
-    /// `aud` is the Person Server that issued the presented token.
-    pub access_server: Option<&'a str>,
     /// Seconds since the epoch.
     pub now: i64,
     /// Seconds the token is good for.
@@ -102,7 +98,6 @@ impl<'a> ResourceTokenParams<'a> {
             budget: None,
             r3: None,
             mission_expires_at: None,
-            access_server: None,
             now: crate::now_unix(),
             lifetime: DEFAULT_RESOURCE_TOKEN_LIFETIME,
         }
@@ -119,33 +114,17 @@ impl<'a> ResourceTokenParams<'a> {
         self.r3 = Some((uri, s256));
         self
     }
-
-    /// Address the token to this resource's own Access Server, which the
-    /// Person Server then federates with (AAuth `#ps-as-federation`).
-    pub fn access_server(mut self, access_server: &'a str) -> Self {
-        self.access_server = Some(access_server);
-        self
-    }
 }
 
 /// Mint a resource token for a `requirement=auth-token` challenge, addressed
-/// to this resource's Access Server when it has one, else to the Person
-/// Server that issued the presented token, and carrying the presented
-/// token's `sub`, `mission_s256` and `tenant` unchanged.
+/// to the Person Server that issued the presented token, and carrying its
+/// `sub`, `mission_s256` and `tenant` unchanged.
 pub fn resource_token(key: &SigningKey, params: &ResourceTokenParams<'_>) -> Result<String> {
     if !is_server_identifier(params.resource) {
         return Err(Error::Invalid(format!(
             "{} is not a server identifier",
             params.resource
         )));
-    }
-    if params
-        .access_server
-        .is_some_and(|access_server| !is_server_identifier(access_server))
-    {
-        return Err(Error::Invalid(
-            "the Access Server is not a server identifier".into(),
-        ));
     }
     if params.scope.is_empty() {
         return Err(Error::Invalid("a resource token needs a scope".into()));
@@ -166,7 +145,7 @@ pub fn resource_token(key: &SigningKey, params: &ResourceTokenParams<'_>) -> Res
     let mut claims = json!({
         "iss": params.resource,
         "dwk": dwk::RESOURCE,
-        "aud": params.access_server.unwrap_or(ps),
+        "aud": ps,
         "ps": ps,
         "jti": crate::random_id(),
         "sub": presented.sub,
@@ -200,55 +179,4 @@ pub fn challenge(requirement: &Requirement) -> Vec<(String, String)> {
         crate::requirement::HEADER.to_string(),
         requirement.to_header(),
     )]
-}
-
-/// Whose auth tokens a resource accepts.
-#[derive(Clone, Copy, Debug)]
-pub enum AuthTokenIssuers<'a> {
-    /// Three-party: each of these Person Servers issues its own, `dwk`
-    /// `aauth-person.json` with `ps` its `iss`.
-    PersonServers(&'a [String]),
-    /// Four-party: only this resource's Access Server issues them, `dwk`
-    /// `aauth-access.json`, for the people of `person_servers`. One a Person
-    /// Server minted itself would skip the Access Server's policy, so it is
-    /// refused.
-    AccessServer {
-        /// The Access Server's identifier.
-        access_server: &'a str,
-        /// The Person Servers whose people it issues for: an auth token's `ps`.
-        person_servers: &'a [String],
-    },
-}
-
-impl AuthTokenIssuers<'_> {
-    /// Whether `token`, verified by [`authenticate`], is an auth token one
-    /// of these issued, answered as `invalid_jwt` when it is not. A token of
-    /// any other kind passes: its issuer is the caller's to check.
-    pub fn check(&self, token: &VerifiedToken) -> Result<(), SignatureError> {
-        if token.kind != TokenKind::Auth {
-            return Ok(());
-        }
-        let ps = token.ps().unwrap_or_default();
-        let issued_here = match self {
-            Self::PersonServers(person_servers) => {
-                token.dwk == dwk::PERSON && ps == token.iss && person_servers.contains(&token.iss)
-            }
-            Self::AccessServer {
-                access_server,
-                person_servers,
-            } => {
-                token.iss == *access_server
-                    && token.dwk == dwk::ACCESS
-                    && person_servers.iter().any(|p| p == ps)
-            }
-        };
-        if issued_here {
-            Ok(())
-        } else {
-            Err(SignatureError::new(
-                "invalid_jwt",
-                format!("{} does not issue the auth tokens accepted here", token.iss),
-            ))
-        }
-    }
 }

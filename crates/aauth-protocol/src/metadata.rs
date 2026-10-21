@@ -57,28 +57,6 @@ pub struct PersonServerMetadata {
     pub description: Option<String>,
 }
 
-/// An Access Server's `aauth-access.json` (AAuth §Access Server Metadata,
-/// `#access-server-metadata`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AccessServerMetadata {
-    /// The Access Server's server identifier: the `iss` of its auth tokens.
-    pub issuer: String,
-    /// The keys its auth tokens are signed with.
-    pub jwks_uri: String,
-    /// Where a Person Server sends its token requests (`#as-token-endpoint`).
-    pub auth_token_endpoint: String,
-    /// Where a Person Server or resource revokes a token it gave this
-    /// Access Server. RECOMMENDED by the draft; not served by this crate yet.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revocation_endpoint: Option<String>,
-    /// A display name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// A display description, in Markdown.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
 /// The part of any role's metadata document that key discovery reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyedMetadata {

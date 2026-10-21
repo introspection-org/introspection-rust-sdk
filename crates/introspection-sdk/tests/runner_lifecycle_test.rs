@@ -8,7 +8,9 @@
 //! keep serving a closed session.
 
 use introspection_sdk::api::{IntrospectionAPIError, RunRequest};
-use introspection_sdk::{AdvancedOptions, ClientConfig, IntrospectionClient, RunnerIdentity};
+use introspection_sdk::{
+    AdvancedOptions, ClientConfig, IntrospectionClient, Runner, RunnerIdentity,
+};
 use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{method, path};
@@ -90,6 +92,34 @@ async fn mount_run(server: &MockServer, spec: serde_json::Value, calls: u64) {
         .await;
 }
 
+/// A runner opened as session `sess_1` against `dp_endpoint`.
+async fn open(cp: &MockServer, dp_endpoint: &str) -> Runner {
+    mount_run(
+        cp,
+        runner_spec("sess_1", dp_endpoint, "2026-01-01T00:00:00Z"),
+        1,
+    )
+    .await;
+    client(cp)
+        .runtimes()
+        .handle(Uuid::parse_str(RUNTIME_ID).unwrap())
+        .run(run_request())
+        .await
+        .unwrap()
+}
+
+/// A DP that serves `task_1` exactly once.
+async fn dp_serving_one_task() -> MockServer {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/tasks/task_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_response()))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    dp
+}
+
 #[tokio::test]
 async fn run_opens_a_runner_whose_accessors_report_the_spec() {
     let cp = MockServer::start().await;
@@ -126,28 +156,9 @@ async fn the_namespaces_a_runner_hands_out_talk_to_the_deployment_from_the_spec(
     // The whole point of the runner: `runner.tasks()` must reach the DP the
     // CP named, with the session token as the bearer -- not the CP host and
     // not the CP token.
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/tasks/task_1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(task_response()))
-        .expect(1)
-        .mount(&dp)
-        .await;
-
+    let dp = dp_serving_one_task().await;
     let cp = MockServer::start().await;
-    mount_run(
-        &cp,
-        runner_spec("sess_1", &dp.uri(), "2026-01-01T00:00:00Z"),
-        1,
-    )
-    .await;
-
-    let runner = client(&cp)
-        .runtimes()
-        .handle(Uuid::parse_str(RUNTIME_ID).unwrap())
-        .run(run_request())
-        .await
-        .unwrap();
+    let runner = open(&cp, &dp.uri()).await;
 
     let task = runner.tasks().get("task_1").await.unwrap();
     assert_eq!(task.id.to_string(), "00000000-0000-0000-0000-000000000001");
@@ -174,19 +185,7 @@ async fn refresh_re_mints_the_session_and_repoints_the_namespaces() {
     let cp = MockServer::start().await;
     // `up_to_n_times(1)` on the first mount means the second /run call falls
     // through to this one -- wiremock matches the most recently mounted first.
-    mount_run(
-        &cp,
-        runner_spec("sess_1", &first.uri(), "2026-01-01T00:00:00Z"),
-        1,
-    )
-    .await;
-
-    let runner = client(&cp)
-        .runtimes()
-        .handle(Uuid::parse_str(RUNTIME_ID).unwrap())
-        .run(run_request())
-        .await
-        .unwrap();
+    let runner = open(&cp, &first.uri()).await;
     runner.tasks().get("task_1").await.unwrap();
     assert_eq!(first.received_requests().await.unwrap().len(), 1);
 
@@ -227,28 +226,9 @@ async fn a_namespace_taken_before_close_stops_working_after_it() {
     // The handle is a cheap clone captured *before* close(). It shares the
     // client's closed flag, so it must refuse too -- and refuse with a typed
     // error rather than the panic the accessors used to raise.
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/tasks/task_1"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(task_response()))
-        .expect(1)
-        .mount(&dp)
-        .await;
-
+    let dp = dp_serving_one_task().await;
     let cp = MockServer::start().await;
-    mount_run(
-        &cp,
-        runner_spec("sess_1", &dp.uri(), "2026-01-01T00:00:00Z"),
-        1,
-    )
-    .await;
-
-    let runner = client(&cp)
-        .runtimes()
-        .handle(Uuid::parse_str(RUNTIME_ID).unwrap())
-        .run(run_request())
-        .await
-        .unwrap();
+    let runner = open(&cp, &dp.uri()).await;
     let tasks = runner.tasks();
     tasks.get("task_1").await.unwrap();
 
@@ -278,19 +258,7 @@ async fn a_namespace_taken_before_close_stops_working_after_it() {
 #[tokio::test]
 async fn refresh_after_close_is_refused() {
     let cp = MockServer::start().await;
-    mount_run(
-        &cp,
-        runner_spec("sess_1", "https://dp.example.com", "2026-01-01T00:00:00Z"),
-        1,
-    )
-    .await;
-
-    let runner = client(&cp)
-        .runtimes()
-        .handle(Uuid::parse_str(RUNTIME_ID).unwrap())
-        .run(run_request())
-        .await
-        .unwrap();
+    let runner = open(&cp, "https://dp.example.com").await;
     runner.close();
 
     mount_run(

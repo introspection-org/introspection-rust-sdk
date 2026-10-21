@@ -643,7 +643,7 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 
 ### Semver checks
 
-CI runs [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) on every pull request. It compares the public API of `introspection-sdk`, `aauth-protocol` and `aauth-person-server` with their latest crates.io releases, with default features and with all features, and fails on a breaking change the version number does not allow. Run the same check locally:
+CI runs [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) on every pull request. It compares the public API of `introspection-sdk` and `aauth-protocol` with their latest crates.io releases, with default features and with all features, and fails on a breaking change the version number does not allow. Run the same check locally:
 
 ```sh
 cargo install --locked cargo-semver-checks@0.51.0
@@ -663,7 +663,6 @@ To make a breaking change on purpose, declare it the way release-please reads it
 Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth), the protocol Introspection's egress uses when an agent acts for a person:
 
 - [`aauth-protocol`](crates/aauth-protocol): HTTP Message Signatures under the AAuth profile, agent, person and auth tokens, key discovery, and an agent-side Person Server client.
-- [`aauth-person-server`](crates/aauth-person-server): a Person Server you can run, for missions, budgets and approvals.
 
 Neither depends on this SDK.
 
