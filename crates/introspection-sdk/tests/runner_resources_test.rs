@@ -11,14 +11,15 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
-    ConversationItemInclude, ConversationItemListParams, ConversationListParams, Conversations,
-    Dimension, Event, EventListParams, Events, FileCreateText, FileListParams, FileUpdate,
-    FileUpload, FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig,
-    IntrospectionAPIError, IntrospectionEventName, MetricFilter, MetricSpec, Metrics,
-    MetricsConfig, MetricsQuery, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType,
-    ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt,
-    TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TrajectoryRecord,
+    ConversationContentClass, ConversationExportFormat, ConversationExportParams,
+    ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
+    ConversationListParams, Conversations, Dimension, Event, EventListParams, Events,
+    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionListParams, FileVersions,
+    Files, HttpClient, HttpConfig, IntrospectionAPIError, IntrospectionEventName, MetricFilter,
+    MetricSpec, Metrics, MetricsConfig, MetricsQuery, ResumeEntry, ShareCreate, ShareListParams,
+    ShareResourceType, ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams,
+    TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
@@ -1123,6 +1124,52 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     let second = pages.next_page().await.unwrap().unwrap();
     assert_eq!(second.data[0].span_id.as_deref(), Some("span-2"));
     assert!(pages.next_page().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn conversation_items_list_repeats_operation_names_and_content_classes() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param("operation_name", "chat"))
+        .and(query_param("operation_name", "execute_tool"))
+        .and(query_param("content", "user_text"))
+        .and(query_param("content", "tool:message_user"))
+        .and(query_param("content", "tool_result:react"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": false,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let items = conversations
+        .items
+        .list(
+            "conv-1",
+            &ConversationItemListParams {
+                operation_name: Some("chat".into()),
+                operation_names: vec!["execute_tool".into()],
+                content: vec![
+                    ConversationContentClass::UserText,
+                    ConversationContentClass::Tool("message_user".into()),
+                    ConversationContentClass::ToolResult("react".into()),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .collect_all(0)
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
 }
 
 #[tokio::test]

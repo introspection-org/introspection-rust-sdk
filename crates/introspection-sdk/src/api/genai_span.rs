@@ -273,6 +273,31 @@ pub struct IntrospectionConversation {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
+/// `introspection.content.*`: what a chat span's sealed messages hold,
+/// stamped at ingest so a read can select rows without opening them.
+///
+/// Counts and tool names only, never content. Absent on a span recorded
+/// before the summary existed and on an `execute_tool` span.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionContent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    /// User text parts in the span's new input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_text: Option<i64>,
+    /// Assistant text parts in the span's output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_text: Option<i64>,
+    /// Tool names the output calls, sorted and deduplicated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<String>,
+    /// Tool names whose results the new input carries, sorted and deduplicated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_results: Vec<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
 /// The `introspection.*` attribute family.
 ///
 /// Everything here is ours. `cost_usd` sits here rather than under
@@ -305,6 +330,8 @@ pub struct IntrospectionAttributes {
     pub cost_usd: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<IntrospectionConversation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<IntrospectionContent>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }

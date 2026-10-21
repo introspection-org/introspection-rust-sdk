@@ -157,6 +157,27 @@ fn introspection_attributes_sit_beside_gen_ai_not_inside_it() {
 }
 
 #[test]
+fn the_content_summary_is_counts_and_names_never_messages() {
+    let span = parse(json!({
+        "trace_id": "t", "span_id": "s", "start_time": "2026-01-01T00:00:00Z",
+        "name": "chat", "kind": "CLIENT",
+        "attributes": {"introspection": {"content": {
+            "version": 1, "user_text": 1, "assistant_text": 0,
+            "tool_calls": ["message_user"], "tool_results": ["react"]
+        }}}
+    }));
+    let content = span.attributes.introspection.unwrap().content.unwrap();
+    assert_eq!(content.version, Some(1));
+    assert_eq!(content.user_text, Some(1));
+    assert_eq!(content.assistant_text, Some(0));
+    assert_eq!(content.tool_calls, vec!["message_user".to_string()]);
+    assert_eq!(content.tool_results, vec!["react".to_string()]);
+
+    let bare = parse(bare_span());
+    assert!(bare.attributes.introspection.is_none());
+}
+
+#[test]
 fn cost_is_typed_where_the_server_emits_it() {
     // Placement needs its own test precisely because the tree is open: had
     // this been modelled under `conversation` — where an early draft of the

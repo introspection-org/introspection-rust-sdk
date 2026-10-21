@@ -4205,13 +4205,66 @@ pub struct ConversationItemListParams {
     /// `root`, an exact invocation id, or omitted for the complete conversation.
     pub agent: Option<String>,
     pub service_name: Option<String>,
+    /// One `gen_ai.operation.name` to keep. For several, use
+    /// [`operation_names`](Self::operation_names); both lower to the repeated
+    /// `operation_name` query parameter, any of which matches.
     pub operation_name: Option<String>,
+    /// Further operation names, any of which matches (`chat`, `execute_tool`,
+    /// `invoke_agent`, ...).
+    pub operation_names: Vec<String>,
+    /// Content classes to keep, any of which matches. Each selects the rows
+    /// that carry that content, and a chat span matched on one side opens
+    /// only that side's messages. Empty keeps every row.
+    pub content: Vec<ConversationContentClass>,
     pub lookback_days: Option<u32>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
     /// Prefer the typed field where one exists.
     pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// A content class on the conversation item list's `content` filter.
+///
+/// `UserText`, `AssistantText`, `ToolCall` and `ToolResult` select chat spans
+/// by the plaintext summary stamped on them at ingest (and, on a conversation
+/// recorded before that summary existed, every chat span before its
+/// cut-over); `Tool` selects the `execute_tool` span by its tool name;
+/// `Delegation` selects the `invoke_agent` / `create_agent` wrappers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConversationContentClass {
+    /// A chat span whose new input carries a user text message.
+    UserText,
+    /// A chat span whose output carries an assistant text message.
+    AssistantText,
+    /// The `invoke_agent` / `create_agent` wrapper of a delegated run.
+    Delegation,
+    /// The `execute_tool` span of the named tool.
+    Tool(String),
+    /// A chat span whose output calls the named tool.
+    ToolCall(String),
+    /// A chat span whose new input carries the named tool's result.
+    ToolResult(String),
+}
+
+impl ConversationContentClass {
+    /// The value as it goes on the wire.
+    pub fn to_wire(&self) -> String {
+        match self {
+            Self::UserText => "user_text".into(),
+            Self::AssistantText => "assistant_text".into(),
+            Self::Delegation => "delegation".into(),
+            Self::Tool(name) => format!("tool:{name}"),
+            Self::ToolCall(name) => format!("tool_call:{name}"),
+            Self::ToolResult(name) => format!("tool_result:{name}"),
+        }
+    }
+}
+
+impl Serialize for ConversationContentClass {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_wire())
+    }
 }
 
 /// Parameters for `GET /v1/conversations/{conversation_id}/items/{item_id}`.
@@ -6235,8 +6288,15 @@ pub struct ConversationExportParams {
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_name: Option<String>,
+    /// One `gen_ai.operation.name` to keep; `operation_names` adds more, any
+    /// of which matches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_name: Option<String>,
+    #[serde(rename = "operation_name", skip_serializing_if = "Vec::is_empty")]
+    pub operation_names: Vec<String>,
+    /// Content classes to keep, any of which matches; empty keeps every row.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<ConversationContentClass>,
     /// Partition lookback bound in days (1-365).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookback_days: Option<u16>,
