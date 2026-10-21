@@ -2,7 +2,7 @@
   "path": ["."],
   "pattern": "crates/**/*.rs",
   "format": ["rust"],
-  "ignore": ["**/target/**", "crates/introspection-sdk/src/api/schemas.rs"],
+  "ignore": ["**/target/**", "crates/introspection-sdk/src/api/schemas.rs", "crates/*/examples/docs_*.rs"],
   "gitignore": true,
   "minTokens": 70,
   "minLines": 8,

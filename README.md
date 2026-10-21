@@ -663,7 +663,7 @@ CI fails when the share of duplicated lines in `crates/**/*.rs` exceeds the `thr
 npx --yes jscpd@5.4.1
 ```
 
-The config sets `mode: "weak"`, so copies that differ only in comments or whitespace count. The generated `crates/introspection-sdk/src/api/schemas.rs` is ignored.
+The config sets `mode: "weak"`, so copies that differ only in comments or whitespace count. The generated `crates/introspection-sdk/src/api/schemas.rs` is ignored. So are the docs-region examples, `crates/*/examples/docs_*.rs`: they are standalone snippets by design, and each repeats its client setup so it can be copied into the docs as-is.
 
 It counts only `exact` clones. The `renamed` kind (with `ignoreIdentifiers`), which catches copies that differ only in names, was measured and left out. Its hits here are declaration boilerplate, such as serde `Option<T>` field lists, the `pub use schemas::{…}` re-export lists and accessor lists, at every `minTokens` tried. Raising `minTokens` far enough to quiet them also drops the real exact copies:
 
