@@ -66,9 +66,22 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
         .await?
         .into_stream()
         .await?;
+    let mut text = String::new();
     while let Some(event) = events.next().await {
         match event? {
-            AgUiEvent::TextMessageContent(m) => print!("{}", m.delta),
+            // A replay snapshot replaces the output accumulated before reconnecting.
+            AgUiEvent::MessagesSnapshot(e) => {
+                text = e
+                    .messages
+                    .iter()
+                    .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+                    .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                    .collect();
+            }
+            AgUiEvent::TextMessageContent(m) => text.push_str(&m.delta),
+            AgUiEvent::TextMessageChunk(m) => {
+                text.push_str(m.delta.as_deref().unwrap_or_default());
+            }
             AgUiEvent::RunError(e) => {
                 return Err(IntrospectionAPIError::RunFailed {
                     message: e.message,
@@ -76,9 +89,16 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
                 }
                 .into());
             }
+            AgUiEvent::Custom(e) if e.name == "resume_gap" => {
+                return Err(IntrospectionAPIError::StreamIncomplete(
+                    "The replay buffer lost output; read the conversation transcript".into(),
+                )
+                .into());
+            }
             _ => {}
         }
     }
+    println!("{text}");
     // #endregion docs:reference/rust/run-task
     Ok((client, runner))
 }
