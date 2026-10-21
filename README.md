@@ -653,6 +653,20 @@ Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth),
 
 Neither depends on this SDK.
 
+## Code-quality checks
+
+### Duplicate code
+
+CI fails when the share of duplicated lines in `crates/**/*.rs` exceeds the `threshold` in [`.jscpd.json`](.jscpd.json). Run the same check locally (needs Node.js):
+
+```sh
+npx --yes jscpd@5.4.1
+```
+
+The config sets `mode: "weak"`, so copies that differ only in comments or whitespace count, and lists `kind: ["exact", "renamed"]` with `ignoreIdentifiers: true`, so copies that differ only in variable, function or type names count too. The generated `crates/introspection-sdk/src/api/schemas.rs` is ignored.
+
+The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
+
 ## License
 
 Apache-2.0

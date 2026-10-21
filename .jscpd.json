@@ -1,0 +1,14 @@
+{
+  "path": ["."],
+  "pattern": "crates/**/*.rs",
+  "format": ["rust"],
+  "ignore": ["**/target/**", "crates/introspection-sdk/src/api/schemas.rs"],
+  "gitignore": true,
+  "minTokens": 70,
+  "minLines": 8,
+  "mode": "weak",
+  "kind": ["exact", "renamed"],
+  "ignoreIdentifiers": true,
+  "threshold": 10.9,
+  "reporters": ["console"]
+}
