@@ -639,6 +639,20 @@ export INTROSPECTION_TOKEN="intro_xxx"
 export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 ```
 
+## Code-quality checks
+
+### Semver checks
+
+CI runs [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) on every pull request. It compares the public API of `introspection-sdk`, `aauth-protocol` and `aauth-person-server` with their latest crates.io releases, with default features and with all features, and fails on a breaking change the version number does not allow. Run the same check locally:
+
+```sh
+cargo install --locked cargo-semver-checks@0.51.0
+scripts/semver-checks.sh                  # every published crate
+scripts/semver-checks.sh aauth-protocol   # one crate
+```
+
+To make a breaking change on purpose, declare it the way release-please reads it: put `!` in the PR title (`feat(sdk)!: ...`) or a `BREAKING CHANGE:` footer in the PR body, then re-run the job. The script then skips the check, and release-please bumps the version on squash merge (0.x crates get a minor bump). Until that release ships, the check also skips any crate with a breaking commit on `main` since its last release tag, because crates.io still holds the old API. Locally, the script reads the commits up to `HEAD` and the `PR_TITLE` and `PR_BODY` variables.
+
 ## Documentation
 
 - [Rust SDK](https://docs.introspection.dev/reference/rust)
