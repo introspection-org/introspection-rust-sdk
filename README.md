@@ -653,6 +653,20 @@ Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth),
 
 Neither depends on this SDK.
 
+## Check for unused dependencies
+
+CI fails when a crate declares a dependency its code never uses. Run the same
+check locally with the version CI pins:
+
+```sh
+cargo install cargo-machete --version 0.9.2 --locked
+cargo machete
+```
+
+When it flags a dependency that is in fact used (through a macro or under a
+renamed crate, say), list it under `[package.metadata.cargo-machete] ignored`
+in that crate's `Cargo.toml` with a comment saying why.
+
 ## License
 
 Apache-2.0
