@@ -37,7 +37,8 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
     // #region docs:reference/rust/run-task
     use futures::StreamExt;
     use introspection_sdk::{
-        AgUiEvent, ClientConfig, IntrospectionClient, RunRequest, RunnerIdentity,
+        AgUiEvent, ClientConfig, IntrospectionAPIError, IntrospectionClient, RunRequest,
+        RunnerIdentity,
     };
 
     let client = IntrospectionClient::new(ClientConfig::default())?;
@@ -66,8 +67,16 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
         .into_stream()
         .await?;
     while let Some(event) = events.next().await {
-        if let AgUiEvent::TextMessageContent(m) = event? {
-            print!("{}", m.delta);
+        match event? {
+            AgUiEvent::TextMessageContent(m) => print!("{}", m.delta),
+            AgUiEvent::RunError(e) => {
+                return Err(IntrospectionAPIError::RunFailed {
+                    message: e.message,
+                    code: e.code,
+                }
+                .into());
+            }
+            _ => {}
         }
     }
     // #endregion docs:reference/rust/run-task
