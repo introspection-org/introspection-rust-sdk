@@ -97,6 +97,25 @@ jobs:
       - name: Rust duplicate code stays under the threshold
         run: npx --yes jscpd@5.4.1
 
+  unused-deps:
+    name: Unused Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to an exact release so a new cargo-machete heuristic cannot
+      # turn main red overnight; bump it deliberately.
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+
+      # Reads the manifests and greps the sources, so it needs no toolchain
+      # or build. A false positive goes in the crate's
+      # [package.metadata.cargo-machete] ignored list, with the reason.
+      - name: Check for unused dependencies
+        run: cargo machete
+
   test:
     name: Tests
     runs-on: ubuntu-latest

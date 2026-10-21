@@ -677,6 +677,20 @@ At `minTokens` 70, exact only, the measurement is 34 clones and 1.45% duplicated
 
 The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
 
+### Unused dependencies
+
+CI fails when a crate declares a dependency its code never uses. Run the same
+check locally with the version CI pins:
+
+```sh
+cargo install cargo-machete --version 0.9.2 --locked
+cargo machete
+```
+
+When it flags a dependency that is in fact used (through a macro or under a
+renamed crate, say), list it under `[package.metadata.cargo-machete] ignored`
+in that crate's `Cargo.toml` with a comment saying why.
+
 ## License
 
 Apache-2.0
