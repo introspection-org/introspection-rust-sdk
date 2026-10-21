@@ -103,7 +103,7 @@ println!("{}", follow_up.text().await?);
 Unknown future AG-UI event types surface as `AgUiEvent::Unknown` rather than
 ending the stream.
 
-See [Tasks and streaming](https://docs.introspection.dev/sdk/rust/tasks-and-streaming) for reconnects,
+See [Tasks and streaming](https://docs.introspection.dev/reference/rust#continue-and-control-a-task) for reconnects,
 interrupts, and cancellation.
 
 ## The same Data Plane calls on a client or a runner
@@ -176,7 +176,7 @@ logs.shutdown()?;
 `IntrospectionSpanProcessor` to an `SdkTracerProvider`; spans in the
 OpenTelemetry GenAI semantic conventions are exported as they are.
 
-See [Product signals](https://docs.introspection.dev/sdk/rust/product-signals) for the full surface.
+See [Product signals](https://docs.introspection.dev/reference/rust#feedback) for the full surface.
 
 ## Logging custom events
 
@@ -499,8 +499,8 @@ The tag catalogue lives under `client.tags()`, keyed by `TagKind::Access` or
 `TagKind::Annotation`. `TagCreate` is an enum per kind, so an access tag has no
 colour to set and an annotation tag cannot omit one.
 
-See [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence) for transcripts,
-typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
+See [Production evidence](https://docs.introspection.dev/reference/rust#conversations-events-and-metrics) for transcripts,
+typed events, and metrics queries, [Files and shares](https://docs.introspection.dev/reference/rust#files-and-shares)
 for durable inputs and grants, and [`examples/`](crates/introspection-sdk/examples/) for end-to-end
 programs.
 
@@ -573,7 +573,7 @@ match client.repositories().merge(repository.id, &merge).await? {
 
 ## Sign in
 
-Each [Application](https://docs.introspection.dev/sdk/authentication) type
+Each [Application](https://docs.introspection.dev/reference/authentication) type
 offers one way in. The type is chosen when the Application is created, the
 types are mutually exclusive, and the grants follow from the type:
 
@@ -641,14 +641,8 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 
 ## Documentation
 
-- [Rust quickstart](https://docs.introspection.dev/sdk/rust/quickstart)
-- [Tasks and streaming](https://docs.introspection.dev/sdk/rust/tasks-and-streaming)
-- [Files and shares](https://docs.introspection.dev/sdk/rust/files-and-shares)
-- [Production evidence](https://docs.introspection.dev/sdk/rust/production-evidence)
-- [Product signals](https://docs.introspection.dev/sdk/rust/product-signals)
-- [Platform operations](https://docs.introspection.dev/sdk/rust/platform-operations)
-- [Rust SDK reference](https://docs.introspection.dev/sdk/rust/reference)
-- [Authentication](https://docs.introspection.dev/sdk/authentication)
+- [Rust SDK](https://docs.introspection.dev/reference/rust)
+- [Authentication](https://docs.introspection.dev/reference/authentication)
 
 ## Also in this repository
 

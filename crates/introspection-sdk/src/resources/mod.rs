@@ -54,6 +54,7 @@
 //! one names; creating or changing one is still the CLI's. Projects are
 //! readable for the same reason: a tool needs a project's slug to link to it.
 
+pub mod aauth;
 pub mod annotations;
 pub mod automations;
 pub mod connections;
@@ -67,6 +68,7 @@ pub mod repositories;
 pub mod runtimes;
 pub mod tags;
 
+pub use aauth::{Aauth, Approvals, Missions};
 pub use annotations::Annotations;
 pub use automations::Automations;
 pub use connections::MemberConnections;
