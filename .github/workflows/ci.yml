@@ -82,6 +82,7 @@ jobs:
         run: |
           cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
           cargo clippy -p aauth-person-server --no-default-features -- -D warnings
+          cargo clippy -p aauth-access-server --no-default-features -- -D warnings
 
   test:
     name: Tests

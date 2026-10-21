@@ -1,5 +1,5 @@
 //! An AAuth Person Server ([draft-hardt-oauth-aauth-protocol] `-11`,
-//! three-party) you can run instead of building one.
+//! three-party and four-party) you can run instead of building one.
 //!
 //! A Person Server speaks for people when agents want to act for them. This
 //! one:
@@ -88,6 +88,14 @@
 //!   what is left, is issued at once and spent. Any other budgeted request
 //!   is put to the approver, and spent when approved.
 //! - A request with no `budget` is issued within the mission without spending.
+//! - A resource token whose `aud` is not this Person Server names the
+//!   resource's own Access Server (four-party, `#access-server-federation`).
+//!   The mission and budget are weighed first, exactly as above; then the
+//!   request is redeemed at that Access Server through
+//!   [`aauth_protocol::federation`], and its auth token relayed once it
+//!   verifies. Its `202` reaches the agent as this server's own pending
+//!   request, its refusal with its own error and status, and the spend lands
+//!   only once it issues. Both sides must agree.
 //! - Completing a mission is the person's own decision; nothing is issued
 //!   under it afterwards.
 //! - Each agent key is bound to the first person it names.
@@ -132,8 +140,9 @@
 //!   `503`.
 //! - Bound request bodies before handing them over (the example caps them
 //!   at 256 KiB), and rate-limit in front: this crate does neither.
-//! - Only a trusted agent provider's keys, a mission's resources' keys, and
-//!   a resource's own R3 documents are ever fetched, through
+//! - Only a trusted agent provider's keys, a mission's resources' keys, a
+//!   resource's own R3 documents, and the Access Server a verified resource
+//!   token names are ever fetched or called, through
 //!   `ReqwestFetch::guarded` (the `reqwest` feature, on by default): `https`
 //!   only, never an IP literal, `localhost` or a private address. Give
 //!   [`Config::fetch`] your own to change that.
@@ -162,6 +171,6 @@ pub use error::{problem, AAuthError};
 pub use server::{Config, Endpoints, PersonServer, DEFAULT_TENANT};
 pub use store::{MemoryStore, Spend, Store, StoreError, StoreResult};
 pub use types::{
-    Agent, Approval, ApprovalKind, ApprovalStatus, Decision, Issued, IssuedKind, LogEntry, Mission,
-    Person, Verdict,
+    Agent, Approval, ApprovalKind, ApprovalStatus, Decision, Federation, Issued, IssuedKind,
+    LogEntry, Mission, Person, Verdict,
 };

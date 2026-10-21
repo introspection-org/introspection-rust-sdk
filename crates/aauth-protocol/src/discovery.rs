@@ -55,6 +55,25 @@ pub trait Fetch: Send + Sync {
     /// GET `url` with `headers`. An error is a transport failure; any HTTP
     /// status is a [`Fetched`].
     async fn get(&self, url: &str, headers: HeaderMap) -> Result<Fetched>;
+
+    /// Send `request`, of any method: how a Person Server POSTs to an Access
+    /// Server's `auth_token_endpoint` ([`crate::federation`]). An error is a
+    /// transport failure; any HTTP status is a [`Fetched`].
+    ///
+    /// The default sends a `GET` through [`Fetch::get`] and refuses any
+    /// other method, so a `Fetch` that only reads documents still works for
+    /// everything else.
+    async fn send(&self, request: http::Request<Bytes>) -> Result<Fetched> {
+        if request.method() != http::Method::GET {
+            return Err(Error::Http(format!(
+                "this Fetch sends only GET, not {}",
+                request.method()
+            )));
+        }
+        let url = request.uri().to_string();
+        let (parts, _) = request.into_parts();
+        self.get(&url, parts.headers).await
+    }
 }
 
 const MAX_CACHED: usize = 256;
@@ -250,15 +269,40 @@ impl Fetch for ReqwestFetch {
             .send()
             .await
             .map_err(|e| Error::Http(format!("{url}: {e}")))?;
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = read_limited(response, MAX_DOCUMENT_BYTES).await?;
-        Ok(Fetched {
-            status,
-            headers,
-            body,
-        })
+        fetched(response).await
     }
+
+    async fn send(&self, request: http::Request<Bytes>) -> Result<Fetched> {
+        let url = request.uri().to_string();
+        if self.guarded {
+            if !url.starts_with("https://") {
+                return Err(Error::Url(format!("refusing to call {url}")));
+            }
+            crate::client::guard::admit_host(&url)?;
+        }
+        let (parts, body) = request.into_parts();
+        let response = self
+            .client
+            .request(parts.method, &url)
+            .headers(parts.headers)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| Error::Http(format!("{url}: {e}")))?;
+        fetched(response).await
+    }
+}
+
+#[cfg(feature = "client")]
+async fn fetched(response: reqwest::Response) -> Result<Fetched> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = read_limited(response, MAX_DOCUMENT_BYTES).await?;
+    Ok(Fetched {
+        status,
+        headers,
+        body,
+    })
 }
 
 /// Serves fixed JSON documents by URL, and `404` for anything else: for
