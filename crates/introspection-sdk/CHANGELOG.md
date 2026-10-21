@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.31.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.30.0...v0.31.0) (2026-10-21)
+
+
+### Features
+
+* **examples:** add compiled docs-region examples for patterns, observe and sharing pages ([#126](https://github.com/introspection-org/introspection-rust-sdk/issues/126)) ([8d14eaf](https://github.com/introspection-org/introspection-rust-sdk/commit/8d14eafdf9b2e4625b03c4d53aa9f435100c5df6))
+* **examples:** add docs region examples for the patterns pages ([#128](https://github.com/introspection-org/introspection-rust-sdk/issues/128)) ([d2dd570](https://github.com/introspection-org/introspection-rust-sdk/commit/d2dd570bc3c4bb663ef79ba7c65e37ebddd8c078))
+* **examples:** compiled docs-region examples for the Rust reference and authentication pages ([#127](https://github.com/introspection-org/introspection-rust-sdk/issues/127)) ([5e592c3](https://github.com/introspection-org/introspection-rust-sdk/commit/5e592c3ec1db8c1ce3569c42f45a36ead4ba60fd))
+
 ## [0.30.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.29.0...v0.30.0) (2026-10-20)
 
 
