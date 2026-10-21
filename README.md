@@ -667,6 +667,55 @@ Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth),
 
 Neither depends on this SDK.
 
+## Code-quality checks
+
+### Complexity limits
+
+Clippy's `cognitive_complexity`, `too_many_lines`, `too_many_arguments` and `excessive_nesting` lints are on for every crate (`[workspace.lints.clippy]` in `Cargo.toml`), with thresholds in [`clippy.toml`](clippy.toml). CI runs clippy with `-D warnings`, so going over a threshold fails the build. Run the same checks locally:
+
+```sh
+cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets -- -D warnings
+```
+
+The thresholds are a ratchet: each starts at today's worst measured value, and it is never raised, only lowered when a refactor brings the worst offender down. The targets are cognitive complexity 15, 100 lines, 5 arguments and nesting depth 4. The generated `api::schemas` module and the wire-field fixture test in `tests/api_contract_test.rs` are exempt.
+
+### Duplicate code
+
+CI fails when the share of duplicated lines in `crates/**/*.rs` exceeds the `threshold` in [`.jscpd.json`](.jscpd.json). Run the same check locally (needs Node.js):
+
+```sh
+npx --yes jscpd@5.4.1
+```
+
+The config sets `mode: "weak"`, so copies that differ only in comments or whitespace count. The generated `crates/introspection-sdk/src/api/schemas.rs` is ignored. So are the docs-region examples, `crates/*/examples/docs_*.rs`: they are standalone snippets by design, and each repeats its client setup so it can be copied into the docs as-is.
+
+It counts only `exact` clones. The `renamed` kind (with `ignoreIdentifiers`), which catches copies that differ only in names, was measured and left out. Its hits here are declaration boilerplate, such as serde `Option<T>` field lists, the `pub use schemas::{…}` re-export lists and accessor lists, at every `minTokens` tried. Raising `minTokens` far enough to quiet them also drops the real exact copies:
+
+| `minTokens` | Clones, exact + renamed | Duplicated lines |
+| --- | --- | --- |
+| 70 | 218 | 10.85% |
+| 150 | 37 | 3.19% |
+| 250 | 9 | 1.02% |
+
+At `minTokens` 70, exact only, the measurement is 34 clones and 1.45% duplicated lines.
+
+The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
+
+### Unused dependencies
+
+CI fails when a crate declares a dependency its code never uses. Run the same
+check locally with the version CI pins:
+
+```sh
+cargo install cargo-machete --version 0.9.2 --locked
+cargo machete
+```
+
+When it flags a dependency that is in fact used (through a macro or under a
+renamed crate, say), list it under `[package.metadata.cargo-machete] ignored`
+in that crate's `Cargo.toml` with a comment saying why.
+
 ## License
 
 Apache-2.0

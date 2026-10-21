@@ -177,6 +177,15 @@ pub mod genai_span;
 pub mod http;
 pub mod paginator;
 pub mod resumable;
+// Generated wire types mirroring the Data Plane OpenAPI schema; their size and
+// shape follow the schema, not hand-written logic, so the complexity ratchet
+// in clippy.toml does not apply to them.
+#[allow(
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
+    clippy::excessive_nesting
+)]
 pub mod schemas;
 pub mod shares;
 pub mod sse;
