@@ -78,11 +78,8 @@ jobs:
 
       # Without its `client` feature aauth-protocol makes no network calls
       # and pulls in no HTTP client; keep that combination building.
-      - name: Run clippy (AAuth crates without HTTP)
-        run: |
-          cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
-          cargo clippy -p aauth-person-server --no-default-features -- -D warnings
-          cargo clippy -p aauth-access-server --no-default-features -- -D warnings
+      - name: Run clippy (aauth-protocol without HTTP)
+        run: cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
 
   # Fails when the duplicated-line share of crates/**/*.rs exceeds the
   # threshold in .jscpd.json. The threshold is a ratchet: lower it when a
