@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.31.0...v0.31.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **examples:** show the helpers each docs region calls ([#140](https://github.com/introspection-org/introspection-rust-sdk/issues/140)) ([c51acb8](https://github.com/introspection-org/introspection-rust-sdk/commit/c51acb8b32d940b719f68467dfb049ddf4f4e9d7))
+
 ## [0.31.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.30.0...v0.31.0) (2026-10-21)
 
 
