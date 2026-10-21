@@ -6289,14 +6289,12 @@ pub struct ConversationExportParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_name: Option<String>,
     /// One `gen_ai.operation.name` to keep; `operation_names` adds more, any
-    /// of which matches.
+    /// of which matches. Both go on the wire as the repeated `operation_name`
+    /// key through [`to_wire`](Self::to_wire), which the export reads use.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_name: Option<String>,
-    #[serde(rename = "operation_name", skip_serializing_if = "Vec::is_empty")]
-    pub operation_names: Vec<String>,
-    /// Content classes to keep, any of which matches; empty keeps every row.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub content: Vec<ConversationContentClass>,
+    pub operation_names: Vec<String>,
     /// Partition lookback bound in days (1-365).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookback_days: Option<u16>,
@@ -6310,4 +6308,31 @@ pub struct ConversationExportParams {
     /// Upper bound on which records are assembled (ISO 8601).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_date: Option<String>,
+}
+
+impl ConversationExportParams {
+    /// The lowered query exactly as it goes on the wire: `operation_name` is
+    /// repeated once per name, which a struct serialization cannot express
+    /// (two fields under one key would overwrite each other).
+    pub fn to_wire(&self) -> Vec<(String, String)> {
+        let mut query = Vec::new();
+        let mut push = |key: &str, value: Option<String>| {
+            if let Some(value) = value {
+                query.push((key.to_string(), value));
+            }
+        };
+        push("agent", self.agent.clone());
+        push("service_name", self.service_name.clone());
+        push("operation_name", self.operation_name.clone());
+        for name in &self.operation_names {
+            push("operation_name", Some(name.clone()));
+        }
+        push(
+            "lookback_days",
+            self.lookback_days.map(|days| days.to_string()),
+        );
+        push("start_date", self.start_date.clone());
+        push("end_date", self.end_date.clone());
+        query
+    }
 }

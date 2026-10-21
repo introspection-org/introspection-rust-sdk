@@ -726,7 +726,6 @@ fn sdk_surface_matches_the_published_reference() {
         service_name: Some("svc".into()),
         operation_name: Some("op".into()),
         operation_names: vec!["chat".into()],
-        content: vec![ConversationContentClass::UserText],
         lookback_days: Some(7),
         start_date: Some("2026-01-01T00:00:00Z".into()),
         end_date: Some("2026-01-02T00:00:00Z".into()),
@@ -1471,7 +1470,11 @@ fn sdk_surface_matches_the_published_reference() {
         ),
         compare(
             "conversation export filters — GET /v1/conversations/{id}/export query parameters",
-            wire_fields(&conversation_export),
+            conversation_export
+                .to_wire()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<BTreeSet<String>>(),
             query_parameters(&spec, "/v1/conversations/{conversation_id}/export", "get"),
             &[],
             "sent as a query parameter the API does not accept",

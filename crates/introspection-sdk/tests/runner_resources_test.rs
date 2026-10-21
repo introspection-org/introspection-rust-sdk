@@ -1969,6 +1969,45 @@ async fn conversations_export_stream_preserves_bytes_headers_and_filters() {
 }
 
 #[tokio::test]
+async fn conversations_export_repeats_operation_names_on_the_wire() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(query_param("agent", "root"))
+        .and(query_param("operation_name", "chat"))
+        .and(query_param("operation_name", "execute_tool"))
+        .and(query_param("lookback_days", "7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": false,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = conversations
+        .export_json(
+            "conv-1",
+            &ConversationExportParams {
+                agent: Some("root".into()),
+                operation_name: Some("chat".into()),
+                operation_names: vec!["execute_tool".into()],
+                lookback_days: Some(7),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.data.len(), 1);
+}
+
+#[tokio::test]
 async fn conversations_export_trajectory_negotiates_v1_and_types_records() {
     let server = MockServer::start().await;
     let http = build_http(&server);
