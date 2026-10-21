@@ -260,6 +260,10 @@ fn compare_ahead(
 
 #[test]
 #[ignore = "reaches the network: fetches the published API reference"]
+// A fixture, not logic: it spells out every field of every wire type so a new
+// field fails to compile here. Like the generated `api::schemas`, its length
+// follows the API surface, so the too_many_lines ratchet does not apply.
+#[allow(clippy::too_many_lines)]
 fn sdk_surface_matches_the_published_reference() {
     let (spec, reference) = load_reference();
     let (cp_spec, cp_reference) = load_cp_reference();

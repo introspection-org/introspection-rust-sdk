@@ -653,6 +653,19 @@ Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth),
 
 Neither depends on this SDK.
 
+## Code-quality checks
+
+### Complexity limits
+
+Clippy's `cognitive_complexity`, `too_many_lines`, `too_many_arguments` and `excessive_nesting` lints are on for every crate (`[workspace.lints.clippy]` in `Cargo.toml`), with thresholds in [`clippy.toml`](clippy.toml). CI runs clippy with `-D warnings`, so going over a threshold fails the build. Run the same checks locally:
+
+```sh
+cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets -- -D warnings
+```
+
+The thresholds are a ratchet: each starts at today's worst measured value, and it is never raised, only lowered when a refactor brings the worst offender down. The targets are cognitive complexity 15, 100 lines, 5 arguments and nesting depth 4. The generated `api::schemas` module and the wire-field fixture test in `tests/api_contract_test.rs` are exempt.
+
 ## License
 
 Apache-2.0

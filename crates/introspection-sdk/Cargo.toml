@@ -9,6 +9,9 @@ keywords = ["ai", "llm", "opentelemetry", "otlp", "introspection"]
 categories = ["development-tools", "api-bindings"]
 readme = "../../README.md"
 
+[lints]
+workspace = true
+
 # docs.rs builds with all features so intra-doc links to the
 # `otel`-gated surface (IntrospectionLogs, IntrospectionSpanProcessor)
 # resolve correctly.

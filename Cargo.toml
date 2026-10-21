@@ -31,3 +31,11 @@ thiserror = "2"
 tokio = "1.44"
 url = "2"
 uuid = { version = "1.22", features = ["v4", "v7"] }
+
+# Complexity ratchet: thresholds live in clippy.toml. CI runs clippy with
+# -D warnings, so these warnings block a merge.
+[workspace.lints.clippy]
+cognitive_complexity = "warn"
+too_many_lines = "warn"
+too_many_arguments = "warn"
+excessive_nesting = "warn"
