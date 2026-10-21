@@ -4324,63 +4324,6 @@ pub struct JudgeUpdateParams {
     pub sample_rate: Option<f64>,
 }
 
-// projects
-
-/// The prefix of each display id (`T-12`) a project mints.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct DisplayIdPrefixes {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub issue: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub report: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub observation: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-}
-
-/// Body of `POST /v1/projects`. `slug` is derived from `name` when omitted.
-#[derive(Debug, Clone, Serialize)]
-pub struct ProjectCreateParams {
-    pub name: String,
-    pub deployment_id: Uuid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_id_prefixes: Option<DisplayIdPrefixes>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub settings: Option<HashMap<String, serde_json::Value>>,
-}
-
-impl ProjectCreateParams {
-    pub fn new(name: impl Into<String>, deployment_id: Uuid) -> Self {
-        Self {
-            name: name.into(),
-            deployment_id,
-            slug: None,
-            description: None,
-            display_id_prefixes: None,
-            settings: None,
-        }
-    }
-}
-
-/// Body of `PATCH /v1/projects/{project}`.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ProjectUpdateParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_id_prefixes: Option<DisplayIdPrefixes>,
-    /// Replaces the settings map wholesale.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub settings: Option<HashMap<String, serde_json::Value>>,
-}
-
 // signed-in member
 
 /// A feature flag's resolved value.

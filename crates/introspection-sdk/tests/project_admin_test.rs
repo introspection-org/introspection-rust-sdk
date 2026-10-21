@@ -10,9 +10,9 @@ use introspection_sdk::{
     ApplicationListParams, ApplicationType, ClientConfig, CredentialCreateParams,
     CredentialUpdateParams, FeatureFlagValue, ImageCreate, ImageKind, ImageListParams, ImageSource,
     ImageStatus, IntegrationCreateParams, IntegrationStatus, IntegrationType, IntrospectionClient,
-    JudgeUpdateParams, Lane, PaginationParams, ProjectCreateParams, ProjectUpdateParams,
-    RuntimeSettingListParams, Secret, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus,
-    VariableCreateParams, MAX_COMMAND_WAIT_SECONDS,
+    JudgeUpdateParams, Lane, PaginationParams, RuntimeSettingListParams, Secret,
+    TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, VariableCreateParams,
+    MAX_COMMAND_WAIT_SECONDS,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -407,23 +407,15 @@ async fn variables_integrations_and_judges_send_their_wire_names() {
 }
 
 #[tokio::test]
-async fn projects_encode_the_slug_and_me_decodes_flags() {
+async fn projects_get_encodes_the_slug_and_me_decodes_flags() {
     let server = MockServer::start().await;
     let project = json!({
         "id": PROJECT, "org_id": ORG, "deployment_id": ID, "name": "Web",
         "slug": "web", "description": null,
     });
-    Mock::given(method("PATCH"))
+    Mock::given(method("GET"))
         .and(path("/v1/projects/a%2Fb"))
-        .and(body_json(json!({ "description": "edited" })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(project.clone()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/projects"))
-        .and(body_json(json!({ "name": "Web", "deployment_id": ID })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(project))
+        .respond_with(ResponseTemplate::new(200).set_body_json(project))
         .expect(1)
         .mount(&server)
         .await;
@@ -438,23 +430,8 @@ async fn projects_encode_the_slug_and_me_decodes_flags() {
         .await;
 
     let client = client(&server);
-    client
-        .projects()
-        .update(
-            "a/b",
-            &ProjectUpdateParams {
-                description: Some("edited".into()),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("update");
-    let created = client
-        .projects()
-        .create(&ProjectCreateParams::new("Web", id()))
-        .await
-        .expect("create");
-    assert_eq!(created.slug.as_deref(), Some("web"));
+    let fetched = client.projects().get("a/b").await.expect("get");
+    assert_eq!(fetched.slug.as_deref(), Some("web"));
 
     let me = client.oidc().me().await.expect("me");
     assert!(me.authenticated);

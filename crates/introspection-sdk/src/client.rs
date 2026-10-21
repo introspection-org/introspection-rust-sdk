@@ -254,7 +254,7 @@ impl IntrospectionClient {
         &self.judges
     }
 
-    /// `/v1/projects` CRUD.
+    /// `GET /v1/projects` — the org's projects, read-only.
     pub fn projects(&self) -> &Projects {
         &self.projects
     }

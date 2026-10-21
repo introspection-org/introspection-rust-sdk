@@ -34,7 +34,10 @@
 //! Project administration, each on an org credential (a member session or
 //! access token; a project API key carries none of these scopes):
 //!
-//! - [`Projects`] — `/v1/projects` CRUD, by slug or id.
+//! - [`Projects`] — `GET /v1/projects` lookup, by slug or id. Creating,
+//!   renaming or deleting a project needs an owner or admin's dashboard
+//!   session (`projects:write` is in no API key, Application or CLI login
+//!   scope), so it stays in the dashboard and the API.
 //! - [`ApiKeys`] — `/v1/api-keys`: list, create, update, delete (or rotate
 //!   with a grace period) and acknowledge.
 //! - [`Applications`] — `/v1/applications` CRUD with each Application's

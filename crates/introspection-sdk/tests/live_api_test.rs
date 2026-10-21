@@ -49,13 +49,12 @@ use introspection_sdk::{
     ImageKind, ImageListParams, ImageSource, IntegrationCreateParams, IntegrationStatus,
     IntegrationType, IntegrationUpdateParams, IntrospectionClient, IntrospectionEventName,
     JudgeListParams, JudgeUpdateParams, Lane, MemberListParams, PaginationParams,
-    ProjectCreateParams, ProjectListParams, ProjectUpdateParams, RecipeListParams, ResumeEntry,
-    RunRequest, RunnerIdentity, RuntimeListParams, RuntimeSettingListParams, ShareCreate,
-    ShareListParams, ShareResourceType, ShareUpdate, StringOrUuid, TagCreate, TagKind,
-    TagListParams, TagUpdate, Task, TaskCancelOptions, TaskCommandListParams, TaskCommandSpec,
-    TaskCommandStatus, TaskCreate, TaskKind, TaskListParams, TaskPrompt, TaskRunCreate,
-    TaskRunKind, TaskRunResume, TaskStatus, TaskUpdate, Tasks, UploadSource, VariableCreateParams,
-    VariableUpdateParams,
+    ProjectListParams, RecipeListParams, ResumeEntry, RunRequest, RunnerIdentity,
+    RuntimeListParams, RuntimeSettingListParams, ShareCreate, ShareListParams, ShareResourceType,
+    ShareUpdate, StringOrUuid, TagCreate, TagKind, TagListParams, TagUpdate, Task,
+    TaskCancelOptions, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCreate,
+    TaskKind, TaskListParams, TaskPrompt, TaskRunCreate, TaskRunKind, TaskRunResume, TaskStatus,
+    TaskUpdate, Tasks, UploadSource, VariableCreateParams, VariableUpdateParams,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -990,7 +989,7 @@ async fn judges_read_and_update_walk() {
 
 #[tokio::test]
 #[ignore = "reaches a live deployment; see the module docs"]
-async fn projects_crud_walk() {
+async fn projects_reads_with_session() {
     let Some(client) = live_client(Credential::Session) else {
         return;
     };
@@ -1006,48 +1005,6 @@ async fn projects_crud_walk() {
         .await
         .expect("list");
     assert!(listed.iter().any(|p| p.id == seeded.id));
-    let description = unique("description");
-    let updated = projects
-        .update(
-            seeded.id,
-            &ProjectUpdateParams {
-                description: Some(description.clone()),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("update");
-    assert_eq!(updated.description.as_deref(), Some(description.as_str()));
-    projects
-        .update(
-            seeded.id,
-            &ProjectUpdateParams {
-                description: Some(seeded.description.clone().unwrap_or_default()),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("restore description");
-
-    // A scratch project on the seeded project's plane, so the walk deletes
-    // nothing it did not create.
-    let created = match projects
-        .create(&ProjectCreateParams::new(
-            unique("project"),
-            seeded.deployment_id,
-        ))
-        .await
-    {
-        Ok(created) => created,
-        Err(err) if err.status() == Some(403) => {
-            eprintln!("skipping the project create: the plan's project limit is reached ({err})");
-            return;
-        }
-        Err(err) => panic!("create: {err}"),
-    };
-    projects.get(created.id).await.expect("get created");
-    projects.delete(created.id).await.expect("delete");
-    assert_status(projects.get(created.id).await, 404);
 }
 
 #[tokio::test]

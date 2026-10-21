@@ -575,7 +575,7 @@ match client.repositories().merge(repository.id, &merge).await? {
 
 With an org credential (a member's session or access token; a project API key
 carries none of these scopes), the client manages what the `introspection` CLI
-does: `projects()`, `api_keys()`, `applications()` (with `.idps`, `.secrets`
+does: `projects()` (read-only), `api_keys()`, `applications()` (with `.idps`, `.secrets`
 and `.keys`), `credentials()`, `variables()`, `integrations()`, `judges()` and
 `oidc().me()`. A secret the API returns once, or takes on write, is a `Secret`
 whose `Debug` prints `<redacted>`.
