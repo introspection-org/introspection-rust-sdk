@@ -83,6 +83,20 @@ jobs:
           cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
           cargo clippy -p aauth-person-server --no-default-features -- -D warnings
 
+  # Fails when the duplicated-line share of crates/**/*.rs exceeds the
+  # threshold in .jscpd.json. The threshold is a ratchet: lower it when a
+  # refactor removes duplication; never raise it.
+  duplication:
+    name: Duplicate code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Rust duplicate code stays under the threshold
+        run: npx --yes jscpd@5.4.1
+
   unused-deps:
     name: Unused Dependencies
     runs-on: ubuntu-latest
