@@ -178,6 +178,10 @@ pub use auth::{
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, USER_AGENT, VERSION};
 pub use data_plane::DataPlaneResources;
+pub use resources::aauth::{
+    Approval, ApprovalDecision, ApprovalKind, ApprovalListParams, ApprovalStatus, ApproverIdentity,
+    Budget, DecidedBy, Decision, Mission, MissionListParams, MissionLogEntry,
+};
 pub use resources::annotations::{
     AnnotationEventOptions, AnnotationListParams, AnnotationMutation, AnnotationState,
     AnnotationTarget,
@@ -186,9 +190,9 @@ pub use resources::tags::{
     AccessTagCreate, AnnotationTagCreate, Tag, TagCreate, TagKind, TagListParams, TagUpdate,
 };
 pub use resources::{
-    Annotations, Automations, Connections, Connectors, Endpoints, ExperimentHandle, Experiments,
-    MemberConnections, Members, Projects, Recipes, Repositories, RepositoryContents, RuntimeHandle,
-    Runtimes, Tags,
+    Aauth, Annotations, Approvals, Automations, Connections, Connectors, Endpoints,
+    ExperimentHandle, Experiments, MemberConnections, Members, Missions, Projects, Recipes,
+    Repositories, RepositoryContents, RuntimeHandle, Runtimes, Tags,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

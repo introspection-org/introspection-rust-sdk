@@ -2,7 +2,7 @@
 resolver = "2"
 members = ["crates/*"]
 
-# Shared by the AAuth crates; introspection-sdk declares its own.
+# Shared by every crate; introspection-sdk keeps its own keywords and categories.
 [workspace.package]
 edition = "2021"
 rust-version = "1.89"
@@ -21,12 +21,13 @@ getrandom = "0.3"
 hmac = "0.12"
 http = "1"
 ipnet = "2"
+percent-encoding = "2"
 p256 = { version = "0.13", features = ["ecdsa"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "net", "io-util", "sync"] }
+tokio = "1.44"
 url = "2"
 uuid = { version = "1.22", features = ["v4", "v7"] }
