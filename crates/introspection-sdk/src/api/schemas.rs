@@ -4245,6 +4245,10 @@ pub enum ConversationContentClass {
     ToolCall(String),
     /// A chat span whose new input carries the named tool's result.
     ToolResult(String),
+    /// A chat span whose output calls any tool.
+    AnyToolCall,
+    /// A chat span whose new input carries any tool's result.
+    AnyToolResult,
 }
 
 impl ConversationContentClass {
@@ -4257,6 +4261,8 @@ impl ConversationContentClass {
             Self::Tool(name) => format!("tool:{name}"),
             Self::ToolCall(name) => format!("tool_call:{name}"),
             Self::ToolResult(name) => format!("tool_result:{name}"),
+            Self::AnyToolCall => "tool_call".into(),
+            Self::AnyToolResult => "tool_result".into(),
         }
     }
 }

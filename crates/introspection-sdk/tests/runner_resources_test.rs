@@ -1138,6 +1138,7 @@ async fn conversation_items_list_repeats_operation_names_and_content_classes() {
         .and(query_param("content", "user_text"))
         .and(query_param("content", "tool:message_user"))
         .and(query_param("content", "tool_result:react"))
+        .and(query_param("content", "tool_call"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "object": "list",
             "data": [conversation_item("span-1")],
@@ -1161,6 +1162,7 @@ async fn conversation_items_list_repeats_operation_names_and_content_classes() {
                     ConversationContentClass::UserText,
                     ConversationContentClass::Tool("message_user".into()),
                     ConversationContentClass::ToolResult("react".into()),
+                    ConversationContentClass::AnyToolCall,
                 ],
                 ..Default::default()
             },
