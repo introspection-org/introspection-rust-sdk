@@ -115,7 +115,10 @@ impl Comparison {
     }
 
     fn objects(&mut self, reference: &Object, sdk: &Object, path: &str) {
-        if reference.fields.is_empty() {
+        // A map with no named fields takes any key. A closed object with none
+        // (an operation without query parameters) still makes every SDK
+        // field an extra one.
+        if reference.open && reference.fields.is_empty() {
             return;
         }
         if sdk.fields.is_empty() && sdk.open {

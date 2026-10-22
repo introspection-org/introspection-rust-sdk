@@ -174,6 +174,11 @@ pub struct Paginated<T> {
     pub next: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct Count {
+    pub count: u64,
+}
+
 #[derive(Serialize)]
 pub struct WidgetListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -201,6 +206,15 @@ impl Widgets {
 
     pub async fn legacy(&self) -> ApiResult<()> {
         self.http.delete_empty("/v1/gadgets").await
+    }
+
+    pub async fn count(&self, params: &WidgetListParams) -> ApiResult<Count> {
+        self.http.get_json("/v1/widgets/count", params).await
+    }
+
+    pub async fn watch(&self, id: &str) -> ApiResult<Response> {
+        let path = format!("/v1/widgets/{id}/events");
+        self.http.get_stream_raw(&path, Some("text/event-stream"), None).await
     }
 }
 "#;
@@ -266,6 +280,12 @@ fn reference() -> Document {
                     "responses": {"204": {}}
                 }
             },
+            "/v1/widgets/count": {
+                "get": {"responses": ok(serde_json::json!({"type": "object", "properties": {"count": {"type": "integer"}}}))}
+            },
+            "/v1/widgets/{widget_id}/events": {
+                "get": {"responses": ok(serde_json::json!({"type": "object"}))}
+            },
             "/v1/widgets/{widget_id}/archive": {
                 "post": {"x-introspection": sdk, "responses": {"204": {}}}
             }
@@ -295,7 +315,7 @@ fn reports_every_kind_of_finding() {
     );
     assert_eq!(
         report.unknown_routes,
-        ["DELETE /v1/gadgets at src/widgets.rs:59"]
+        ["DELETE /v1/gadgets at src/widgets.rs:64"]
     );
     for line in [
         "  POST /v1/widgets (dataplane)",
@@ -306,7 +326,13 @@ fn reports_every_kind_of_finding() {
         "  GET /v1/widgets (dataplane)",
         "    field missing in SDK: response.records[].created_at, response.total_count",
         "  POST /v1/widgets/{widget_id}/touch (dataplane)",
-        "    body: serde_json::json! builds an untyped value at src/widgets.rs:55",
+        "    body: serde_json::json! builds an untyped value at src/widgets.rs:60",
+        // An operation without query parameters still has extra ones.
+        "  GET /v1/widgets/count (dataplane)",
+        "    field extra in SDK: query.limit",
+        // A raw response's media type is checked too.
+        "  GET /v1/widgets/{widget_id}/events (dataplane)",
+        "    media type: response (the SDK reads text/event-stream; the reference's response has application/json)",
     ] {
         assert!(
             text.contains(&format!("{line}\n")),

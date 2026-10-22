@@ -47,7 +47,9 @@ pub struct CallSite {
     pub body: Part,
     pub query: Part,
     pub response: Part,
-    /// The media type the response is asked for in.
+    /// The media type the response is asked for in; `Err` with the
+    /// argument's text when the check cannot tell (or the call sends no
+    /// `Accept` and reads raw bytes).
     pub accept: Result<String, String>,
 }
 
@@ -372,7 +374,7 @@ impl Walker<'_, '_> {
             Read::Json => (self.response(expect, false), json),
             Read::JsonOrNothing => (self.response(expect, true), json),
             Read::Nothing => (Part::NotRead, json),
-            Read::Bytes => (Part::Raw, json),
+            Read::Bytes => (Part::Raw, no_accept()),
             Read::ByAccept(at) => {
                 let accept = call
                     .args
@@ -383,7 +385,7 @@ impl Walker<'_, '_> {
                     Ok(Some(media)) if media.contains("json") => (self.decoded(), Ok(media)),
                     Ok(Some(media)) => (Part::Raw, Ok(media)),
                     Ok(None) if at == 2 => (self.decoded(), json),
-                    Ok(None) => (Part::Raw, json),
+                    Ok(None) => (Part::Raw, no_accept()),
                     Err(e) => (
                         Part::Untyped(format!("Accept `{e}` is not a constant")),
                         Err(e),
@@ -798,6 +800,10 @@ impl Walker<'_, '_> {
             },
         )
     }
+}
+
+fn no_accept() -> Result<String, String> {
+    Err("no Accept header".to_owned())
 }
 
 /// Source text as written, rather than with a space between every token.

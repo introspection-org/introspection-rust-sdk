@@ -309,11 +309,13 @@ fn compare_query(op: &Operation, site: &CallSite, index: &Index, out: &mut Compa
 }
 
 fn compare_response(op: &Operation, site: &CallSite, index: &Index, out: &mut Comparison) {
-    let (ty, scope) = match &site.response {
-        Part::Typed(ty, scope) => (ty, *scope),
-        Part::Untyped(why) => return out.warn("response", why),
-        _ => return,
-    };
+    match &site.response {
+        Part::NotRead | Part::Absent | Part::Media(_) => return,
+        Part::Untyped(why) => out.warn("response", why),
+        Part::Typed(..) | Part::Raw => {}
+    }
+    // The media type is checked whenever the call names one, even for a
+    // response the SDK reads as bytes, a stream or Arrow.
     let Ok(wanted) = &site.accept else { return };
     let Some(content) = op.response() else { return };
     let Some(declared) = media(&content, wanted) else {
@@ -325,6 +327,8 @@ fn compare_response(op: &Operation, site: &CallSite, index: &Index, out: &mut Co
         let detail = format!("the SDK reads {wanted}; the reference's response has {offers}");
         return out.diff(Kind::Media, "response", Some(detail));
     };
-    let sdk = Lower::new(index, Dir::Read).shape(ty, scope);
-    out.compare(&op.lower(&declared["schema"]), &sdk, "response");
+    if let Part::Typed(ty, scope) = &site.response {
+        let sdk = Lower::new(index, Dir::Read).shape(ty, *scope);
+        out.compare(&op.lower(&declared["schema"]), &sdk, "response");
+    }
 }
