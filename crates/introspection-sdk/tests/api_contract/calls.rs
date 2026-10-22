@@ -513,7 +513,7 @@ impl Walker<'_, '_> {
         let (mut body, mut query, mut content_type) = (Part::Absent, Part::Absent, None);
         for link in rest {
             let Link::Call(next) = link else { continue };
-            let arg = next.args.iter().last();
+            let arg = next.args.last();
             match (next.method.to_string().as_str(), arg) {
                 ("json", Some(b)) => body = self.part(b),
                 ("form", Some(_)) => body = Part::Media("application/x-www-form-urlencoded".into()),
