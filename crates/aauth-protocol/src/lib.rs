@@ -20,7 +20,8 @@
 //! | [`mission`], [`budget`] | What a person approved, and what it may spend |
 //! | [`client`] | The agent's side of a Person Server conversation, and an SSRF guard (feature `client`) |
 //!
-//! The Person Server itself is the [`aauth-person-server`] crate.
+//! A Person Server is any server speaking the draft;
+//! [`@introspection-sdk/aauth-person-server`] is a reference implementation.
 //!
 //! # A request, end to end
 //!
@@ -109,7 +110,7 @@
 //!
 //! [draft-hardt-oauth-aauth-protocol]: https://github.com/dickhardt/AAuth
 //! [draft-hardt-httpbis-signature-key]: https://github.com/dickhardt/signature-key
-//! [`aauth-person-server`]: https://docs.rs/aauth-person-server
+//! [`@introspection-sdk/aauth-person-server`]: https://www.npmjs.com/package/@introspection-sdk/aauth-person-server
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]

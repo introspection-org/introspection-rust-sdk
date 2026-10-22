@@ -78,10 +78,37 @@ jobs:
 
       # Without its `client` feature aauth-protocol makes no network calls
       # and pulls in no HTTP client; keep that combination building.
-      - name: Run clippy (AAuth crates without HTTP)
-        run: |
-          cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
-          cargo clippy -p aauth-person-server --no-default-features -- -D warnings
+      - name: Run clippy (aauth-protocol without HTTP)
+        run: cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
+
+  lint-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
 
   # Fails when the duplicated-line share of crates/**/*.rs exceeds the
   # threshold in .jscpd.json. The threshold is a ratchet: lower it when a
@@ -202,3 +229,27 @@ jobs:
           PR_BODY="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""')"
           export PR_TITLE PR_BODY
           scripts/semver-checks.sh
+
+  # The one check to require in branch protection: it fails when any job it
+  # needs failed, was cancelled, or was skipped without being listed below.
+  # Add every new job to its needs.
+  all-green:
+    name: All green
+    if: always()
+    needs:
+      - secrets-scan
+      - lint-actions
+      - lint
+      - lint-and-format
+      - duplication
+      - unused-deps
+      - test
+      - semver-checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that every needed job passed
+        uses: re-actors/alls-green@release/v1
+        with:
+          # semver-checks runs on pull requests only, so a push skips it.
+          allowed-skips: semver-checks
+          jobs: ${{ toJSON(needs) }}

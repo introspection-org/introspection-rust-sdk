@@ -643,7 +643,7 @@ export INTROSPECTION_SERVICE_NAME="my-service"   # optional
 
 ### Semver checks
 
-CI runs [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) on every pull request. It compares the public API of `introspection-sdk`, `aauth-protocol` and `aauth-person-server` with their latest crates.io releases, with default features and with all features, and fails on a breaking change the version number does not allow. Run the same check locally:
+CI runs [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) on every pull request. It compares the public API of `introspection-sdk` and `aauth-protocol` with their latest crates.io releases, with default features and with all features, and fails on a breaking change the version number does not allow. Run the same check locally:
 
 ```sh
 cargo install --locked cargo-semver-checks@0.51.0
@@ -663,7 +663,6 @@ To make a breaking change on purpose, declare it the way release-please reads it
 Two vendor-neutral crates implement [AAuth](https://github.com/dickhardt/AAuth), the protocol Introspection's egress uses when an agent acts for a person:
 
 - [`aauth-protocol`](crates/aauth-protocol): HTTP Message Signatures under the AAuth profile, agent, person and auth tokens, key discovery, and an agent-side Person Server client.
-- [`aauth-person-server`](crates/aauth-person-server): a Person Server you can run, for missions, budgets and approvals.
 
 Neither depends on this SDK.
 
@@ -678,7 +677,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo clippy --all-targets -- -D warnings
 ```
 
-The thresholds are a ratchet: each starts at today's worst measured value, and it is never raised, only lowered when a refactor brings the worst offender down. The targets are cognitive complexity 15, 100 lines, 5 arguments and nesting depth 4. The generated `api::schemas` module and the wire-field fixture test in `tests/api_contract_test.rs` are exempt.
+The thresholds are a ratchet: each starts at today's worst measured value, and it is never raised, only lowered when a refactor brings the worst offender down. The targets are cognitive complexity 15, 100 lines, 5 arguments and nesting depth 4. The generated `api::schemas` module is exempt.
 
 ### Duplicate code
 
@@ -698,7 +697,7 @@ It counts only `exact` clones. The `renamed` kind (with `ignoreIdentifiers`), wh
 | 150 | 37 | 3.19% |
 | 250 | 9 | 1.02% |
 
-At `minTokens` 70, exact only, the measurement is 34 clones and 1.45% duplicated lines.
+At `minTokens` 70, exact only, the measurement is 29 clones and 1.35% duplicated lines.
 
 The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
 
@@ -715,6 +714,27 @@ cargo machete
 When it flags a dependency that is in fact used (through a macro or under a
 renamed crate, say), list it under `[package.metadata.cargo-machete] ignored`
 in that crate's `Cargo.toml` with a comment saying why.
+
+### API contract
+
+The [API Contract](.github/workflows/api-contract.yml) workflow checks the SDK against the staging Control Plane and Data Plane OpenAPI documents. The documents mark every operation the SDK must call with `x-introspection: {clients: [sdk, ...]}`, and those flags are the check's only classification: it keeps no list of its own. It reads the requests in `crates/introspection-sdk/src` and compares method and path only:
+
+- A route the SDK calls that neither document has fails, on pull requests too.
+- An operation flagged for the SDK that it never calls fails after each staging deploy of the API (introspection-cloud sends the `api-reference-deployed` `repository_dispatch`) and in a run by hand. On a pull request it is only listed in the job summary.
+
+A deploy-triggered run posts to `#main-build-alerts` when the result changes from clean to drift or back. A document staging answers with 404 skips the check.
+
+Run the check locally against staging, or against local copies:
+
+```sh
+cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
+
+INTROSPECTION_CONTROLPLANE_SPEC=path/to/controlplane.json \
+INTROSPECTION_DATAPLANE_SPEC=path/to/dataplane.json \
+  cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
+```
+
+Each variable takes a path (relative to the repository root) or a URL.
 
 ## License
 

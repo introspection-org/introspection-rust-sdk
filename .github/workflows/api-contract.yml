@@ -1,24 +1,40 @@
-# Watches the published API reference for drift against this SDK's request and
-# response surface.
-# Scheduled rather than run on pull requests: it reaches the network and it goes
-# red when the *API* changes, which is a fact about the world and not about the
-# commit under review. Gating PRs on it would make it noise, and being ignorable
-# is how the last one of these went unnoticed.
+# Checks the SDK's routes against the staging API reference
+# (https://api.staging.introspection.dev/openapi/{controlplane,dataplane}.json)
+# with crates/introspection-sdk/tests/api_contract_test.rs.
+#
+# - Pull requests: a route the SDK calls that is in neither document fails.
+#   Operations flagged for the SDK that it doesn't call are only listed in the
+#   job summary, so a new API operation doesn't block unrelated work.
+# - After each staging deploy of the API (introspection-cloud sends the
+#   `api-reference-deployed` repository_dispatch; client_payload.sha is its
+#   commit), or by hand: both fail, and #main-build-alerts hears when the
+#   result changes (clean to drift, drift to clean).
+#
+# A document staging answers with 404 (not deployed yet) skips the check
+# green, without a post and without touching the stored state.
+#
+# Only a run on main may post to Slack, and a manual run only when its
+# post_for_real input is set. Any other run prints the message instead. The
+# state is recorded only when a post really went out.
 name: API Contract
 
 on:
-  schedule:
-    # 07:00 UTC daily, so a red run is waiting at the start of the day rather
-    # than arriving mid-afternoon.
-    - cron: "0 7 * * *"
+  pull_request:
+  repository_dispatch:
+    types: [api-reference-deployed]
   workflow_dispatch:
+    inputs:
+      post_for_real:
+        description: "Post to Slack on a state change, as a deploy-triggered run does. Off prints the message instead."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  sdk-surface:
-    name: SDK surface vs published reference
+  api-contract:
+    name: SDK routes vs staging API reference
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,5 +45,50 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Compare the SDK surface against the reference
-        run: cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
+      - name: Check the SDK's routes
+        id: check
+        env:
+          INTROSPECTION_API_CONTRACT_UNCALLED: ${{ github.event_name == 'pull_request' && 'report' || 'fail' }}
+          CLOUD_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "${CLOUD_SHA}" ]; then
+            run_url="${run_url} (after introspection-cloud ${CLOUD_SHA})"
+          fi
+          scripts/api-drift-report.sh "${RUNNER_TEMP}/api-drift" "${run_url}"
+          cat "${RUNNER_TEMP}/api-drift/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+          echo "state=$(cat "${RUNNER_TEMP}/api-drift/state")" >> "${GITHUB_OUTPUT}"
+
+      # The state of the last real post. Caches are immutable, so each post
+      # saves under a new key and the newest one is restored by prefix.
+      - name: Restore the last posted state
+        if: github.event_name != 'pull_request' && steps.check.outputs.state != 'skipped'
+        uses: actions/cache/restore@v5
+        with:
+          path: .api-drift-state
+          key: api-drift-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: api-drift-state-
+
+      - name: Notify #main-build-alerts
+        id: notify
+        if: github.event_name != 'pull_request' && steps.check.outputs.state != 'skipped'
+        env:
+          REPORT_DIR: ${{ runner.temp }}/api-drift
+          STATE_DIR: .api-drift-state
+          # Only a run on main posts, and a manual one only with post_for_real.
+          # Without a webhook URL the script prints the message.
+          SLACK_WEBHOOK_URL: ${{ github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || inputs.post_for_real) && secrets.MAIN_STATUS_SLACK_WEBHOOK_URL || '' }}
+        run: scripts/api-drift-notify.sh
+
+      - name: Save the posted state
+        if: steps.notify.outputs.posted == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .api-drift-state
+          key: api-drift-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Fail on drift
+        if: steps.check.outputs.state == 'red'
+        run: |
+          echo "::error::API drift found; the job summary has the report."
+          exit 1
