@@ -1,9 +1,22 @@
-# Watches the published API reference for drift against this SDK's request and
-# response surface.
-# Scheduled rather than run on pull requests: it reaches the network and it goes
-# red when the *API* changes, which is a fact about the world and not about the
-# commit under review. Gating PRs on it would make it noise, and being ignorable
-# is how the last one of these went unnoticed.
+# Checks this SDK against the staging API reference every night, and tells
+# #main-build-alerts when the result changes.
+#
+# Two reports (scripts/api-drift-report.sh):
+#
+# - SDK drift: the API contract check in
+#   crates/introspection-sdk/tests/api_contract_test.rs, against
+#   https://api.staging.introspection.dev/openapi/{controlplane,dataplane}.json.
+# - Reference changelog: oasdiff between the saved copies in api-reference/ and
+#   staging, so a change to the API shows up even where the SDK still matches.
+#
+# Scheduled rather than run on pull requests: it reaches the network and it
+# goes red when the *API* changes, which is a fact about the world and not
+# about the commit under review.
+#
+# A red run that nobody opens is ignorable too, so the run posts to
+# #main-build-alerts when the state changes (clean to drift, drift to clean),
+# with a ready-to-paste agent prompt for the fix (.github/api-drift-prompt.md).
+# It never opens a fix PR itself.
 name: API Contract
 
 on:
@@ -12,13 +25,22 @@ on:
     # than arriving mid-afternoon.
     - cron: "0 7 * * *"
   workflow_dispatch:
+    inputs:
+      post_for_real:
+        description: "Post to Slack on a state change, as the nightly run does. Off prints the message instead."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+env:
+  OASDIFF_VERSION: "1.33.0"
+  OASDIFF_SHA256: "43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247"
+
 jobs:
-  sdk-surface:
-    name: SDK surface vs published reference
+  api-contract:
+    name: SDK vs staging API reference
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,5 +51,50 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Compare the SDK surface against the reference
-        run: cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
+      - name: Install oasdiff
+        run: |
+          archive="oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/${archive}"
+          echo "${OASDIFF_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/oasdiff"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/oasdiff" oasdiff
+          echo "${RUNNER_TEMP}/oasdiff" >> "${GITHUB_PATH}"
+
+      - name: Build the drift report
+        run: |
+          scripts/api-drift-report.sh "${RUNNER_TEMP}/api-drift" \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          cat "${RUNNER_TEMP}/api-drift/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      # The state of the last real post. Caches are immutable, so each post
+      # saves under a new key and the newest one is restored by prefix.
+      - name: Restore the last posted state
+        uses: actions/cache/restore@v5
+        with:
+          path: .api-drift-state
+          key: api-drift-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: api-drift-state-
+
+      - name: Notify #main-build-alerts
+        id: notify
+        env:
+          REPORT_DIR: ${{ runner.temp }}/api-drift
+          STATE_DIR: .api-drift-state
+          # A manual run rehearses unless asked to post: it prints the message.
+          SLACK_WEBHOOK_URL: ${{ (github.event_name != 'workflow_dispatch' || inputs.post_for_real) && secrets.MAIN_STATUS_SLACK_WEBHOOK_URL || '' }}
+        run: scripts/api-drift-notify.sh
+
+      - name: Save the posted state
+        if: steps.notify.outputs.posted == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .api-drift-state
+          key: api-drift-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Fail on drift
+        run: |
+          if [ "$(cat "${RUNNER_TEMP}/api-drift/state")" = "red" ]; then
+            echo "::error::API drift found; the job summary has both reports."
+            exit 1
+          fi

@@ -16,6 +16,10 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - List a job in `allowed-skips` only when it skips by design, like `semver-checks`, which runs on pull requests only. A job skipped because a job it needs failed must still fail `All green`.
 - CI runs `cargo clippy --all-targets --all-features -- -D warnings` at the workspace root. That compiles every member's examples, so a broken example fails CI.
 - CI never runs the examples. They need a live server.
+- `.github/workflows/api-contract.yml` runs the API contract check nightly against staging. It is not part of `ci.yml`, so it is not in `all-green`. Pull requests run only its offline tests.
+- The check (`crates/introspection-sdk/tests/api_contract_test.rs`) takes the documents' `x-introspection` flags as its only classification. Never add an exemption, allowlist or skip to it.
+- The check finds requests through the `HttpClient` methods, the `Paginator` constructors and `reqwest` builders (`tests/api_contract/calls.rs`). A new way of sending requests must be taught there, or its operations show up as not called.
+- `api-reference/*.json` are byte copies of the staging documents, refreshed with `curl`. Don't reformat them.
 
 ## Examples
 

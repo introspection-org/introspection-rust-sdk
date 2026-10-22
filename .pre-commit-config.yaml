@@ -3,6 +3,10 @@
 # Or: pip install pre-commit && pre-commit install
 # Run manually: pre-commit run --all-files
 
+# api-reference/ holds byte copies of the staging OpenAPI documents, refreshed
+# with curl; whitespace fixes and the size limit don't apply to them.
+exclude: ^api-reference/
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
