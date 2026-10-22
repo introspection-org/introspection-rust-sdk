@@ -249,8 +249,8 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     for name in &params.operation_names {
         query.push(("operation_name".into(), name.clone()));
     }
-    for class in &params.content {
-        query.push(("content".into(), class.to_wire()));
+    for value in &params.contains {
+        query.push(("contains".into(), value.to_wire()));
     }
     push_opt(&mut query, "lookback_days", params.lookback_days);
     for (key, value) in params.filters.iter().flatten() {

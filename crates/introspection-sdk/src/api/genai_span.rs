@@ -273,27 +273,29 @@ pub struct IntrospectionConversation {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-/// `introspection.content.*`: what a chat span's sealed messages hold,
-/// stamped at ingest so a read can select rows without opening them.
+/// `introspection.contains.*`: what a chat span's sealed input delta and
+/// output contain, stamped at ingest so a read can select rows without
+/// opening them.
 ///
 /// Counts and tool names only, never content. Absent on a span recorded
 /// before the summary existed and on an `execute_tool` span.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
-pub struct IntrospectionContent {
+pub struct IntrospectionContains {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<i64>,
-    /// User text parts in the span's new input.
+    /// User-authored parts in the span's new input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user_text: Option<i64>,
-    /// Assistant text parts in the span's output.
+    pub input_user_parts: Option<i64>,
+    /// Text parts in the span's output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assistant_text: Option<i64>,
-    /// Tool names the output calls, sorted and deduplicated.
+    pub output_text_parts: Option<i64>,
+    /// `name`s of the `tool_call` parts in the output, sorted and deduplicated.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<String>,
-    /// Tool names whose results the new input carries, sorted and deduplicated.
+    pub output_tool_names: Vec<String>,
+    /// `name`s of the `tool_call_response` parts in the new input, sorted and
+    /// deduplicated.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_results: Vec<String>,
+    pub input_tool_response_names: Vec<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
@@ -331,7 +333,7 @@ pub struct IntrospectionAttributes {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<IntrospectionConversation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<IntrospectionContent>,
+    pub contains: Option<IntrospectionContains>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }

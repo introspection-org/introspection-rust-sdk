@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    ConversationContentClass, ConversationExportFormat, ConversationExportParams,
+    ConversationContains, ConversationExportFormat, ConversationExportParams,
     ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, Conversations, Dimension, Event, EventListParams, Events,
     FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionListParams, FileVersions,
@@ -1127,7 +1127,7 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
 }
 
 #[tokio::test]
-async fn conversation_items_list_repeats_operation_names_and_content_classes() {
+async fn conversation_items_list_repeats_operation_names_and_contains_values() {
     let server = MockServer::start().await;
     let conversations = Conversations::new(build_http(&server));
 
@@ -1135,10 +1135,16 @@ async fn conversation_items_list_repeats_operation_names_and_content_classes() {
         .and(path("/v1/conversations/conv-1/items"))
         .and(query_param("operation_name", "chat"))
         .and(query_param("operation_name", "execute_tool"))
-        .and(query_param("content", "user_text"))
-        .and(query_param("content", "tool:message_user"))
-        .and(query_param("content", "tool_result:react"))
-        .and(query_param("content", "tool_call"))
+        .and(query_param("contains", "gen_ai.input.messages.role:user"))
+        .and(query_param("contains", "gen_ai.tool.name:message_user"))
+        .and(query_param(
+            "contains",
+            "gen_ai.input.messages.parts.name:react",
+        ))
+        .and(query_param(
+            "contains",
+            "gen_ai.output.messages.parts.type:tool_call",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "object": "list",
             "data": [conversation_item("span-1")],
@@ -1158,11 +1164,11 @@ async fn conversation_items_list_repeats_operation_names_and_content_classes() {
             &ConversationItemListParams {
                 operation_name: Some("chat".into()),
                 operation_names: vec!["execute_tool".into()],
-                content: vec![
-                    ConversationContentClass::UserText,
-                    ConversationContentClass::Tool("message_user".into()),
-                    ConversationContentClass::ToolResult("react".into()),
-                    ConversationContentClass::AnyToolCall,
+                contains: vec![
+                    ConversationContains::InputUser,
+                    ConversationContains::Tool("message_user".into()),
+                    ConversationContains::InputToolResponse("react".into()),
+                    ConversationContains::AnyOutputToolCall,
                 ],
                 ..Default::default()
             },

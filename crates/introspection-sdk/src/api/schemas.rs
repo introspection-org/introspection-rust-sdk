@@ -4212,10 +4212,10 @@ pub struct ConversationItemListParams {
     /// Further operation names, any of which matches (`chat`, `execute_tool`,
     /// `invoke_agent`, ...).
     pub operation_names: Vec<String>,
-    /// Content classes to keep, any of which matches. Each selects the rows
-    /// that carry that content, and a chat span matched on one side opens
-    /// only that side's messages. Empty keeps every row.
-    pub content: Vec<ConversationContentClass>,
+    /// `contains` values to keep, any of which matches: what the sealed
+    /// messages must contain, as a GenAI semconv path. A chat span matched on
+    /// one side opens only that side's messages. Empty keeps every row.
+    pub contains: Vec<ConversationContains>,
     pub lookback_days: Option<u32>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
@@ -4224,50 +4224,61 @@ pub struct ConversationItemListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// A content class on the conversation item list's `content` filter.
+/// One value of the conversation item list's `contains` filter: a GenAI
+/// semconv path over the sealed payload and what it must contain.
 ///
-/// `UserText`, `AssistantText`, `ToolCall` and `ToolResult` select chat spans
-/// by the plaintext summary stamped on them at ingest (and, on a conversation
-/// recorded before that summary existed, every chat span before its
-/// cut-over); `Tool` selects the `execute_tool` span by its tool name;
-/// `Delegation` selects the `invoke_agent` / `create_agent` wrappers.
+/// The message variants select chat spans by the plaintext summary stamped on
+/// them at ingest (and, on a chat span recorded before that summary existed,
+/// the whole span); an input variant opens only the span's new input and an
+/// output variant only its output. `Tool` and `Operation` match a span
+/// attribute and open the whole span. The set is closed because every value
+/// is resolved without opening the payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConversationContentClass {
-    /// A chat span whose new input carries a user text message.
-    UserText,
-    /// A chat span whose output carries an assistant text message.
-    AssistantText,
-    /// The `invoke_agent` / `create_agent` wrapper of a delegated run.
-    Delegation,
-    /// The `execute_tool` span of the named tool.
+pub enum ConversationContains {
+    /// `gen_ai.input.messages.role:user`: a chat span whose new input carries
+    /// a user-authored part.
+    InputUser,
+    /// `gen_ai.input.messages.parts.type:tool_call_response`: a chat span
+    /// whose new input carries any tool's response.
+    AnyInputToolResponse,
+    /// `gen_ai.input.messages.parts.name:<tool>`: a chat span whose new input
+    /// carries the named tool's response.
+    InputToolResponse(String),
+    /// `gen_ai.output.messages.parts.type:text`: a chat span whose output
+    /// carries assistant text.
+    OutputText,
+    /// `gen_ai.output.messages.parts.type:tool_call`: a chat span whose
+    /// output calls any tool.
+    AnyOutputToolCall,
+    /// `gen_ai.output.messages.parts.name:<tool>`: a chat span whose output
+    /// calls the named tool.
+    OutputToolCall(String),
+    /// `gen_ai.tool.name:<tool>`: the `execute_tool` span of the named tool.
     Tool(String),
-    /// A chat span whose output calls the named tool.
-    ToolCall(String),
-    /// A chat span whose new input carries the named tool's result.
-    ToolResult(String),
-    /// A chat span whose output calls any tool.
-    AnyToolCall,
-    /// A chat span whose new input carries any tool's result.
-    AnyToolResult,
+    /// `gen_ai.operation.name:<operation>`: every span of that operation,
+    /// e.g. the `invoke_agent` wrapper of a delegated run.
+    Operation(String),
 }
 
-impl ConversationContentClass {
+impl ConversationContains {
     /// The value as it goes on the wire.
     pub fn to_wire(&self) -> String {
         match self {
-            Self::UserText => "user_text".into(),
-            Self::AssistantText => "assistant_text".into(),
-            Self::Delegation => "delegation".into(),
-            Self::Tool(name) => format!("tool:{name}"),
-            Self::ToolCall(name) => format!("tool_call:{name}"),
-            Self::ToolResult(name) => format!("tool_result:{name}"),
-            Self::AnyToolCall => "tool_call".into(),
-            Self::AnyToolResult => "tool_result".into(),
+            Self::InputUser => "gen_ai.input.messages.role:user".into(),
+            Self::AnyInputToolResponse => {
+                "gen_ai.input.messages.parts.type:tool_call_response".into()
+            }
+            Self::InputToolResponse(name) => format!("gen_ai.input.messages.parts.name:{name}"),
+            Self::OutputText => "gen_ai.output.messages.parts.type:text".into(),
+            Self::AnyOutputToolCall => "gen_ai.output.messages.parts.type:tool_call".into(),
+            Self::OutputToolCall(name) => format!("gen_ai.output.messages.parts.name:{name}"),
+            Self::Tool(name) => format!("gen_ai.tool.name:{name}"),
+            Self::Operation(name) => format!("gen_ai.operation.name:{name}"),
         }
     }
 }
 
-impl Serialize for ConversationContentClass {
+impl Serialize for ConversationContains {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_wire())
     }
