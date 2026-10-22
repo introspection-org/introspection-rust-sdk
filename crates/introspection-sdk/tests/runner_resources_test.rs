@@ -1126,18 +1126,20 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     assert!(pages.next_page().await.unwrap().is_none());
 }
 
-// `operation_name` is deprecated in favour of `contains`; the server still
-// takes it, so this checks the SDK still sends it beside `contains`.
-#[allow(deprecated)]
+// Operations filter through `contains=gen_ai.operation.name:<op>`; the items
+// list has no `operation_name` parameter.
 #[tokio::test]
-async fn conversation_items_list_repeats_operation_names_and_contains_values() {
+async fn conversation_items_list_filters_operations_through_contains() {
     let server = MockServer::start().await;
     let conversations = Conversations::new(build_http(&server));
 
     Mock::given(method("GET"))
         .and(path("/v1/conversations/conv-1/items"))
-        .and(query_param("operation_name", "chat"))
-        .and(query_param("operation_name", "execute_tool"))
+        .and(query_param("contains", "gen_ai.operation.name:chat"))
+        .and(query_param(
+            "contains",
+            "gen_ai.operation.name:execute_tool",
+        ))
         .and(query_param("contains", "gen_ai.input.messages.role:user"))
         .and(query_param("contains", "gen_ai.tool.name:message_user"))
         .and(query_param(
@@ -1165,9 +1167,9 @@ async fn conversation_items_list_repeats_operation_names_and_contains_values() {
         .list(
             "conv-1",
             &ConversationItemListParams {
-                operation_name: Some("chat".into()),
-                operation_names: vec!["execute_tool".into()],
                 contains: vec![
+                    ConversationContains::Operation("chat".into()),
+                    ConversationContains::Operation("execute_tool".into()),
                     ConversationContains::InputUser,
                     ConversationContains::Tool("message_user".into()),
                     ConversationContains::InputToolResponse("react".into()),
@@ -1181,6 +1183,12 @@ async fn conversation_items_list_repeats_operation_names_and_contains_values() {
         .await
         .unwrap();
     assert_eq!(items.len(), 1);
+    let requests = server.received_requests().await.unwrap();
+    let query = requests[0].url.query().unwrap_or_default();
+    assert!(
+        !query.contains("operation_name"),
+        "items.list sends no operation_name: {query}"
+    );
 }
 
 #[test]

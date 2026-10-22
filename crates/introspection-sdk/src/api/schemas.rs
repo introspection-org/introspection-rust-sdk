@@ -4205,36 +4205,12 @@ pub struct ConversationItemListParams {
     /// `root`, an exact invocation id, or omitted for the complete conversation.
     pub agent: Option<String>,
     pub service_name: Option<String>,
-    /// One `gen_ai.operation.name` to keep. For several, use
-    /// [`operation_names`](Self::operation_names); both lower to the repeated
-    /// `operation_name` query parameter, any of which matches.
-    ///
-    /// Deprecated: pass [`ConversationContains::Operation`] in
-    /// [`contains`](Self::contains) (`contains=gen_ai.operation.name:<op>`),
-    /// which returns the same rows. The server keeps `operation_name` for older
-    /// clients; it ANDs with `contains`, so it narrows the page where a
-    /// `contains` value adds to it.
-    #[deprecated(
-        since = "0.32.0",
-        note = "use `contains: vec![ConversationContains::Operation(..)]` (contains=gen_ai.operation.name:<op>); operation_name ANDs with contains"
-    )]
-    pub operation_name: Option<String>,
-    /// Further operation names, any of which matches (`chat`, `execute_tool`,
-    /// `invoke_agent`, ...).
-    ///
-    /// Deprecated like [`operation_name`](Self::operation_name): pass one
-    /// [`ConversationContains::Operation`] per name in
-    /// [`contains`](Self::contains) instead.
-    #[deprecated(
-        since = "0.32.0",
-        note = "use `contains: vec![ConversationContains::Operation(..)]` (contains=gen_ai.operation.name:<op>); operation_name ANDs with contains"
-    )]
-    pub operation_names: Vec<String>,
     /// `contains` values to keep, any of which matches (at most 20): what the
     /// sealed messages must contain, as a GenAI semconv path. A chat span
     /// matched on one side opens only that side's messages. Empty keeps every
     /// row. A name may end in one `*` to match by prefix; see
-    /// [`ConversationContains`].
+    /// [`ConversationContains`]. Filter by operation with
+    /// [`ConversationContains::Operation`] (`contains=gen_ai.operation.name:<op>`).
     pub contains: Vec<ConversationContains>,
     pub lookback_days: Option<u32>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged

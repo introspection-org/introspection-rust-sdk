@@ -230,9 +230,6 @@ impl ConversationItemListParams {
     }
 }
 
-// `operation_name` is deprecated in favour of `contains`, but still sent for
-// callers that set it.
-#[allow(deprecated)]
 fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     let mut query = Vec::new();
     push_opt(&mut query, "limit", params.limit);
@@ -244,14 +241,6 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     }
     push_opt_ref(&mut query, "agent", params.agent.as_deref());
     push_opt_ref(&mut query, "service_name", params.service_name.as_deref());
-    push_opt_ref(
-        &mut query,
-        "operation_name",
-        params.operation_name.as_deref(),
-    );
-    for name in &params.operation_names {
-        query.push(("operation_name".into(), name.clone()));
-    }
     for value in &params.contains {
         query.push(("contains".into(), value.to_wire()));
     }
