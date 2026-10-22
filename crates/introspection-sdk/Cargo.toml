@@ -102,6 +102,12 @@ insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
 flate2 = "1"
 dotenvy = "0.15"
+# The API contract check (tests/api_contract_test.rs) reads the SDK source to
+# find its requests. `span-locations` gives the line numbers
+# its findings name.
+syn = { version = "2", features = ["full", "visit"] }
+quote = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
 
 [[example]]
 name = "connectors-slack"

@@ -8,6 +8,6 @@
   "minLines": 8,
   "mode": "weak",
   "kind": ["exact"],
-  "threshold": 1.5,
+  "threshold": 1.4,
   "reporters": ["console"]
 }

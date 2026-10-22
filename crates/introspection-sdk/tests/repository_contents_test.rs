@@ -3,34 +3,16 @@
 //! The Control Plane is a separate mock with nothing mounted, so a contents
 //! read that went to it instead would 404.
 
+mod common;
+
+use common::{client, repository_id, REPOSITORY_ID};
 use futures::StreamExt;
 use introspection_sdk::{
-    AdvancedOptions, ClientConfig, ContentsQuery, IntrospectionAPIError, IntrospectionClient,
-    RepositoryContent, RepositoryEntryType,
+    ContentsQuery, IntrospectionAPIError, RepositoryContent, RepositoryEntryType,
 };
 use serde_json::json;
-use uuid::Uuid;
 use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-const REPOSITORY_ID: &str = "22222222-2222-7222-8222-222222222222";
-
-fn repository_id() -> Uuid {
-    Uuid::parse_str(REPOSITORY_ID).unwrap()
-}
-
-async fn client(dp: &MockServer) -> (IntrospectionClient, MockServer) {
-    let cp = MockServer::start().await;
-    let client = IntrospectionClient::new(ClientConfig::with_token("intro_test").advanced(
-        AdvancedOptions {
-            base_api_url: Some(cp.uri()),
-            dp_url: Some(dp.uri()),
-            ..Default::default()
-        },
-    ))
-    .unwrap();
-    (client, cp)
-}
 
 fn entry(name: &str, kind: &str) -> serde_json::Value {
     json!({"name": name, "path": format!("agents/{name}"), "type": kind, "size": 3, "sha": "e1"})
