@@ -17,7 +17,7 @@ This crate is the part of the protocol every role shares.
 | `mission`, `budget` | What a person approved, and what it may spend |
 | `client` | The agent's Person Server client, and an SSRF-guarded HTTP client (`client` feature, on by default) |
 
-The Person Server itself is the [`aauth-person-server`](https://crates.io/crates/aauth-person-server) crate.
+A Person Server is any server speaking the draft; [`@introspection-sdk/aauth-person-server`](https://www.npmjs.com/package/@introspection-sdk/aauth-person-server) is a reference implementation.
 
 ## Sign as an agent
 
