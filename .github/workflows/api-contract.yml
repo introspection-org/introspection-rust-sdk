@@ -12,6 +12,10 @@
 #
 # A document staging answers with 404 (not deployed yet) skips the check
 # green, without a post and without touching the stored state.
+#
+# Only a run on main may post to Slack, and a manual run only when its
+# post_for_real input is set. Any other run prints the message instead. The
+# state is recorded only when a post really went out.
 name: API Contract
 
 on:
@@ -71,8 +75,9 @@ jobs:
         env:
           REPORT_DIR: ${{ runner.temp }}/api-drift
           STATE_DIR: .api-drift-state
-          # A manual run rehearses unless asked to post: it prints the message.
-          SLACK_WEBHOOK_URL: ${{ (github.event_name != 'workflow_dispatch' || inputs.post_for_real) && secrets.MAIN_STATUS_SLACK_WEBHOOK_URL || '' }}
+          # Only a run on main posts, and a manual one only with post_for_real.
+          # Without a webhook URL the script prints the message.
+          SLACK_WEBHOOK_URL: ${{ github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || inputs.post_for_real) && secrets.MAIN_STATUS_SLACK_WEBHOOK_URL || '' }}
         run: scripts/api-drift-notify.sh
 
       - name: Save the posted state
