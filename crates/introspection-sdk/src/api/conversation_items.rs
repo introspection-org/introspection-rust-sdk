@@ -230,6 +230,9 @@ impl ConversationItemListParams {
     }
 }
 
+// `operation_name` is deprecated in favour of `contains`, but still sent for
+// callers that set it.
+#[allow(deprecated)]
 fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     let mut query = Vec::new();
     push_opt(&mut query, "limit", params.limit);

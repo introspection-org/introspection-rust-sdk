@@ -4208,13 +4208,33 @@ pub struct ConversationItemListParams {
     /// One `gen_ai.operation.name` to keep. For several, use
     /// [`operation_names`](Self::operation_names); both lower to the repeated
     /// `operation_name` query parameter, any of which matches.
+    ///
+    /// Deprecated: pass [`ConversationContains::Operation`] in
+    /// [`contains`](Self::contains) (`contains=gen_ai.operation.name:<op>`),
+    /// which returns the same rows. The server keeps `operation_name` for older
+    /// clients; it ANDs with `contains`, so it narrows the page where a
+    /// `contains` value adds to it.
+    #[deprecated(
+        since = "0.32.0",
+        note = "use `contains: vec![ConversationContains::Operation(..)]` (contains=gen_ai.operation.name:<op>); operation_name ANDs with contains"
+    )]
     pub operation_name: Option<String>,
     /// Further operation names, any of which matches (`chat`, `execute_tool`,
     /// `invoke_agent`, ...).
+    ///
+    /// Deprecated like [`operation_name`](Self::operation_name): pass one
+    /// [`ConversationContains::Operation`] per name in
+    /// [`contains`](Self::contains) instead.
+    #[deprecated(
+        since = "0.32.0",
+        note = "use `contains: vec![ConversationContains::Operation(..)]` (contains=gen_ai.operation.name:<op>); operation_name ANDs with contains"
+    )]
     pub operation_names: Vec<String>,
-    /// `contains` values to keep, any of which matches: what the sealed
-    /// messages must contain, as a GenAI semconv path. A chat span matched on
-    /// one side opens only that side's messages. Empty keeps every row.
+    /// `contains` values to keep, any of which matches (at most 20): what the
+    /// sealed messages must contain, as a GenAI semconv path. A chat span
+    /// matched on one side opens only that side's messages. Empty keeps every
+    /// row. A name may end in one `*` to match by prefix; see
+    /// [`ConversationContains`].
     pub contains: Vec<ConversationContains>,
     pub lookback_days: Option<u32>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
@@ -4233,6 +4253,34 @@ pub struct ConversationItemListParams {
 /// output variant only its output. `Tool` and `Operation` match a span
 /// attribute and open the whole span. The set is closed because every value
 /// is resolved without opening the payload.
+///
+/// An input path is evaluated over the messages new to the item, not the full
+/// history that [`ConversationItemInclude`]'s input expansion adds.
+///
+/// # Prefix match
+///
+/// The four name variants ([`InputToolResponse`](Self::InputToolResponse),
+/// [`OutputToolCall`](Self::OutputToolCall), [`Tool`](Self::Tool) and
+/// [`Operation`](Self::Operation)) take a name that may end in one `*`, which
+/// matches every name starting with what precedes it; `*` alone matches any
+/// name. The server answers `422` for a `*` anywhere else in the name, and the
+/// fixed variants take none.
+///
+/// ```
+/// use introspection_sdk::ConversationContains;
+///
+/// // Every chat span whose output calls a Browserbase MCP tool.
+/// let browserbase = ConversationContains::OutputToolCall("mcp_browserbase_*".into());
+/// assert_eq!(
+///     browserbase.to_wire(),
+///     "gen_ai.output.messages.parts.name:mcp_browserbase_*",
+/// );
+/// // Every `execute_tool` span of an MCP tool.
+/// assert_eq!(
+///     ConversationContains::Tool("mcp_*".into()).to_wire(),
+///     "gen_ai.tool.name:mcp_*",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConversationContains {
     /// `gen_ai.input.messages.role:user`: a chat span whose new input carries
@@ -4242,7 +4290,7 @@ pub enum ConversationContains {
     /// whose new input carries any tool's response.
     AnyInputToolResponse,
     /// `gen_ai.input.messages.parts.name:<tool>`: a chat span whose new input
-    /// carries the named tool's response.
+    /// carries the named tool's response. The name may end in `*`.
     InputToolResponse(String),
     /// `gen_ai.output.messages.parts.type:text`: a chat span whose output
     /// carries assistant text.
@@ -4251,12 +4299,14 @@ pub enum ConversationContains {
     /// output calls any tool.
     AnyOutputToolCall,
     /// `gen_ai.output.messages.parts.name:<tool>`: a chat span whose output
-    /// calls the named tool.
+    /// calls the named tool. The name may end in `*`.
     OutputToolCall(String),
     /// `gen_ai.tool.name:<tool>`: the `execute_tool` span of the named tool.
+    /// The name may end in `*`.
     Tool(String),
     /// `gen_ai.operation.name:<operation>`: every span of that operation,
-    /// e.g. the `invoke_agent` wrapper of a delegated run.
+    /// e.g. the `invoke_agent` wrapper of a delegated run. The name may end
+    /// in `*`.
     Operation(String),
 }
 

@@ -1126,6 +1126,9 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     assert!(pages.next_page().await.unwrap().is_none());
 }
 
+// `operation_name` is deprecated in favour of `contains`; the server still
+// takes it, so this checks the SDK still sends it beside `contains`.
+#[allow(deprecated)]
 #[tokio::test]
 async fn conversation_items_list_repeats_operation_names_and_contains_values() {
     let server = MockServer::start().await;
@@ -1178,6 +1181,86 @@ async fn conversation_items_list_repeats_operation_names_and_contains_values() {
         .await
         .unwrap();
     assert_eq!(items.len(), 1);
+}
+
+#[test]
+fn conversation_contains_name_values_keep_a_trailing_wildcard() {
+    let cases = [
+        (
+            ConversationContains::OutputToolCall("mcp_browserbase_*".into()),
+            "gen_ai.output.messages.parts.name:mcp_browserbase_*",
+        ),
+        (
+            ConversationContains::InputToolResponse("*".into()),
+            "gen_ai.input.messages.parts.name:*",
+        ),
+        (
+            ConversationContains::Tool("mcp_*".into()),
+            "gen_ai.tool.name:mcp_*",
+        ),
+        (
+            ConversationContains::Operation("invoke_*".into()),
+            "gen_ai.operation.name:invoke_*",
+        ),
+    ];
+    for (value, wire) in cases {
+        assert_eq!(value.to_wire(), wire);
+        assert_eq!(serde_json::to_value(&value).unwrap(), json!(wire));
+    }
+}
+
+#[tokio::test]
+async fn conversation_items_list_sends_prefix_contains_values_verbatim() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param(
+            "contains",
+            "gen_ai.output.messages.parts.name:mcp_browserbase_*",
+        ))
+        .and(query_param("contains", "gen_ai.tool.name:mcp_*"))
+        .and(query_param(
+            "contains",
+            "gen_ai.operation.name:invoke_agent",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": false,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let items = conversations
+        .items
+        .list(
+            "conv-1",
+            &ConversationItemListParams {
+                contains: vec![
+                    ConversationContains::OutputToolCall("mcp_browserbase_*".into()),
+                    ConversationContains::Tool("mcp_*".into()),
+                    ConversationContains::Operation("invoke_agent".into()),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .collect_all(0)
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    let requests = server.received_requests().await.unwrap();
+    let query = requests[0].url.query().unwrap_or_default();
+    assert!(
+        !query.contains("operation_name"),
+        "contains alone sends no operation_name: {query}"
+    );
 }
 
 #[tokio::test]
