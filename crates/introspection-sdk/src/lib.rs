@@ -117,6 +117,7 @@ pub mod resources;
 pub mod runner;
 pub mod types;
 
+// jscpd:ignore-start -- a re-export list mirroring `api`'s, declarations only
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
     AgentInfo, AnnotationEvent, AnnotationPayload, Arm, Automation, AutomationCondition,
@@ -166,6 +167,7 @@ pub use api::{
     TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
     TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
 };
+// jscpd:ignore-end
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // AG-UI protocol event surface yielded by the task-run stream. The full

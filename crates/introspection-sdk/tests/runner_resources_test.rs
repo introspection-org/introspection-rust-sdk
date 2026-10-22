@@ -1126,55 +1126,34 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     assert!(pages.next_page().await.unwrap().is_none());
 }
 
-// Operations filter through `contains=gen_ai.operation.name:<op>`; the items
-// list has no `operation_name` parameter.
-#[tokio::test]
-async fn conversation_items_list_filters_operations_through_contains() {
+/// Lists items with `contains` and checks each value reaches the query string
+/// exactly as `wire` spells it, with no `operation_name`.
+async fn assert_items_list_sends_contains(contains: Vec<ConversationContains>, wire: &[&str]) {
     let server = MockServer::start().await;
     let conversations = Conversations::new(build_http(&server));
 
-    Mock::given(method("GET"))
-        .and(path("/v1/conversations/conv-1/items"))
-        .and(query_param("contains", "gen_ai.operation.name:chat"))
-        .and(query_param(
-            "contains",
-            "gen_ai.operation.name:execute_tool",
-        ))
-        .and(query_param("contains", "gen_ai.input.messages.role:user"))
-        .and(query_param("contains", "gen_ai.tool.name:message_user"))
-        .and(query_param(
-            "contains",
-            "gen_ai.input.messages.parts.name:react",
-        ))
-        .and(query_param(
-            "contains",
-            "gen_ai.output.messages.parts.type:tool_call",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "object": "list",
-            "data": [conversation_item("span-1")],
-            "first_id": "span-1",
-            "last_id": "span-1",
-            "has_more": false,
-            "next": null
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+    let mut mock = Mock::given(method("GET")).and(path("/v1/conversations/conv-1/items"));
+    for value in wire {
+        mock = mock.and(query_param("contains", *value));
+    }
+    mock.respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "object": "list",
+        "data": [conversation_item("span-1")],
+        "first_id": "span-1",
+        "last_id": "span-1",
+        "has_more": false,
+        "next": null
+    })))
+    .expect(1)
+    .mount(&server)
+    .await;
 
     let items = conversations
         .items
         .list(
             "conv-1",
             &ConversationItemListParams {
-                contains: vec![
-                    ConversationContains::Operation("chat".into()),
-                    ConversationContains::Operation("execute_tool".into()),
-                    ConversationContains::InputUser,
-                    ConversationContains::Tool("message_user".into()),
-                    ConversationContains::InputToolResponse("react".into()),
-                    ConversationContains::AnyOutputToolCall,
-                ],
+                contains,
                 ..Default::default()
             },
         )
@@ -1189,6 +1168,31 @@ async fn conversation_items_list_filters_operations_through_contains() {
         !query.contains("operation_name"),
         "items.list sends no operation_name: {query}"
     );
+}
+
+// Operations filter through `contains=gen_ai.operation.name:<op>`; the items
+// list has no `operation_name` parameter.
+#[tokio::test]
+async fn conversation_items_list_filters_operations_through_contains() {
+    assert_items_list_sends_contains(
+        vec![
+            ConversationContains::Operation("chat".into()),
+            ConversationContains::Operation("execute_tool".into()),
+            ConversationContains::InputUser,
+            ConversationContains::Tool("message_user".into()),
+            ConversationContains::InputToolResponse("react".into()),
+            ConversationContains::AnyOutputToolCall,
+        ],
+        &[
+            "gen_ai.operation.name:chat",
+            "gen_ai.operation.name:execute_tool",
+            "gen_ai.input.messages.role:user",
+            "gen_ai.tool.name:message_user",
+            "gen_ai.input.messages.parts.name:react",
+            "gen_ai.output.messages.parts.type:tool_call",
+        ],
+    )
+    .await;
 }
 
 #[test]
@@ -1219,56 +1223,19 @@ fn conversation_contains_name_values_keep_a_trailing_wildcard() {
 
 #[tokio::test]
 async fn conversation_items_list_sends_prefix_contains_values_verbatim() {
-    let server = MockServer::start().await;
-    let conversations = Conversations::new(build_http(&server));
-
-    Mock::given(method("GET"))
-        .and(path("/v1/conversations/conv-1/items"))
-        .and(query_param(
-            "contains",
+    assert_items_list_sends_contains(
+        vec![
+            ConversationContains::OutputToolCall("mcp_browserbase_*".into()),
+            ConversationContains::Tool("mcp_*".into()),
+            ConversationContains::Operation("invoke_agent".into()),
+        ],
+        &[
             "gen_ai.output.messages.parts.name:mcp_browserbase_*",
-        ))
-        .and(query_param("contains", "gen_ai.tool.name:mcp_*"))
-        .and(query_param(
-            "contains",
+            "gen_ai.tool.name:mcp_*",
             "gen_ai.operation.name:invoke_agent",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "object": "list",
-            "data": [conversation_item("span-1")],
-            "first_id": "span-1",
-            "last_id": "span-1",
-            "has_more": false,
-            "next": null
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let items = conversations
-        .items
-        .list(
-            "conv-1",
-            &ConversationItemListParams {
-                contains: vec![
-                    ConversationContains::OutputToolCall("mcp_browserbase_*".into()),
-                    ConversationContains::Tool("mcp_*".into()),
-                    ConversationContains::Operation("invoke_agent".into()),
-                ],
-                ..Default::default()
-            },
-        )
-        .unwrap()
-        .collect_all(0)
-        .await
-        .unwrap();
-    assert_eq!(items.len(), 1);
-    let requests = server.received_requests().await.unwrap();
-    let query = requests[0].url.query().unwrap_or_default();
-    assert!(
-        !query.contains("operation_name"),
-        "contains alone sends no operation_name: {query}"
-    );
+        ],
+    )
+    .await;
 }
 
 #[tokio::test]
