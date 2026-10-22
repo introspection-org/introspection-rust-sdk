@@ -9,6 +9,8 @@
 //! `serde_json::Value`, a generic, a value read after the call), the part is
 //! [`Part::Untyped`] and the check warns instead of comparing it.
 
+use std::collections::BTreeMap;
+
 use quote::ToTokens;
 use syn::visit::Visit;
 use syn::{Expr, GenericArgument, PathArguments, Type};
@@ -550,9 +552,7 @@ impl Walker<'_, '_> {
     ) {
         let appended = self.appended_query(path);
         let file = &self.routes.index.files[self.scope.def.file].path;
-        for route in dedup(routes) {
-            let mut route_query: Vec<(String, bool)> =
-                query_keys(&route).into_iter().map(|k| (k, true)).collect();
+        for (route, mut route_query) in merge_routes(routes) {
             route_query.extend(appended.iter().map(|k| (k.clone(), false)));
             self.sites.push(CallSite {
                 method,
@@ -983,9 +983,27 @@ fn query_keys(route: &str) -> Vec<String> {
         .collect()
 }
 
-fn dedup(routes: &[String]) -> Vec<String> {
-    let mut out = routes.to_vec();
-    out.sort();
-    out.dedup();
-    out
+/// The routes one call site can build, one per path: alternatives that differ
+/// only in their `?query` (`Some(project)` adds `?project=`, `None` does not)
+/// are one request, whose parameters are required only when every
+/// alternative sends them.
+fn merge_routes(routes: &[String]) -> Vec<(String, Vec<(String, bool)>)> {
+    let mut by_path: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
+    for route in routes {
+        let path = route.split('?').next().unwrap_or_default().to_owned();
+        by_path.entry(path).or_default().push(query_keys(route));
+    }
+    by_path
+        .into_iter()
+        .map(|(path, alternatives)| {
+            let mut keys: Vec<&String> = alternatives.iter().flatten().collect();
+            keys.sort();
+            keys.dedup();
+            let query = keys
+                .into_iter()
+                .map(|k| (k.clone(), alternatives.iter().all(|a| a.contains(k))))
+                .collect();
+            (path, query)
+        })
+        .collect()
 }

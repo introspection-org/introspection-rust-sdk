@@ -212,6 +212,14 @@ impl Widgets {
         self.http.get_json("/v1/widgets/count", params).await
     }
 
+    pub async fn find(&self, id: &str, project: Option<&str>) -> ApiResult<Widget> {
+        let path = match project {
+            Some(project) => format!("/v1/widgets/{id}?project={project}"),
+            None => format!("/v1/widgets/{id}"),
+        };
+        self.http.get_json(&path, &()).await
+    }
+
     pub async fn watch(&self, id: &str) -> ApiResult<Response> {
         let path = format!("/v1/widgets/{id}/events");
         self.http.get_stream_raw(&path, Some("text/event-stream"), None).await
@@ -339,8 +347,9 @@ fn reports_every_kind_of_finding() {
             "missing line {line:?} in:\n{text}"
         );
     }
-    // `?project=` in the route is a query parameter the SDK sends.
-    assert!(!text.contains("query.project "), "{text}");
+    // `?project=` in the route is a query parameter the SDK sends, also when
+    // only one branch of a `match` adds it (`find`).
+    assert!(!text.contains("query.project"), "{text}");
     assert!(!text.contains("query.project_id"), "{text}");
     assert!(!text.contains("query.next"), "{text}");
     assert!(!report.passed());
