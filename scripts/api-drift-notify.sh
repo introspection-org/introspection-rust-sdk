@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Tell #main-build-alerts when the nightly API drift state changes: clean to
-# drift, or drift back to clean.
+# Tell #main-build-alerts when the API drift state changes: clean to drift, or
+# drift back to clean.
 #
 # scripts/api-drift-report.sh builds the report; this script owns the decision
 # and the post, which follow introspection-sre's change/gates/main-status.sh: a
 # {text} JSON curled to the webhook, and an empty webhook prints the message
 # instead. A run in the same state as the last post stays quiet, so the channel
-# hears each drift once rather than every night until someone fixes it.
+# hears each drift once rather than after every deploy until someone fixes it.
 #
 # The last posted state lives in STATE_DIR/last-posted, and the workflow
 # carries that directory between runs. It is written only after a real post, so

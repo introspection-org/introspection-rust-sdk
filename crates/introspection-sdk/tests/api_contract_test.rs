@@ -11,13 +11,14 @@
 //! 1. an operation whose `clients` include `sdk` is not called anywhere in it;
 //! 2. it calls a `/v1/...` route that is in neither document.
 //!
-//! Both compare method and path only. Field changes in the API show up in the
-//! nightly workflow's oasdiff changelog instead.
+//! Both compare method and path only.
 //!
 //! `#[ignore]`d, following this repository's convention for tests that reach
-//! the network. The nightly `API Contract` workflow runs it against staging;
-//! pull requests do not, because it goes red when the *API* changes, which is
-//! a fact about the world and not about the commit under review.
+//! the network. The `API Contract` workflow runs it against staging: on pull
+//! requests with `INTROSPECTION_API_CONTRACT_UNCALLED=report`, so only check 2
+//! fails and a new API operation doesn't block unrelated work; after each
+//! staging deploy of the API with both checks failing. A document staging
+//! answers with 404 (not deployed yet) skips the check.
 //!
 //! Run against staging:
 //!
@@ -25,12 +26,12 @@
 //!
 //! Run against local copies (a path or a URL each):
 //!
-//!     INTROSPECTION_CONTROLPLANE_SPEC=api-reference/controlplane.json \
-//!     INTROSPECTION_DATAPLANE_SPEC=api-reference/dataplane.json \
+//!     INTROSPECTION_CONTROLPLANE_SPEC=path/to/controlplane.json \
+//!     INTROSPECTION_DATAPLANE_SPEC=path/to/dataplane.json \
 //!     cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
 //!
 //! `INTROSPECTION_API_CONTRACT_REPORT=<file>` also writes the report there,
-//! which the workflow reads to build its alert.
+//! which the workflow reads for its job summary and alert.
 
 mod api_contract;
 
@@ -48,33 +49,42 @@ const CONTROLPLANE_ENV: &str = "INTROSPECTION_CONTROLPLANE_SPEC";
 const DATAPLANE_ENV: &str = "INTROSPECTION_DATAPLANE_SPEC";
 
 const REPORT_ENV: &str = "INTROSPECTION_API_CONTRACT_REPORT";
+/// `report` lists operations not called without failing on them.
+const UNCALLED_ENV: &str = "INTROSPECTION_API_CONTRACT_UNCALLED";
 
-fn load(plane: &'static str, env_var: &str, url: &str) -> Document {
+/// The document, or `Err` with why the check is skipped: a URL that answers
+/// 404.
+fn load(plane: &'static str, env_var: &str, url: &str) -> Result<Document, String> {
     let source = std::env::var(env_var).unwrap_or_else(|_| url.to_owned());
+    let fail =
+        |e: &dyn std::fmt::Display| format!("could not read the API reference {source}: {e}");
     let spec = if source.starts_with("https://") || source.starts_with("http://") {
-        reqwest::blocking::Client::builder()
+        let response = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("client builds")
             .get(&source)
             .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .unwrap_or_else(|e| panic!("could not read the API reference {source}: {e}"))
-            .json()
-            .unwrap_or_else(|e| panic!("could not read the API reference {source}: {e}"))
+            .unwrap_or_else(|e| panic!("{}", fail(&e)));
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(format!("{source} answered 404"));
+        }
+        response
+            .error_for_status()
+            .and_then(reqwest::blocking::Response::json)
+            .unwrap_or_else(|e| panic!("{}", fail(&e)))
     } else {
         // Cargo runs tests in the crate directory; read a relative path from
         // the repository root, where the documented commands run.
         let text = std::fs::read_to_string(repo_root().join(&source))
-            .unwrap_or_else(|e| panic!("could not read the API reference {source}: {e}"));
-        serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("could not read the API reference {source}: {e}"))
+            .unwrap_or_else(|e| panic!("{}", fail(&e)));
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}", fail(&e)))
     };
-    Document {
+    Ok(Document {
         plane,
         source,
         spec,
-    }
+    })
 }
 
 fn repo_root() -> std::path::PathBuf {
@@ -92,17 +102,23 @@ fn sdk_matches_the_api_reference() {
         load("controlplane", CONTROLPLANE_ENV, CONTROLPLANE_URL),
         load("dataplane", DATAPLANE_ENV, DATAPLANE_URL),
     ];
-    let report = check(&documents, &sdk_source());
-    let text = report.render();
+    let documents: Result<Vec<Document>, String> = documents.into_iter().collect();
+    let (text, passed, summary) = match documents {
+        Ok(documents) => {
+            let mut report = check(&documents, &sdk_source());
+            report.uncalled_fail = std::env::var(UNCALLED_ENV).as_deref() != Ok("report");
+            (report.render(), report.passed(), report.summary())
+        }
+        Err(why) => (format!("API contract check skipped: {why}\n"), true, why),
+    };
     println!("{text}");
     if let Ok(path) = std::env::var(REPORT_ENV) {
         std::fs::write(repo_root().join(&path), &text)
             .unwrap_or_else(|e| panic!("{REPORT_ENV}={path}: {e}"));
     }
     assert!(
-        report.passed(),
-        "the SDK disagrees with the API reference: {}",
-        report.summary()
+        passed,
+        "the SDK disagrees with the API reference: {summary}"
     );
 }
 
@@ -211,4 +227,11 @@ fn reports_uncalled_operations_and_unknown_routes() {
         ["DELETE /v1/gadgets at src/widgets.rs:31"]
     );
     assert!(!report.passed());
+
+    // On a pull request only the unknown route fails.
+    let mut listed = report;
+    listed.uncalled_fail = false;
+    assert!(!listed.passed());
+    listed.unknown_routes.clear();
+    assert!(listed.passed());
 }

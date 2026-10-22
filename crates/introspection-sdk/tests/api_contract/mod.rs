@@ -89,11 +89,13 @@ pub struct Report {
     pub not_called: Vec<String>,
     /// `GET /v1/members at src/resources/members.rs:38`.
     pub unknown_routes: Vec<String>,
+    /// Whether `not_called` fails the check; pull requests only list it.
+    pub uncalled_fail: bool,
 }
 
 impl Report {
     pub fn passed(&self) -> bool {
-        self.not_called.is_empty() && self.unknown_routes.is_empty()
+        (self.not_called.is_empty() || !self.uncalled_fail) && self.unknown_routes.is_empty()
     }
 
     /// One line, for the alert's summary.
@@ -115,11 +117,12 @@ impl Report {
             "call sites read: {} in crates/introspection-sdk/src",
             self.call_sites
         );
-        section(
-            &mut out,
-            "Operation not called (x-introspection clients include sdk; no call site in crates/introspection-sdk/src)",
-            &self.not_called,
-        );
+        let not_called = if self.uncalled_fail {
+            "Operation not called (x-introspection clients include sdk; no call site in crates/introspection-sdk/src)"
+        } else {
+            "Operation not called (listed only, does not fail here; x-introspection clients include sdk; no call site in crates/introspection-sdk/src)"
+        };
+        section(&mut out, not_called, &self.not_called);
         section(
             &mut out,
             "Route missing from both references (the SDK calls a /v1 route neither document has)",
@@ -165,5 +168,6 @@ pub fn check(documents: &[Document], index: &Index) -> Report {
         call_sites: sites.len(),
         not_called,
         unknown_routes,
+        uncalled_fail: true,
     }
 }

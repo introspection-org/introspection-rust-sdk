@@ -717,17 +717,20 @@ in that crate's `Cargo.toml` with a comment saying why.
 
 ### API contract
 
-The nightly [API Contract](.github/workflows/api-contract.yml) workflow (07:00 UTC, or run it by hand) checks the SDK against the staging Control Plane and Data Plane OpenAPI documents. The documents mark every operation the SDK must call with `x-introspection: {clients: [sdk, ...]}`, and those flags are the check's only classification: it keeps no list of its own. It reads the requests in `crates/introspection-sdk/src` and fails when an operation flagged for the SDK is never called, or when the SDK calls a `/v1` route neither document has. Both compare method and path only.
+The [API Contract](.github/workflows/api-contract.yml) workflow checks the SDK against the staging Control Plane and Data Plane OpenAPI documents. The documents mark every operation the SDK must call with `x-introspection: {clients: [sdk, ...]}`, and those flags are the check's only classification: it keeps no list of its own. It reads the requests in `crates/introspection-sdk/src` and compares method and path only:
 
-It also runs [oasdiff](https://github.com/oasdiff/oasdiff) between the saved copies in [`api-reference/`](api-reference) and staging. When the result changes from clean to drift or back, it posts to `#main-build-alerts` with the uncalled operations, the unknown routes and the oasdiff changes. Pull requests don't run it: it goes red when the API changes, not when the code under review does.
+- A route the SDK calls that neither document has fails, on pull requests too.
+- An operation flagged for the SDK that it never calls fails after each staging deploy of the API (introspection-cloud sends the `api-reference-deployed` `repository_dispatch`) and in a run by hand. On a pull request it is only listed in the job summary.
+
+A deploy-triggered run posts to `#main-build-alerts` when the result changes from clean to drift or back. A document staging answers with 404 skips the check.
 
 Run the check locally against staging, or against local copies:
 
 ```sh
 cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
 
-INTROSPECTION_CONTROLPLANE_SPEC=api-reference/controlplane.json \
-INTROSPECTION_DATAPLANE_SPEC=api-reference/dataplane.json \
+INTROSPECTION_CONTROLPLANE_SPEC=path/to/controlplane.json \
+INTROSPECTION_DATAPLANE_SPEC=path/to/dataplane.json \
   cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
 ```
 
