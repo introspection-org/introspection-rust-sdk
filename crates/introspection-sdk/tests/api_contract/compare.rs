@@ -87,6 +87,7 @@ impl Comparison {
             (Shape::Union(r), Shape::Union(s)) if r.tag.is_some() && r.tag == s.tag => {
                 self.tagged(r, s, path);
             }
+            (Shape::Union(r), Shape::Union(s)) => self.alternatives(r, s, path),
             (Shape::Union(r), sdk) => match best_variant(r, sdk) {
                 Some(variant) => self.compare(variant, sdk, path),
                 None => self.mismatch(reference, sdk, path),
@@ -150,6 +151,32 @@ impl Comparison {
             .filter(|n| !reference.fields.contains_key(*n))
         {
             self.diff(Kind::Extra, &format!("{path}.{name}"), None);
+        }
+    }
+
+    /// Unions without a shared tag (`anyOf` against `#[serde(untagged)]`):
+    /// each SDK alternative is compared with the reference alternative it is
+    /// meant to be, and a reference alternative of a basic type the SDK has
+    /// none of is a mismatch.
+    fn alternatives(&mut self, reference: &Union, sdk: &Union, path: &str) {
+        for theirs in sdk.variants.values() {
+            match best_variant(reference, theirs) {
+                Some(ours) => self.compare(ours, theirs, path),
+                None => self.mismatch(&Shape::Union(reference.clone()), theirs, path),
+            }
+        }
+        for ours in reference.variants.values() {
+            let covered = sdk
+                .variants
+                .values()
+                .any(|v| v.kind() == ours.kind() || matches!(v, Shape::Any | Shape::Untyped(_)));
+            if !covered && !matches!(ours, Shape::Any) {
+                let detail = format!(
+                    "{} in the reference, no such alternative in the SDK",
+                    ours.kind()
+                );
+                self.diff(Kind::Type, path, Some(detail));
+            }
         }
     }
 

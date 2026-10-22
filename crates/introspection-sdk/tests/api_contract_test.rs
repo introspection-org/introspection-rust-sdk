@@ -41,7 +41,9 @@ mod api_contract;
 
 use std::path::Path;
 
+use api_contract::compare::Comparison;
 use api_contract::index::Index;
+use api_contract::shape::{Shape, Union};
 use api_contract::spec::Document;
 use api_contract::{calls, check};
 
@@ -353,4 +355,45 @@ fn reports_every_kind_of_finding() {
     assert!(!text.contains("query.project_id"), "{text}");
     assert!(!text.contains("query.next"), "{text}");
     assert!(!report.passed());
+}
+
+/// `anyOf` against an `#[serde(untagged)]` enum: alternatives are paired.
+#[test]
+fn compares_untagged_unions_by_alternative() {
+    let union = |shapes: Vec<Shape>| {
+        Shape::Union(Union {
+            tag: None,
+            variants: shapes
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| (i.to_string(), s))
+                .collect(),
+        })
+    };
+    let mut same = Comparison::default();
+    same.compare(
+        &union(vec![Shape::String, Shape::Number]),
+        &union(vec![Shape::Number, Shape::String]),
+        "response",
+    );
+    assert!(same.diffs.is_empty(), "{:?}", same.diffs);
+
+    let mut narrower = Comparison::default();
+    narrower.compare(
+        &union(vec![Shape::String, Shape::Number]),
+        &union(vec![Shape::String, Shape::Boolean]),
+        "response",
+    );
+    let details: Vec<String> = narrower
+        .diffs
+        .iter()
+        .filter_map(|d| d.detail.clone())
+        .collect();
+    assert_eq!(
+        details,
+        [
+            "union in the reference, boolean in the SDK",
+            "number in the reference, no such alternative in the SDK",
+        ]
+    );
 }
