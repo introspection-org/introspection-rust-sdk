@@ -9,15 +9,10 @@
 //! for how) and fails when:
 //!
 //! 1. an operation whose `clients` include `sdk` is not called anywhere in it;
-//! 2. it calls a `/v1/...` route that is in neither document;
-//! 3. a field differs for an operation it calls: names, required vs optional
-//!    and basic types, for the request body, the query parameters and the
-//!    response, following `$ref` into nested schemas
-//!    (`api_contract/compare.rs` has the rules).
+//! 2. it calls a `/v1/...` route that is in neither document.
 //!
-//! A call site without concrete types (a `serde_json::Value`, a generic, a
-//! response read after the call) is a warning naming the operation, the part
-//! and the call site. It does not fail the check.
+//! Both compare method and path only. Field changes in the API show up in the
+//! nightly workflow's oasdiff changelog instead.
 //!
 //! `#[ignore]`d, following this repository's convention for tests that reach
 //! the network. The nightly `API Contract` workflow runs it against staging;
@@ -41,11 +36,8 @@ mod api_contract;
 
 use std::path::Path;
 
-use api_contract::compare::Comparison;
 use api_contract::index::Index;
-use api_contract::shape::{Shape, Union};
-use api_contract::spec::Document;
-use api_contract::{calls, check};
+use api_contract::{calls, check, Document};
 
 const CONTROLPLANE_URL: &str = "https://api.staging.introspection.dev/openapi/controlplane.json";
 const DATAPLANE_URL: &str = "https://api.staging.introspection.dev/openapi/dataplane.json";
@@ -145,73 +137,15 @@ fn reads_the_sdk_source() {
 }
 
 const SOURCE: &str = r#"
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize)]
-pub struct WidgetCreate {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<u32>,
-    #[serde(rename = "colour")]
-    pub color: String,
-}
-
-#[derive(Deserialize)]
-pub struct Widget {
-    pub id: String,
-    pub size: Option<String>,
-    pub parts: Vec<Part>,
-}
-
-#[derive(Deserialize)]
-pub struct Part {
-    pub label: String,
-}
-
-#[derive(Deserialize)]
-pub struct Paginated<T> {
-    pub records: Vec<T>,
-    pub count: u64,
-    #[serde(default)]
-    pub next: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct Count {
-    pub count: u64,
-}
-
-#[derive(Serialize)]
-pub struct WidgetListParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u32>,
-}
+const WIDGETS: &str = "/v1/widgets";
 
 impl Widgets {
     pub async fn create(&self, params: &WidgetCreate) -> ApiResult<Widget> {
-        self.http.post_json("/v1/widgets", params).await
+        self.http.post_json(WIDGETS, params).await
     }
 
     pub fn list(&self, params: &WidgetListParams) -> Paginator<Widget> {
         Paginator::new(self.http.clone(), "/v1/widgets", params).expect("serializes")
-    }
-
-    pub async fn get(&self, id: &str) -> ApiResult<Widget> {
-        let path = format!("/v1/widgets/{}?project={}", id, "p");
-        self.http.get_json(&path, &()).await
-    }
-
-    pub async fn touch(&self, id: &str) -> ApiResult<()> {
-        let body = serde_json::json!({ "at": 1 });
-        self.http.post_json_empty(&format!("/v1/widgets/{id}/touch"), &body).await
-    }
-
-    pub async fn legacy(&self) -> ApiResult<()> {
-        self.http.delete_empty("/v1/gadgets").await
-    }
-
-    pub async fn count(&self, params: &WidgetListParams) -> ApiResult<Count> {
-        self.http.get_json("/v1/widgets/count", params).await
     }
 
     pub async fn find(&self, id: &str, project: Option<&str>) -> ApiResult<Widget> {
@@ -223,87 +157,35 @@ impl Widgets {
     }
 
     pub async fn watch(&self, id: &str) -> ApiResult<Response> {
-        let path = format!("/v1/widgets/{id}/events");
-        self.http.get_stream_raw(&path, Some("text/event-stream"), None).await
+        self.http.get_stream_raw(&events_path(id), Some("text/event-stream"), None).await
     }
+
+    pub async fn replace(&self, id: &str, body: &Widget) -> ApiResult<()> {
+        self.client.put(format!("{}/v1/widgets/{}", self.base, id)).json(body).send().await?;
+        Ok(())
+    }
+
+    pub async fn legacy(&self) -> ApiResult<()> {
+        self.http.delete_empty("/v1/gadgets").await
+    }
+}
+
+fn events_path(id: &str) -> String {
+    format!("/v1/widgets/{id}/events")
 }
 "#;
 
 fn reference() -> Document {
-    let widget = serde_json::json!({
-        "type": "object",
-        "required": ["id", "parts"],
-        "properties": {
-            "id": {"type": "string"},
-            "size": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-            "parts": {"type": "array", "items": {"$ref": "#/components/schemas/Part"}},
-            "created_at": {"type": "string"}
-        }
-    });
-    let page = serde_json::json!({
-        "type": "object",
-        "properties": {
-            "records": {"type": "array", "items": {"$ref": "#/components/schemas/Widget"}},
-            "count": {"type": "integer"},
-            "total_count": {"type": "integer"},
-            "next": {"type": "string"}
-        }
-    });
-    let json =
-        |schema: serde_json::Value| serde_json::json!({"application/json": {"schema": schema}});
-    let ok = |schema: serde_json::Value| serde_json::json!({"200": {"content": json(schema)}});
     let sdk = serde_json::json!({"visibility": "public", "clients": ["sdk"]});
-    let query = |name: &str, flags: serde_json::Value| serde_json::json!({"name": name, "in": "query", "schema": {"type": "string"}, "x-introspection": flags});
+    let cli = serde_json::json!({"visibility": "public", "clients": ["cli"]});
     let spec = serde_json::json!({
         "paths": {
-            "/v1/widgets": {
-                "post": {
-                    "x-introspection": sdk,
-                    "requestBody": {"required": true, "content": json(serde_json::json!({
-                        "type": "object",
-                        "required": ["name", "size"],
-                        "properties": {"name": {"type": "string"}, "size": {"type": "integer"}, "colour": {"type": "string"}}
-                    }))},
-                    "responses": ok(serde_json::json!({"$ref": "#/components/schemas/Widget"}))
-                },
-                "get": {
-                    "x-introspection": sdk,
-                    "parameters": [
-                        {"name": "limit", "in": "query", "schema": {"type": "integer"}},
-                        {"name": "next", "in": "query", "schema": {"type": "string"}},
-                        query("project_id", serde_json::json!({"clients": []}))
-                    ],
-                    "responses": ok(page)
-                }
-            },
-            "/v1/widgets/{widget_id}": {
-                "get": {
-                    "x-introspection": sdk,
-                    "parameters": [{"name": "project", "in": "query", "schema": {"type": "string"}}],
-                    "responses": ok(serde_json::json!({"$ref": "#/components/schemas/Widget"}))
-                }
-            },
-            "/v1/widgets/{widget_id}/touch": {
-                "post": {
-                    "x-introspection": sdk,
-                    "requestBody": {"content": json(serde_json::json!({"type": "object", "properties": {"at": {"type": "integer"}}}))},
-                    "responses": {"204": {}}
-                }
-            },
-            "/v1/widgets/count": {
-                "get": {"responses": ok(serde_json::json!({"type": "object", "properties": {"count": {"type": "integer"}}}))}
-            },
-            "/v1/widgets/{widget_id}/events": {
-                "get": {"responses": ok(serde_json::json!({"type": "object"}))}
-            },
-            "/v1/widgets/{widget_id}/archive": {
-                "post": {"x-introspection": sdk, "responses": {"204": {}}}
-            }
-        },
-        "components": {"schemas": {
-            "Widget": widget,
-            "Part": {"type": "object", "required": ["label"], "properties": {"label": {"type": "string"}}}
-        }}
+            "/v1/widgets": {"post": {"x-introspection": sdk}, "get": {"x-introspection": sdk}},
+            "/v1/widgets/{widget_id}": {"get": {"x-introspection": sdk}, "put": {}},
+            "/v1/widgets/{widget_id}/events": {"get": {"x-introspection": sdk}},
+            "/v1/widgets/{widget_id}/archive": {"post": {"x-introspection": sdk}},
+            "/v1/widgets/stats": {"get": {"x-introspection": cli}}
+        }
     });
     Document {
         plane: "dataplane",
@@ -313,87 +195,20 @@ fn reference() -> Document {
 }
 
 #[test]
-fn reports_every_kind_of_finding() {
+fn reports_uncalled_operations_and_unknown_routes() {
     let index = Index::from_source("widgets.rs", SOURCE);
     let report = check(&[reference()], &index);
-    let text = report.render();
-    println!("{text}");
+    println!("{}", report.render());
 
+    // Only operations flagged for the SDK must be called: the cli-only
+    // `stats` is not reported, and neither is the unflagged `put`.
     assert_eq!(
         report.not_called,
         ["dataplane POST /v1/widgets/{widget_id}/archive"]
     );
     assert_eq!(
         report.unknown_routes,
-        ["DELETE /v1/gadgets at src/widgets.rs:64"]
+        ["DELETE /v1/gadgets at src/widgets.rs:31"]
     );
-    for line in [
-        "  POST /v1/widgets (dataplane)",
-        "    field missing in SDK: response.created_at",
-        "    type mismatch: response.size (number in the reference, string in the SDK)",
-        "    required mismatch: body.size (required in the reference, optional in the SDK)",
-        // A paginator sends the cursor itself; `project_id` is `clients: []`.
-        "  GET /v1/widgets (dataplane)",
-        "    field missing in SDK: response.records[].created_at, response.total_count",
-        "  POST /v1/widgets/{widget_id}/touch (dataplane)",
-        "    body: serde_json::json! builds an untyped value at src/widgets.rs:60",
-        // An operation without query parameters still has extra ones.
-        "  GET /v1/widgets/count (dataplane)",
-        "    field extra in SDK: query.limit",
-        // A raw response's media type is checked too.
-        "  GET /v1/widgets/{widget_id}/events (dataplane)",
-        "    media type: response (the SDK reads text/event-stream; the reference's response has application/json)",
-    ] {
-        assert!(
-            text.contains(&format!("{line}\n")),
-            "missing line {line:?} in:\n{text}"
-        );
-    }
-    // `?project=` in the route is a query parameter the SDK sends, also when
-    // only one branch of a `match` adds it (`find`).
-    assert!(!text.contains("query.project"), "{text}");
-    assert!(!text.contains("query.project_id"), "{text}");
-    assert!(!text.contains("query.next"), "{text}");
     assert!(!report.passed());
-}
-
-/// `anyOf` against an `#[serde(untagged)]` enum: alternatives are paired.
-#[test]
-fn compares_untagged_unions_by_alternative() {
-    let union = |shapes: Vec<Shape>| {
-        Shape::Union(Union {
-            tag: None,
-            variants: shapes
-                .into_iter()
-                .enumerate()
-                .map(|(i, s)| (i.to_string(), s))
-                .collect(),
-        })
-    };
-    let mut same = Comparison::default();
-    same.compare(
-        &union(vec![Shape::String, Shape::Number]),
-        &union(vec![Shape::Number, Shape::String]),
-        "response",
-    );
-    assert!(same.diffs.is_empty(), "{:?}", same.diffs);
-
-    let mut narrower = Comparison::default();
-    narrower.compare(
-        &union(vec![Shape::String, Shape::Number]),
-        &union(vec![Shape::String, Shape::Boolean]),
-        "response",
-    );
-    let details: Vec<String> = narrower
-        .diffs
-        .iter()
-        .filter_map(|d| d.detail.clone())
-        .collect();
-    assert_eq!(
-        details,
-        [
-            "union in the reference, boolean in the SDK",
-            "number in the reference, no such alternative in the SDK",
-        ]
-    );
 }

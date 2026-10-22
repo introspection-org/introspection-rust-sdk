@@ -22,13 +22,9 @@ const MAX_DEPTH: u8 = 16;
 pub struct FnScope<'a> {
     pub id: usize,
     pub def: &'a FnDef,
-    pub params: HashMap<String, syn::Type>,
-    pub lets: HashMap<String, Vec<Binding>>,
-}
-
-pub struct Binding {
-    pub ty: Option<syn::Type>,
-    pub init: Option<Expr>,
+    pub params: HashSet<String>,
+    /// Each `let`'s initializer, in order.
+    pub lets: HashMap<String, Vec<Expr>>,
 }
 
 impl<'a> FnScope<'a> {
@@ -39,7 +35,7 @@ impl<'a> FnScope<'a> {
             .inputs
             .iter()
             .filter_map(|input| match input {
-                FnArg::Typed(t) => Some((pat_name(&t.pat)?, (*t.ty).clone())),
+                FnArg::Typed(t) => pat_name(&t.pat),
                 FnArg::Receiver(_) => None,
             })
             .collect();
@@ -60,20 +56,16 @@ impl<'a> FnScope<'a> {
 
 #[derive(Default)]
 struct LetCollector {
-    lets: HashMap<String, Vec<Binding>>,
+    lets: HashMap<String, Vec<Expr>>,
 }
 
 impl<'ast> Visit<'ast> for LetCollector {
     fn visit_local(&mut self, local: &'ast syn::Local) {
-        let (pat, ty) = match &local.pat {
-            Pat::Type(t) => (&*t.pat, Some((*t.ty).clone())),
-            other => (other, None),
-        };
-        if let Some(name) = pat_name(pat) {
-            self.lets.entry(name).or_default().push(Binding {
-                ty,
-                init: local.init.as_ref().map(|i| (*i.expr).clone()),
-            });
+        if let (Some(name), Some(init)) = (pat_name(&local.pat), &local.init) {
+            self.lets
+                .entry(name)
+                .or_default()
+                .push((*init.expr).clone());
         }
         syn::visit::visit_local(self, local);
     }
@@ -88,7 +80,7 @@ impl<'ast> Visit<'ast> for LetCollector {
 }
 
 /// Whether `mac` is `name!`, however it is qualified.
-pub fn is_macro(mac: &syn::Macro, name: &str) -> bool {
+fn is_macro(mac: &syn::Macro, name: &str) -> bool {
     mac.path.segments.last().is_some_and(|s| s.ident == name)
 }
 
@@ -104,7 +96,7 @@ pub fn macro_stmts(mac: &syn::Macro) -> Option<Vec<syn::Stmt>> {
     mac.parse_body_with(syn::Block::parse_within).ok()
 }
 
-pub fn pat_name(pat: &Pat) -> Option<String> {
+fn pat_name(pat: &Pat) -> Option<String> {
     match pat {
         Pat::Ident(i) => Some(i.ident.to_string()),
         Pat::Type(t) => pat_name(&t.pat),
@@ -179,11 +171,10 @@ impl<'a> Routes<'a> {
             if let Some(bindings) = scope.lets.get(&name) {
                 return bindings
                     .iter()
-                    .filter_map(|b| b.init.as_ref())
                     .flat_map(|init| self.eval(scope, init, depth))
                     .collect();
             }
-            if scope.params.contains_key(&name) {
+            if scope.params.contains(&name) {
                 return Vec::new();
             }
         }
@@ -506,7 +497,7 @@ impl<'r, 'a> FieldRoutes<'r, 'a> {
                 self.found.entry(key).or_default().extend(routes);
             } else if let Expr::Path(p) = &field.expr {
                 let param = p.path.get_ident().map(ToString::to_string);
-                if let Some(param) = param.filter(|p| scope.params.contains_key(p)) {
+                if let Some(param) = param.filter(|p| scope.params.contains(p)) {
                     self.stored.insert((scope.id, param), key);
                 }
             }

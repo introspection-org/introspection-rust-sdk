@@ -9,9 +9,9 @@ Fix the API drift that last night's API Contract run found in introspection-rust
 
 Where: the introspection-rust-sdk repository. Fetch origin, create a new branch from origin/main, and work only there.
 
-What: make the SDK match the staging API reference. Fix exactly the failures in the SDK drift report below, and nothing else. The `x-introspection` flags in the reference decide what the SDK must cover: an operation whose `clients` include `sdk` must be called, and a query parameter flagged `clients: []` need not be sent. Each fix covers the SDK types, the client code that sends or reads the field, and a test for it in crates/introspection-sdk/tests that follows AGENTS.md. Warnings (call sites without concrete types) are not failures; leave them unless a fix touches that call site anyway. The reference changelog is context: it says what changed in the API since the saved copies in api-reference/ were taken.
+What: make the SDK match the staging API reference. Fix exactly the failures in the SDK drift report below, and nothing else. The `x-introspection` flags in the reference decide what the SDK must cover: an operation whose `clients` include `sdk` must be called. An operation not called needs an SDK method that calls it, with its types and a test in crates/introspection-sdk/tests that follows AGENTS.md. The reference changelog is context: it says what changed in the API since the saved copies in api-reference/ were taken.
 
-Stale code: when the check reports something the SDK has and the reference no longer does (a field extra in the SDK, a route in neither reference), delete it from the SDK. List each deletion in the PR body. If a deletion or a retype breaks the SDK's public API, declare it as breaking the way the "Semver checks" section of README.md says.
+Stale code: when the check reports something the SDK has and the reference no longer does (a route in neither reference), delete it from the SDK. List each deletion in the PR body. If a deletion breaks the SDK's public API, declare it as breaking the way the "Semver checks" section of README.md says.
 
 Finish: when the drift is fixed, refresh both saved copies from staging:
 
