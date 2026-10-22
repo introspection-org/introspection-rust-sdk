@@ -3,36 +3,16 @@
 //! The Control Plane is a separate mock with nothing mounted, so a merge that
 //! went to it instead would 404.
 
-use introspection_sdk::{
-    AdvancedOptions, ClientConfig, IntrospectionAPIError, IntrospectionClient,
-    RepositoryMergeCreate,
-};
+mod common;
+
+use common::{client, repository_id, REPOSITORY_ID};
+use introspection_sdk::{IntrospectionAPIError, RepositoryMergeCreate};
 use serde_json::json;
-use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const REPOSITORY_ID: &str = "22222222-2222-7222-8222-222222222222";
-
-fn repository_id() -> Uuid {
-    Uuid::parse_str(REPOSITORY_ID).unwrap()
-}
-
 fn merges_path() -> String {
     format!("/v1/repositories/{REPOSITORY_ID}/merges")
-}
-
-async fn client(dp: &MockServer) -> (IntrospectionClient, MockServer) {
-    let cp = MockServer::start().await;
-    let client = IntrospectionClient::new(ClientConfig::with_token("intro_test").advanced(
-        AdvancedOptions {
-            base_api_url: Some(cp.uri()),
-            dp_url: Some(dp.uri()),
-            ..Default::default()
-        },
-    ))
-    .unwrap();
-    (client, cp)
 }
 
 fn feature_into_main() -> RepositoryMergeCreate {

@@ -697,7 +697,7 @@ It counts only `exact` clones. The `renamed` kind (with `ignoreIdentifiers`), wh
 | 150 | 37 | 3.19% |
 | 250 | 9 | 1.02% |
 
-At `minTokens` 70, exact only, the measurement is 31 clones and 1.39% duplicated lines.
+At `minTokens` 70, exact only, the measurement is 29 clones and 1.35% duplicated lines.
 
 The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
 
