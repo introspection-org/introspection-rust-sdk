@@ -157,24 +157,23 @@ fn introspection_attributes_sit_beside_gen_ai_not_inside_it() {
 }
 
 #[test]
-fn the_contains_summary_is_counts_and_names_never_messages() {
+fn the_contains_summary_is_filter_values_never_messages() {
+    let values = [
+        "gen_ai.input.messages.role:user",
+        "gen_ai.input.messages.parts.type:tool_call_response",
+        "gen_ai.input.messages.parts.name:react",
+        "gen_ai.output.messages.parts.type:tool_call",
+        "gen_ai.output.messages.parts.name:message_user",
+    ];
     let span = parse(json!({
         "trace_id": "t", "span_id": "s", "start_time": "2026-01-01T00:00:00Z",
         "name": "chat", "kind": "CLIENT",
-        "attributes": {"introspection": {"contains": {
-            "version": 1, "input_user_parts": 1, "output_text_parts": 0,
-            "output_tool_names": ["message_user"], "input_tool_response_names": ["react"]
-        }}}
+        "attributes": {"introspection": {"contains": {"version": 1, "values": values}}}
     }));
     let contains = span.attributes.introspection.unwrap().contains.unwrap();
     assert_eq!(contains.version, Some(1));
-    assert_eq!(contains.input_user_parts, Some(1));
-    assert_eq!(contains.output_text_parts, Some(0));
-    assert_eq!(contains.output_tool_names, vec!["message_user".to_string()]);
-    assert_eq!(
-        contains.input_tool_response_names,
-        vec!["react".to_string()]
-    );
+    assert_eq!(contains.values, values.map(String::from).to_vec());
+    assert!(contains.extra.is_empty());
 
     let bare = parse(bare_span());
     assert!(bare.attributes.introspection.is_none());

@@ -277,25 +277,20 @@ pub struct IntrospectionConversation {
 /// output contain, stamped at ingest so a read can select rows without
 /// opening them.
 ///
-/// Counts and tool names only, never content. Absent on a span recorded
-/// before the summary existed and on an `execute_tool` span.
+/// Filter values only, never content. Absent on an `execute_tool` span.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct IntrospectionContains {
+    /// Summary schema version. `0` or absent means the span was never
+    /// summarized (it was recorded before the summary existed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<i64>,
-    /// User-authored parts in the span's new input.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_user_parts: Option<i64>,
-    /// Text parts in the span's output.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_text_parts: Option<i64>,
-    /// `name`s of the `tool_call` parts in the output, sorted and deduplicated.
+    /// The `contains=` values this span answers, spelled exactly as a client
+    /// passes them to the conversation items list, as `<path>:<value>` (e.g.
+    /// `gen_ai.input.messages.role:user`,
+    /// `gen_ai.output.messages.parts.name:message_user`). A name list the
+    /// processor cut at its bound carries `<path>:*`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub output_tool_names: Vec<String>,
-    /// `name`s of the `tool_call_response` parts in the new input, sorted and
-    /// deduplicated.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub input_tool_response_names: Vec<String>,
+    pub values: Vec<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
