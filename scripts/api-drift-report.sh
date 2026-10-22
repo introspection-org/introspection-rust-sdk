@@ -17,7 +17,7 @@
 #
 #   state        red | green
 #   body.txt     the Slack message below its headline: summary, run link, and
-#                the agent prompt carrying both reports trimmed to fit
+#                both reports trimmed to fit
 #   summary.md   both reports in full, for the job summary
 #
 # Exits 0 when the report was built (red or green) and 2 when it could not be,
@@ -123,20 +123,8 @@ echo "${state}" >"${out}/state"
 summary_line="SDK drift: $(head -n 1 "${out}/sdk-drift.txt")"
 plane_lines="$(grep -h -m1 '^[a-z]*plane:' "${out}/controlplane.txt" "${out}/dataplane.txt" | sed 's/^/Reference /')"
 
-# The prompt, with the placeholders filled and its leading comment dropped.
-prompt="$(
-  # The report keeps its first line; the rest is the findings.
-  drift="$(trim "${drift_budget}" <"${out}/sdk-drift.txt")"
-  planes="$(for plane in controlplane dataplane; do trim "${plane_budget}" <"${out}/${plane}.txt"; done)"
-  awk 'BEGIN { skip = 0 } /^<!--/ { skip = 1 } !skip { print } /-->/ { skip = 0 }' \
-    "${root}/.github/api-drift-prompt.md" |
-    sed -e '/./,$!d' |
-    RUN_URL="${run_url}" DRIFT="${drift}" PLANES="${planes}" awk '
-      { gsub(/\{\{RUN_URL\}\}/, ENVIRON["RUN_URL"]) }
-      /^\{\{SDK_DRIFT\}\}$/ { print ENVIRON["DRIFT"]; next }
-      /^\{\{CHANGELOG\}\}$/ { print ENVIRON["PLANES"]; next }
-      { print }'
-)"
+drift="$(trim "${drift_budget}" <"${out}/sdk-drift.txt")"
+planes="$(for plane in controlplane dataplane; do trim "${plane_budget}" <"${out}/${plane}.txt"; done)"
 
 # Slack reads & < > as control characters, so they travel as entities.
 slack_escape() {
@@ -144,9 +132,9 @@ slack_escape() {
 }
 
 if [ "${state}" = red ]; then
-  # shellcheck disable=SC2016 # the backticks are a Slack code block
-  printf '%s\n%s\n%s\n\nAgent prompt, ready to paste:\n```\n%s\n```\n' \
-    "${summary_line}" "${plane_lines}" "${run_url}" "${prompt}" | slack_escape >"${out}/body.txt"
+  # shellcheck disable=SC2016 # the backticks are Slack code blocks
+  printf '%s\n%s\n%s\n\nSDK drift:\n```\n%s\n```\nReference changelog (oasdiff, api-reference/ saved copy vs staging):\n```\n%s\n```\n' \
+    "${summary_line}" "${plane_lines}" "${run_url}" "${drift}" "${planes}" | slack_escape >"${out}/body.txt"
 else
   printf '%s\n' "${run_url}" >"${out}/body.txt"
 fi

@@ -719,7 +719,7 @@ in that crate's `Cargo.toml` with a comment saying why.
 
 The nightly [API Contract](.github/workflows/api-contract.yml) workflow (07:00 UTC, or run it by hand) checks the SDK against the staging Control Plane and Data Plane OpenAPI documents. The documents mark every operation the SDK must call with `x-introspection: {clients: [sdk, ...]}`, and those flags are the check's only classification: it keeps no list of its own. It reads the requests in `crates/introspection-sdk/src` and fails when an operation flagged for the SDK is never called, or when the SDK calls a `/v1` route neither document has. Both compare method and path only.
 
-It also runs [oasdiff](https://github.com/oasdiff/oasdiff) between the saved copies in [`api-reference/`](api-reference) and staging. When the result changes from clean to drift or back, it posts to `#main-build-alerts` with an agent prompt for the fix ([`.github/api-drift-prompt.md`](.github/api-drift-prompt.md)). Pull requests don't run it: it goes red when the API changes, not when the code under review does.
+It also runs [oasdiff](https://github.com/oasdiff/oasdiff) between the saved copies in [`api-reference/`](api-reference) and staging. When the result changes from clean to drift or back, it posts to `#main-build-alerts` with the uncalled operations, the unknown routes and the oasdiff changes. Pull requests don't run it: it goes red when the API changes, not when the code under review does.
 
 Run the check locally against staging, or against local copies:
 
