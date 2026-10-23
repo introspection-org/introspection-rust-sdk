@@ -240,11 +240,25 @@ pub struct IntrospectionRecipe {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-/// `introspection.conversation.*`.
-///
-/// On an item these describe the turn's place in the conversation.
+/// `introspection.history.new_messages`: the slice of the full input history
+/// this call added, `start` inclusive and `end` exclusive.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
-pub struct IntrospectionConversation {
+pub struct IntrospectionNewMessages {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<i64>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// `introspection.history.*`: where the conversation linker placed this model
+/// call, inferred from hashes of its input history.
+///
+/// Absent on a span the linker never placed (tool, proxy and API calls).
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionHistory {
+    /// 1-based.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -252,23 +266,9 @@ pub struct IntrospectionConversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation_method: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_hash_hit: Option<bool>,
+    pub hash_hit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub new_messages_start: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub new_messages_end: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_message_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_use_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failed_tool_use_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub has_errors: Option<bool>,
+    pub new_messages: Option<IntrospectionNewMessages>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
@@ -299,8 +299,8 @@ pub struct IntrospectionContains {
 ///
 /// Everything here is ours. `cost_usd` sits here rather than under
 /// `gen_ai.usage` because cost is not in the GenAI conventions at all — on
-/// spans or anywhere else — and beside `environment` rather than inside
-/// `conversation` because it is the cost of *this object*: the operation's on
+/// spans or anywhere else — and beside `environment` because it is the cost of
+/// *this object*: the operation's on
 /// an item, the conversation's on a summary, scoped by which read returned the
 /// span exactly as `gen_ai.usage.*` is.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -325,8 +325,12 @@ pub struct IntrospectionAttributes {
     pub environment: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// `introspection.turn`: the runtime's application-level turn, numbered
+    /// from 1 per conversation. Absent where no runtime stamped one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conversation: Option<IntrospectionConversation>,
+    pub turn: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<IntrospectionHistory>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contains: Option<IntrospectionContains>,
     #[serde(flatten)]

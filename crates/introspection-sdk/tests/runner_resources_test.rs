@@ -27,6 +27,10 @@ use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const RUNTIME_ID: &str = "0190f1a2-0000-7000-8000-000000000001";
+const GROUP_ID: &str = "0190f1a2-0000-7000-8000-000000000002";
+const EXPERIMENT_ID: &str = "0190f1a2-0000-7000-8000-000000000003";
+
 fn build_http(server: &MockServer) -> Arc<HttpClient> {
     let cfg = HttpConfig {
         api_url: server.uri(),
@@ -962,7 +966,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
                 "created_at": "2026-08-04T22:14:34.462000Z",
                 "updated_at": "2026-08-04T22:14:35Z",
                 "metadata": {"flow": "checkout", "tenant": "acme"},
-                "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                "usage": {"total_input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
                 "cost": {"usd": 0.01},
                 "metrics": {"duration_ms": 538.0, "trace_count": 1, "span_count": 2, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
             }],
@@ -980,7 +984,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
                 "id": "c2",
                 "created_at": "2026-08-04T22:15:00Z",
                 "updated_at": "2026-08-04T22:15:01Z",
-                "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+                "usage": {"total_input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
                 "cost": {"usd": 0.02},
                 "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
             }],
@@ -1030,15 +1034,72 @@ async fn conversations_get_returns_the_complete_agent_index() {
             "created_at": "2026-08-04T22:15:00Z",
             "updated_at": "2026-08-04T22:15:01Z",
             "agents": [{"id": "root-run", "name": "agent", "depth": 0}],
-            "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+            "usage": {"total_input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
             "cost": {"usd": 0.02},
-            "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
+            "metrics": {"duration_ms": 1000.0, "trace_count": 1, "max_turn": 4, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false},
+            "runtime": {"id": RUNTIME_ID, "group_id": GROUP_ID},
+            "experiment": {"id": EXPERIMENT_ID},
+            "recipe": {"git_commit_sha": "deadbeef"},
+            "owner": {"key": "user:alice"}
         })))
         .mount(&server)
         .await;
 
     let conversation = conversations.get("conv-1").await.unwrap();
-    assert_eq!(conversation.agents.unwrap()[0].id, "root-run");
+    assert_eq!(conversation.agents.as_ref().unwrap()[0].id, "root-run");
+    assert_eq!(conversation.usage.total_input_tokens, 3);
+    assert_eq!(conversation.metrics.max_turn, Some(4));
+    let runtime = conversation.runtime.as_ref().unwrap();
+    assert_eq!(runtime.id, Some(RUNTIME_ID.parse().unwrap()));
+    assert_eq!(runtime.group_id, Some(GROUP_ID.parse().unwrap()));
+    assert_eq!(
+        conversation.experiment.as_ref().unwrap().id,
+        Some(EXPERIMENT_ID.parse().unwrap())
+    );
+    assert_eq!(
+        conversation
+            .recipe
+            .as_ref()
+            .unwrap()
+            .git_commit_sha
+            .as_deref(),
+        Some("deadbeef")
+    );
+    assert_eq!(
+        conversation.owner.as_ref().unwrap().key.as_deref(),
+        Some("user:alice")
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_without_identity_omits_the_groups() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "conversation",
+            "id": "conv-2",
+            "created_at": "2026-08-04T22:15:00Z",
+            "updated_at": "2026-08-04T22:15:01Z",
+            "usage": {"total_input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "cost": {"usd": 0.0},
+            "metrics": {"duration_ms": 0.0, "trace_count": 1, "max_turn": null, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
+        })))
+        .mount(&server)
+        .await;
+
+    let conversation = conversations.get("conv-2").await.unwrap();
+    assert_eq!(conversation.metrics.max_turn, None);
+    assert!(conversation.runtime.is_none());
+    assert!(conversation.experiment.is_none());
+    assert!(conversation.recipe.is_none());
+    assert!(conversation.owner.is_none());
+    let wire = serde_json::to_value(&conversation).unwrap();
+    for key in ["runtime", "experiment", "recipe", "owner"] {
+        assert!(wire.get(key).is_none(), "{key} serialized");
+    }
+    assert!(wire["metrics"].get("max_turn").is_none());
 }
 
 #[tokio::test]

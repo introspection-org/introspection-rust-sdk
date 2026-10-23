@@ -78,7 +78,14 @@ fn full_span() -> serde_json::Value {
                 "member": {"id": "019fbe0c"},
                 "environment": "production",
                 "cost_usd": 0.0098,
-                "conversation": {"position": 1, "is_new": true}
+                "turn": 2,
+                "history": {
+                    "position": 1,
+                    "is_new": true,
+                    "continuation_method": "history",
+                    "hash_hit": false,
+                    "new_messages": {"start": 0, "end": 1}
+                }
             }
         }
     })
@@ -153,7 +160,27 @@ fn introspection_attributes_sit_beside_gen_ai_not_inside_it() {
     // Cost is not in the GenAI conventions at all, which is why it is here and
     // not under `gen_ai.usage`.
     assert_eq!(introspection.cost_usd, Some(0.0098));
-    assert_eq!(introspection.conversation.unwrap().position, Some(1));
+    assert_eq!(introspection.turn, Some(2));
+    let history = introspection.history.unwrap();
+    assert_eq!(history.position, Some(1));
+    assert_eq!(history.is_new, Some(true));
+    assert_eq!(history.continuation_method.as_deref(), Some("history"));
+    assert_eq!(history.hash_hit, Some(false));
+    let new_messages = history.new_messages.unwrap();
+    assert_eq!((new_messages.start, new_messages.end), (Some(0), Some(1)));
+    assert!(introspection.extra.is_empty());
+}
+
+#[test]
+fn an_unplaced_span_has_a_turn_and_no_history() {
+    let span = parse(json!({
+        "trace_id": "t",
+        "start_time": "2026-08-04T22:14:34Z",
+        "attributes": {"introspection": {"turn": 3}}
+    }));
+    let introspection = span.attributes.introspection.unwrap();
+    assert_eq!(introspection.turn, Some(3));
+    assert!(introspection.history.is_none());
 }
 
 #[test]
@@ -191,15 +218,14 @@ fn cost_is_typed_where_the_server_emits_it() {
         "start_time": "2026-08-04T22:14:34Z",
         "attributes": {"introspection": {
             "cost_usd": 0.0098,
-            "conversation": {"trace_count": 3}
+            "history": {"position": 3}
         }}
     }));
 
     let introspection = span.attributes.introspection.unwrap();
     assert_eq!(introspection.cost_usd, Some(0.0098));
-    // The counts genuinely describe the conversation, so they nest; cost
-    // describes whichever object you are holding, so it does not.
-    assert_eq!(introspection.conversation.unwrap().trace_count, Some(3));
+    assert_eq!(introspection.history.unwrap().position, Some(3));
+    assert!(introspection.extra.is_empty());
 }
 
 // ----- null is never serialized ---------------------------------------------

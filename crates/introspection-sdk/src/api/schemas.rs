@@ -4001,9 +4001,12 @@ pub struct ConversationAgent {
     pub depth: Option<i64>,
 }
 
+/// `total_input_tokens` is every input token the conversation's model calls
+/// read (uncached input plus cache reads and writes), not the sum of its
+/// items' `gen_ai.usage.input_tokens`, which counts uncached input only.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationUsage {
-    pub input_tokens: i64,
+    pub total_input_tokens: i64,
     pub output_tokens: i64,
     pub total_tokens: i64,
 }
@@ -4017,10 +4020,41 @@ pub struct ConversationCost {
 pub struct ConversationMetrics {
     pub duration_ms: f64,
     pub trace_count: i64,
+    /// The highest `introspection.turn` stamped on the conversation's spans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_turn: Option<i64>,
     pub span_count: i64,
     pub tool_use_count: i64,
     pub failed_tool_use_count: i64,
     pub has_errors: bool,
+}
+
+/// The runtime that served a conversation, nested as its items'
+/// `introspection.runtime.*`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationRuntime {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationExperiment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationRecipe {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit_sha: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationOwner {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -4041,15 +4075,13 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_id: Option<Uuid>,
+    pub runtime: Option<ConversationRuntime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_group_id: Option<Uuid>,
+    pub experiment: Option<ConversationExperiment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub experiment_id: Option<Uuid>,
+    pub recipe: Option<ConversationRecipe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recipe_git_commit_sha: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner_key: Option<String>,
+    pub owner: Option<ConversationOwner>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
 }

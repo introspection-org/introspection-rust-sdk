@@ -200,8 +200,8 @@ pub use files::{FileUpload, FileVersions, Files, UploadSource};
 pub use genai_span::{
     GenAiAgent, GenAiAttributes, GenAiInput, GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan,
     GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, IdRef, IntrospectionAttributes,
-    IntrospectionConversation, IntrospectionRecipe, IntrospectionRuntime, NameRef, SpanAttributes,
-    SpanStatus, TokenCount,
+    IntrospectionHistory, IntrospectionNewMessages, IntrospectionRecipe, IntrospectionRuntime,
+    NameRef, SpanAttributes, SpanStatus, TokenCount,
 };
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
@@ -221,9 +221,10 @@ pub use schemas::{
     ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorCustomAppSearchParams,
     ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus,
     ConnectorUpdateParams, ContentsQuery, Conversation, ConversationAgent, ConversationContains,
-    ConversationCost, ConversationExportParams, ConversationItemGetParams, ConversationItemInclude,
-    ConversationItemListParams, ConversationListParams, ConversationMetrics,
-    ConversationResolution, ConversationSentiment, ConversationStatus, ConversationUsage,
+    ConversationCost, ConversationExperiment, ConversationExportParams, ConversationItemGetParams,
+    ConversationItemInclude, ConversationItemListParams, ConversationListParams,
+    ConversationMetrics, ConversationOwner, ConversationRecipe, ConversationResolution,
+    ConversationRuntime, ConversationSentiment, ConversationStatus, ConversationUsage,
     CustomerMemberCreate, Dimension, Endpoint, EndpointKind, EndpointListParams, EndpointMetadata,
     EntityUid, Event, EventListParams, Experiment, ExperimentGoal, ExperimentGoalComponent,
     ExperimentGoalDirection, ExperimentGoalGuard, ExperimentListParams, ExperimentStatus,
