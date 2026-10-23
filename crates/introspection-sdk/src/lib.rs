@@ -117,6 +117,7 @@ pub mod resources;
 pub mod runner;
 pub mod types;
 
+// jscpd:ignore-start -- a re-export list mirroring `api`'s, declarations only
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
     AgentInfo, AnnotationEvent, AnnotationPayload, Arm, Automation, AutomationCondition,
@@ -132,10 +133,11 @@ pub use api::{
     ConnectorAppListParams, ConnectorAuthMode, ConnectorAuthorization, ConnectorAuthorizeBinding,
     ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorCustomAppSearchParams,
     ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams, ConnectorStatus,
-    ConnectorUpdateParams, ContentsQuery, Conversation, ConversationAgent, ConversationCost,
-    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
-    ConversationItemInclude, ConversationItemListParams, ConversationItemPaginator,
-    ConversationItems, ConversationListParams, ConversationMetrics, ConversationResolution,
+    ConnectorUpdateParams, ContentsQuery, Conversation, ConversationAgent, ConversationContains,
+    ConversationCost, ConversationExperiment, ConversationExportFormat, ConversationExportParams,
+    ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
+    ConversationItemPaginator, ConversationItems, ConversationListParams, ConversationMetrics,
+    ConversationOwner, ConversationRecipe, ConversationResolution, ConversationRuntime,
     ConversationSentiment, ConversationStatus, ConversationUsage, Conversations,
     CustomerMemberCreate, Dimension, Endpoint, EndpointKind, EndpointListParams, EndpointMetadata,
     EntityUid, Event, EventListParams, Events, Experiment, ExperimentGoal, ExperimentGoalComponent,
@@ -144,15 +146,16 @@ pub use api::{
     FileUpload, FileVersionListParams, FileVersions, Files, GenAiAgent, GenAiAttributes,
     GenAiInput, GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool,
     GenAiToolCall, GenAiUsage, HavingTerm, IdRef, IntrospectionAPIError, IntrospectionAttributes,
-    IntrospectionConversation, IntrospectionEventName, IntrospectionRecipe, IntrospectionRuntime,
-    JudgeGoalComponent, JudgementEvent, JudgementPayload, Lane, LaneRef, Member, MemberConnection,
-    MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams, MemberListParams,
-    MemberType, MemberUpdateParams, MetricDimensionValue, MetricFilter, MetricRow, MetricSpec,
-    MetricValue, Metrics, MetricsConfig, MetricsMeta, MetricsQuery, MetricsResponse, MetricsWindow,
-    NameRef, ObservationEvent, ObservationPayload, OrderTerm, Paginated, PaginationParams,
-    Paginator, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent, PatternPayload,
-    PolicyEntity, Project, ProjectListParams, Recipe, RecipeListParams, Repository,
-    RepositoryCommit, RepositoryCommitDetail, RepositoryCommitFile, RepositoryCommitFileStatus,
+    IntrospectionEventName, IntrospectionHistory, IntrospectionNewMessages, IntrospectionRecipe,
+    IntrospectionRuntime, JudgeGoalComponent, JudgementEvent, JudgementPayload, Lane, LaneRef,
+    Member, MemberConnection, MemberConnectionCreate, MemberConnectionListParams,
+    MemberCreateParams, MemberListParams, MemberType, MemberUpdateParams, MetricDimensionValue,
+    MetricFilter, MetricRow, MetricSpec, MetricValue, Metrics, MetricsConfig, MetricsMeta,
+    MetricsQuery, MetricsResponse, MetricsWindow, NameRef, ObservationEvent, ObservationPayload,
+    OrderTerm, Paginated, PaginationParams, Paginator, PatternAssignmentEvent,
+    PatternAssignmentPayload, PatternEvent, PatternPayload, PolicyEntity, Project,
+    ProjectListParams, Recipe, RecipeListParams, Repository, RepositoryCommit,
+    RepositoryCommitDetail, RepositoryCommitFile, RepositoryCommitFileStatus,
     RepositoryCommitPerson, RepositoryContent, RepositoryDirectory, RepositoryEntry,
     RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryMergeCommit,
     RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
@@ -165,6 +168,7 @@ pub use api::{
     TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
     TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory, TypedEvent, UploadSource,
 };
+// jscpd:ignore-end
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 // AG-UI protocol event surface yielded by the task-run stream. The full

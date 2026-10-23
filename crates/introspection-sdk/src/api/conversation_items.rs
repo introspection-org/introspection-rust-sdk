@@ -241,11 +241,9 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     }
     push_opt_ref(&mut query, "agent", params.agent.as_deref());
     push_opt_ref(&mut query, "service_name", params.service_name.as_deref());
-    push_opt_ref(
-        &mut query,
-        "operation_name",
-        params.operation_name.as_deref(),
-    );
+    for value in &params.contains {
+        query.push(("contains".into(), value.to_wire()));
+    }
     push_opt(&mut query, "lookback_days", params.lookback_days);
     for (key, value) in params.filters.iter().flatten() {
         match value {

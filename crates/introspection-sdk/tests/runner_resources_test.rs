@@ -11,20 +11,25 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
-    ConversationItemInclude, ConversationItemListParams, ConversationListParams, Conversations,
-    Dimension, Event, EventListParams, Events, FileCreateText, FileListParams, FileUpdate,
-    FileUpload, FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig,
-    IntrospectionAPIError, IntrospectionEventName, MetricFilter, MetricSpec, Metrics,
-    MetricsConfig, MetricsQuery, ResumeEntry, ShareCreate, ShareListParams, ShareResourceType,
-    ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt,
-    TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TrajectoryRecord,
+    ConversationContains, ConversationExportFormat, ConversationExportParams,
+    ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
+    ConversationListParams, Conversations, Dimension, Event, EventListParams, Events,
+    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionListParams, FileVersions,
+    Files, HttpClient, HttpConfig, IntrospectionAPIError, IntrospectionEventName, MetricFilter,
+    MetricSpec, Metrics, MetricsConfig, MetricsQuery, ResumeEntry, ShareCreate, ShareListParams,
+    ShareResourceType, ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams,
+    TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
+    TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+const RUNTIME_ID: &str = "0190f1a2-0000-7000-8000-000000000001";
+const GROUP_ID: &str = "0190f1a2-0000-7000-8000-000000000002";
+const EXPERIMENT_ID: &str = "0190f1a2-0000-7000-8000-000000000003";
 
 fn build_http(server: &MockServer) -> Arc<HttpClient> {
     let cfg = HttpConfig {
@@ -961,7 +966,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
                 "created_at": "2026-08-04T22:14:34.462000Z",
                 "updated_at": "2026-08-04T22:14:35Z",
                 "metadata": {"flow": "checkout", "tenant": "acme"},
-                "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                "usage": {"total_input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
                 "cost": {"usd": 0.01},
                 "metrics": {"duration_ms": 538.0, "trace_count": 1, "span_count": 2, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
             }],
@@ -979,7 +984,7 @@ async fn conversations_list_maps_window_params_and_paginates() {
                 "id": "c2",
                 "created_at": "2026-08-04T22:15:00Z",
                 "updated_at": "2026-08-04T22:15:01Z",
-                "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+                "usage": {"total_input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
                 "cost": {"usd": 0.02},
                 "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
             }],
@@ -1029,15 +1034,72 @@ async fn conversations_get_returns_the_complete_agent_index() {
             "created_at": "2026-08-04T22:15:00Z",
             "updated_at": "2026-08-04T22:15:01Z",
             "agents": [{"id": "root-run", "name": "agent", "depth": 0}],
-            "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+            "usage": {"total_input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
             "cost": {"usd": 0.02},
-            "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
+            "metrics": {"duration_ms": 1000.0, "trace_count": 1, "max_turn": 4, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false},
+            "runtime": {"id": RUNTIME_ID, "group_id": GROUP_ID},
+            "experiment": {"id": EXPERIMENT_ID},
+            "recipe": {"git_commit_sha": "deadbeef"},
+            "owner": {"key": "user:alice"}
         })))
         .mount(&server)
         .await;
 
     let conversation = conversations.get("conv-1").await.unwrap();
-    assert_eq!(conversation.agents.unwrap()[0].id, "root-run");
+    assert_eq!(conversation.agents.as_ref().unwrap()[0].id, "root-run");
+    assert_eq!(conversation.usage.total_input_tokens, 3);
+    assert_eq!(conversation.metrics.max_turn, Some(4));
+    let runtime = conversation.runtime.as_ref().unwrap();
+    assert_eq!(runtime.id, Some(RUNTIME_ID.parse().unwrap()));
+    assert_eq!(runtime.group_id, Some(GROUP_ID.parse().unwrap()));
+    assert_eq!(
+        conversation.experiment.as_ref().unwrap().id,
+        Some(EXPERIMENT_ID.parse().unwrap())
+    );
+    assert_eq!(
+        conversation
+            .recipe
+            .as_ref()
+            .unwrap()
+            .git_commit_sha
+            .as_deref(),
+        Some("deadbeef")
+    );
+    assert_eq!(
+        conversation.owner.as_ref().unwrap().key.as_deref(),
+        Some("user:alice")
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_without_identity_omits_the_groups() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "conversation",
+            "id": "conv-2",
+            "created_at": "2026-08-04T22:15:00Z",
+            "updated_at": "2026-08-04T22:15:01Z",
+            "usage": {"total_input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "cost": {"usd": 0.0},
+            "metrics": {"duration_ms": 0.0, "trace_count": 1, "max_turn": null, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
+        })))
+        .mount(&server)
+        .await;
+
+    let conversation = conversations.get("conv-2").await.unwrap();
+    assert_eq!(conversation.metrics.max_turn, None);
+    assert!(conversation.runtime.is_none());
+    assert!(conversation.experiment.is_none());
+    assert!(conversation.recipe.is_none());
+    assert!(conversation.owner.is_none());
+    let wire = serde_json::to_value(&conversation).unwrap();
+    for key in ["runtime", "experiment", "recipe", "owner"] {
+        assert!(wire.get(key).is_none(), "{key} serialized");
+    }
+    assert!(wire["metrics"].get("max_turn").is_none());
 }
 
 #[tokio::test]
@@ -1123,6 +1185,118 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     let second = pages.next_page().await.unwrap().unwrap();
     assert_eq!(second.data[0].span_id.as_deref(), Some("span-2"));
     assert!(pages.next_page().await.unwrap().is_none());
+}
+
+/// Lists items with `contains` and checks each value reaches the query string
+/// exactly as `wire` spells it, with no `operation_name`.
+async fn assert_items_list_sends_contains(contains: Vec<ConversationContains>, wire: &[&str]) {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    let mut mock = Mock::given(method("GET")).and(path("/v1/conversations/conv-1/items"));
+    for value in wire {
+        mock = mock.and(query_param("contains", *value));
+    }
+    mock.respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "object": "list",
+        "data": [conversation_item("span-1")],
+        "first_id": "span-1",
+        "last_id": "span-1",
+        "has_more": false,
+        "next": null
+    })))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+    let items = conversations
+        .items
+        .list(
+            "conv-1",
+            &ConversationItemListParams {
+                contains,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .collect_all(0)
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    let requests = server.received_requests().await.unwrap();
+    let query = requests[0].url.query().unwrap_or_default();
+    assert!(
+        !query.contains("operation_name"),
+        "items.list sends no operation_name: {query}"
+    );
+}
+
+// Operations filter through `contains=gen_ai.operation.name:<op>`; the items
+// list has no `operation_name` parameter.
+#[tokio::test]
+async fn conversation_items_list_filters_operations_through_contains() {
+    assert_items_list_sends_contains(
+        vec![
+            ConversationContains::Operation("chat".into()),
+            ConversationContains::Operation("execute_tool".into()),
+            ConversationContains::InputUser,
+            ConversationContains::Tool("message_user".into()),
+            ConversationContains::InputToolResponse("react".into()),
+            ConversationContains::AnyOutputToolCall,
+        ],
+        &[
+            "gen_ai.operation.name:chat",
+            "gen_ai.operation.name:execute_tool",
+            "gen_ai.input.messages.role:user",
+            "gen_ai.tool.name:message_user",
+            "gen_ai.input.messages.parts.name:react",
+            "gen_ai.output.messages.parts.type:tool_call",
+        ],
+    )
+    .await;
+}
+
+#[test]
+fn conversation_contains_name_values_keep_a_trailing_wildcard() {
+    let cases = [
+        (
+            ConversationContains::OutputToolCall("mcp_browserbase_*".into()),
+            "gen_ai.output.messages.parts.name:mcp_browserbase_*",
+        ),
+        (
+            ConversationContains::InputToolResponse("*".into()),
+            "gen_ai.input.messages.parts.name:*",
+        ),
+        (
+            ConversationContains::Tool("mcp_*".into()),
+            "gen_ai.tool.name:mcp_*",
+        ),
+        (
+            ConversationContains::Operation("invoke_*".into()),
+            "gen_ai.operation.name:invoke_*",
+        ),
+    ];
+    for (value, wire) in cases {
+        assert_eq!(value.to_wire(), wire);
+        assert_eq!(serde_json::to_value(&value).unwrap(), json!(wire));
+    }
+}
+
+#[tokio::test]
+async fn conversation_items_list_sends_prefix_contains_values_verbatim() {
+    assert_items_list_sends_contains(
+        vec![
+            ConversationContains::OutputToolCall("mcp_browserbase_*".into()),
+            ConversationContains::Tool("mcp_*".into()),
+            ConversationContains::Operation("invoke_agent".into()),
+        ],
+        &[
+            "gen_ai.output.messages.parts.name:mcp_browserbase_*",
+            "gen_ai.tool.name:mcp_*",
+            "gen_ai.operation.name:invoke_agent",
+        ],
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1919,6 +2093,45 @@ async fn conversations_export_stream_preserves_bytes_headers_and_filters() {
     let chunks: Vec<bytes::Bytes> = stream.try_collect().await.unwrap();
 
     assert_eq!(chunks.concat(), body);
+}
+
+#[tokio::test]
+async fn conversations_export_repeats_operation_names_on_the_wire() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(query_param("agent", "root"))
+        .and(query_param("operation_name", "chat"))
+        .and(query_param("operation_name", "execute_tool"))
+        .and(query_param("lookback_days", "7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": false,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = conversations
+        .export_json(
+            "conv-1",
+            &ConversationExportParams {
+                agent: Some("root".into()),
+                operation_name: Some("chat".into()),
+                operation_names: vec!["execute_tool".into()],
+                lookback_days: Some(7),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.data.len(), 1);
 }
 
 #[tokio::test]

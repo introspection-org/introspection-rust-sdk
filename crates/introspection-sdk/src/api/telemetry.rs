@@ -136,7 +136,7 @@ impl Conversations {
             .http
             .get_raw(
                 &Self::export_path(conversation_id),
-                params,
+                &params.to_wire(),
                 Some("application/json"),
             )
             .await?;
@@ -156,7 +156,7 @@ impl Conversations {
             .http
             .get_raw(
                 &Self::export_path(conversation_id),
-                params,
+                &params.to_wire(),
                 Some(format.accept()),
             )
             .await?;
@@ -198,7 +198,7 @@ impl Conversations {
             .http
             .get_raw(
                 &Self::export_path(conversation_id),
-                params,
+                &params.to_wire(),
                 Some(TRAJECTORY_V1_ACCEPT),
             )
             .await?;
@@ -287,7 +287,7 @@ impl Conversations {
             .http
             .get_raw(
                 &Self::export_path(conversation_id),
-                params,
+                &params.to_wire(),
                 Some(ARROW_STREAM_ACCEPT),
             )
             .await?;
