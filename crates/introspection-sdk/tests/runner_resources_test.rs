@@ -1072,6 +1072,31 @@ async fn conversations_get_returns_the_complete_agent_index() {
 }
 
 #[tokio::test]
+async fn a_data_plane_still_sending_input_tokens_parses() {
+    // A plane on a release before `total_input_tokens`.
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "conversation",
+            "id": "conv-1",
+            "created_at": "2026-08-04T22:15:00Z",
+            "updated_at": "2026-08-04T22:15:01Z",
+            "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7},
+            "cost": {"usd": 0.02},
+            "metrics": {"duration_ms": 1000.0, "trace_count": 1, "span_count": 1, "tool_use_count": 0, "failed_tool_use_count": 0, "has_errors": false}
+        })))
+        .mount(&server)
+        .await;
+
+    let conversation = conversations.get("conv-1").await.unwrap();
+    assert_eq!(conversation.usage.total_input_tokens, 0);
+    assert_eq!(conversation.usage.total_tokens, 7);
+    assert_eq!(conversation.metrics.max_turn, None);
+}
+
+#[tokio::test]
 async fn a_conversation_without_identity_omits_the_groups() {
     let server = MockServer::start().await;
     let conversations = Conversations::new(build_http(&server));

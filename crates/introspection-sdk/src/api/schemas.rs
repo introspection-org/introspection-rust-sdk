@@ -4005,6 +4005,7 @@ pub struct ConversationAgent {
 /// read (uncached input plus cache reads and writes), not the sum of its
 /// items' `gen_ai.usage.input_tokens`, which counts uncached input only.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct ConversationUsage {
     pub total_input_tokens: i64,
     pub output_tokens: i64,
