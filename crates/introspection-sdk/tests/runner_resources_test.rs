@@ -2317,3 +2317,14 @@ async fn task_list_sends_the_tag_filter() {
 
     assert!(found.is_empty());
 }
+
+#[test]
+fn eval_task_create_serializes_kind_and_commands() {
+    let body = serde_json::to_value(TaskCreate {
+        kind: Some(TaskKind::Eval),
+        commands: Some(true),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(body, json!({"kind": "eval", "commands": true}));
+}

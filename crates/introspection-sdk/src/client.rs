@@ -26,8 +26,9 @@ use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
-    Aauth, Annotations, Automations, Connectors, Endpoints, ExperimentHandle, Experiments,
-    MemberConnections, Members, Projects, Recipes, Repositories, RuntimeHandle, Runtimes, Tags,
+    Aauth, Annotations, ApiKeys, Applications, Automations, Connectors, Credentials, Endpoints,
+    ExperimentHandle, Experiments, Images, Integrations, Judges, MemberConnections, Members, Oidc,
+    Projects, Recipes, Repositories, RuntimeHandle, Runtimes, Tags, Variables,
 };
 use crate::types::{self, ClientConfig};
 
@@ -73,10 +74,17 @@ pub struct IntrospectionClient {
     connectors: Connectors,
     endpoints: Endpoints,
     members: Members,
-    projects: Projects,
     annotations: Annotations,
     tags: Tags,
     aauth: Aauth,
+    api_keys: ApiKeys,
+    applications: Applications,
+    credentials: Credentials,
+    variables: Variables,
+    integrations: Integrations,
+    judges: Judges,
+    projects: Projects,
+    oidc: Oidc,
     dp_http: Arc<HttpClient>,
 }
 
@@ -151,7 +159,14 @@ impl IntrospectionClient {
             connectors: Connectors::new(cp_http.clone()),
             endpoints: Endpoints::new(cp_http.clone()),
             members: Members::new(cp_http.clone()),
+            api_keys: ApiKeys::new(cp_http.clone()),
+            applications: Applications::new(cp_http.clone()),
+            credentials: Credentials::new(cp_http.clone()),
+            variables: Variables::new(cp_http.clone()),
+            integrations: Integrations::new(cp_http.clone()),
+            judges: Judges::new(cp_http.clone()),
             projects: Projects::new(cp_http.clone()),
+            oidc: Oidc::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             tags: Tags::new(dp_http.clone()),
             aauth: Aauth::new(dp_http.clone()),
@@ -208,12 +223,54 @@ impl IntrospectionClient {
         &self.members
     }
 
+    /// `/v1/api-keys` — a project's API keys.
+    pub fn api_keys(&self) -> &ApiKeys {
+        &self.api_keys
+    }
+
+    /// `/v1/applications` CRUD, with each Application's `idps`, `secrets`
+    /// and `keys`.
+    pub fn applications(&self) -> &Applications {
+        &self.applications
+    }
+
+    /// `/v1/credentials` — write-only secrets a project's runtimes read.
+    pub fn credentials(&self) -> &Credentials {
+        &self.credentials
+    }
+
+    /// `/v1/variables` — environment variables a project's runtimes read.
+    pub fn variables(&self) -> &Variables {
+        &self.variables
+    }
+
+    /// `/v1/integrations` — the org's provider installs.
+    pub fn integrations(&self) -> &Integrations {
+        &self.integrations
+    }
+
+    /// `/v1/judges` read and operational update.
+    pub fn judges(&self) -> &Judges {
+        &self.judges
+    }
+
     /// `GET /v1/projects` — the org's projects, read-only.
     pub fn projects(&self) -> &Projects {
         &self.projects
     }
 
-    /// Data Plane `/v1/tasks`, with each task's runs under `.runs`.
+    /// `GET /v1/oidc/me` — who this client's credential is.
+    pub fn oidc(&self) -> &Oidc {
+        &self.oidc
+    }
+
+    /// Data Plane `/v1/images`.
+    pub fn images(&self) -> Images {
+        Images::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `/v1/tasks`, with each task's runs under `.runs` and its
+    /// sandbox commands under `.commands`.
     pub fn tasks(&self) -> Tasks {
         Tasks::new(self.dp_http.clone())
     }

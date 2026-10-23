@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use futures::stream::Stream;
 use futures::StreamExt;
+use serde::Serialize;
 
 use crate::agui::Event;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
@@ -12,8 +13,9 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::resumable::{stream_resumable, StreamOptions};
 use crate::api::schemas::{
-    Task, TaskCancelOptions, TaskCancelResponse, TaskCreate, TaskCreateResponse, TaskListParams,
-    TaskRun, TaskRunCreate, TaskRunResponse, TaskRunResume, TaskUpdate,
+    Task, TaskCancelOptions, TaskCancelResponse, TaskCommand, TaskCommandListParams,
+    TaskCommandSpec, TaskCreate, TaskCreateResponse, TaskListParams, TaskRun, TaskRunCreate,
+    TaskRunResponse, TaskRunResume, TaskUpdate,
 };
 
 /// Handle returned by [`Tasks::start`] and [`TaskRuns::create`].
@@ -209,19 +211,97 @@ impl TaskRuns {
     }
 }
 
+/// The longest [`TaskCommands::get`] asks the API to hold a read. The API
+/// allows 60 seconds, but the server has to answer before this client's
+/// 30-second request timeout or the read fails instead of returning the
+/// command.
+pub const MAX_COMMAND_WAIT_SECONDS: u32 = 25;
+
+/// `client.tasks.commands` — `exec`, `upload` and `download` against an eval
+/// task's live sandbox.
+///
+/// A command is a row the task's workflow executes and stamps: the create
+/// returns it `queued`, and [`Self::get`] reads its outcome, optionally
+/// holding the read until it finishes. Eval tasks only, behind `tasks:exec`
+/// (an org admin or owner, or the `operator` role), on a plane with evals
+/// enabled; create the task with [`crate::TaskKind::Eval`] and
+/// [`TaskCreate::commands`] set.
+#[derive(Clone)]
+pub struct TaskCommands {
+    http: Arc<HttpClient>,
+}
+
+impl TaskCommands {
+    #[doc(hidden)]
+    pub fn new(http: Arc<HttpClient>) -> Self {
+        Self { http }
+    }
+
+    /// `POST /v1/tasks/{id}/commands` — record a command and send it to the
+    /// task's workflow.
+    pub async fn create(&self, task_id: &str, spec: &TaskCommandSpec) -> ApiResult<TaskCommand> {
+        let path = format!(
+            "/v1/tasks/{}/commands",
+            crate::api::encoding::encode(task_id)
+        );
+        self.http.post_json(&path, spec).await
+    }
+
+    /// `GET /v1/tasks/{id}/commands` — paginated, newest first.
+    pub fn list(&self, task_id: &str, params: &TaskCommandListParams) -> Paginator<TaskCommand> {
+        let path = format!(
+            "/v1/tasks/{}/commands",
+            crate::api::encoding::encode(task_id)
+        );
+        Paginator::new(self.http.clone(), path, params)
+            .expect("TaskCommandListParams must serialize to a JSON object")
+    }
+
+    /// `GET /v1/tasks/{id}/commands/{command_id}`. `wait_seconds` holds the
+    /// read until the command finishes or the wait runs out, and returns it in
+    /// whatever state it is then; it is capped at
+    /// [`MAX_COMMAND_WAIT_SECONDS`], so call again to wait longer.
+    pub async fn get(
+        &self,
+        task_id: &str,
+        command_id: &str,
+        wait_seconds: Option<u32>,
+    ) -> ApiResult<TaskCommand> {
+        #[derive(Serialize)]
+        struct Q {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            wait_seconds: Option<u32>,
+        }
+        let path = format!(
+            "/v1/tasks/{}/commands/{}",
+            crate::api::encoding::encode(task_id),
+            crate::api::encoding::encode(command_id)
+        );
+        let wait_seconds = wait_seconds.map(|w| w.min(MAX_COMMAND_WAIT_SECONDS));
+        self.http.get_json(&path, &Q { wait_seconds }).await
+    }
+}
+
 /// `client.tasks.*`.
 #[derive(Clone)]
 pub struct Tasks {
     http: Arc<HttpClient>,
     /// Nested `runs` namespace.
     pub runs: TaskRuns,
+    /// Nested `commands` namespace: eval sandbox operations.
+    pub commands: TaskCommands,
 }
 
 impl Tasks {
     #[doc(hidden)]
     pub fn new(http: Arc<HttpClient>) -> Self {
         let runs = TaskRuns::new(http.clone());
-        Self { http, runs }
+        let commands = TaskCommands::new(http.clone());
+        Self {
+            http,
+            runs,
+            commands,
+        }
     }
 
     /// `GET /v1/tasks` — paginator over the list endpoint.
