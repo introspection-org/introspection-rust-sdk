@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.32.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.31.1...v0.32.0) (2026-10-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **conversations:** `ConversationContentClass` is replaced by `ConversationContains` (`InputUser`, `OutputText`, `InputToolResponse`, `OutputToolCall`, `AnyInputToolResponse`, `AnyOutputToolCall`, `Tool`, `Operation`), `IntrospectionContent` by `IntrospectionContains`, and the `content` field on the list params and on `IntrospectionAttributes` by `contains`.
+* **aauth:** the aauth-person-server crate is no longer maintained.
+
+### Features
+
+* **conversations:** add the contains filter on items and deprecate operation_name ([#143](https://github.com/introspection-org/introspection-rust-sdk/issues/143)) ([d2a54ae](https://github.com/introspection-org/introspection-rust-sdk/commit/d2a54ae73d8d20cc9de898a3c471911611efe423))
+
+
+### Bug Fixes
+
+* **conversations:** read a conversation from a data plane that predates total_input_tokens ([#148](https://github.com/introspection-org/introspection-rust-sdk/issues/148)) ([cd5ba0b](https://github.com/introspection-org/introspection-rust-sdk/commit/cd5ba0bb790b04fe702a3656ce03f4d0355eb080))
+
+
+### Code Refactoring
+
+* **aauth:** retire the Rust Person Server and Access Server ([#145](https://github.com/introspection-org/introspection-rust-sdk/issues/145)) ([f8f8bf4](https://github.com/introspection-org/introspection-rust-sdk/commit/f8f8bf43c5c012c18356d8bfa8d7a3c2d4a4e3ea))
+
 ## [0.31.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.31.0...v0.31.1) (2026-10-21)
 
 

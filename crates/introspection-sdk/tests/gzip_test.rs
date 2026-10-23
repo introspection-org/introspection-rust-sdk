@@ -49,7 +49,7 @@ async fn gzipped_json_response_is_transparently_decoded() {
             "id": "conv-1",
             "created_at": "2026-08-04T22:14:34.462000Z",
             "updated_at": "2026-08-04T22:14:37.462000Z",
-            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            "usage": {"total_input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
             "cost": {"usd": 0.001},
             "metrics": {
                 "duration_ms": 3000.0,

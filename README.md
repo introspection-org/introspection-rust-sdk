@@ -704,7 +704,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo clippy --all-targets -- -D warnings
 ```
 
-The thresholds are a ratchet: each starts at today's worst measured value, and it is never raised, only lowered when a refactor brings the worst offender down. The targets are cognitive complexity 15, 100 lines, 5 arguments and nesting depth 4. The generated `api::schemas` module and the wire-field fixture test in `tests/api_contract_test.rs` are exempt.
+The thresholds are a ratchet: each starts at today's worst measured value, and it is never raised, only lowered when a refactor brings the worst offender down. The targets are cognitive complexity 15, 100 lines, 5 arguments and nesting depth 4. The generated `api::schemas` module is exempt.
 
 ### Duplicate code
 
@@ -724,7 +724,7 @@ It counts only `exact` clones. The `renamed` kind (with `ignoreIdentifiers`), wh
 | 150 | 37 | 3.19% |
 | 250 | 9 | 1.02% |
 
-At `minTokens` 70, exact only, the measurement is 34 clones and 1.45% duplicated lines.
+At `minTokens` 70, exact only, the measurement is 29 clones and 1.35% duplicated lines.
 
 The threshold is a ratchet: never raise it to land a change; factor the clone out instead. When a refactor removes duplication, run the command, read the duplicated-lines percentage in the `Total` row, and lower `threshold` to just above it in the same PR.
 
