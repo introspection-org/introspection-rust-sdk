@@ -4,21 +4,25 @@
 #
 # Writes to OUT_DIR the files the workflow and the notify step read:
 #
-#   state        red | green | skipped (staging answered 404: the API
-#                reference is not deployed yet)
+#   state        red | green
 #   body.txt     the Slack message below its headline: the run link and the
 #                report, trimmed to fit
 #   summary.md   the report in full, for the job summary
 #
-# Exits 0 when the check ran or was skipped, and 2 when it could not run, for
-# example when staging did not answer: an outage is not drift, and must not
-# post or change the notify state.
+# Exits 0 when the check ran, drift or not, and then writes references=read
+# to GITHUB_OUTPUT: both documents were fetched and parsed. Exits 2 when it
+# could not run: a document that cannot be read (any HTTP error, 404
+# included, a network error or a body that is not JSON) or a base URL that is
+# unset. That is not drift, and must not post or change the notify state.
 #
 # usage: scripts/api-drift-report.sh OUT_DIR [RUN_URL]
 # env:   INTROSPECTION_API_CONTRACT_UNCALLED  report: operations not called
 #                                             are listed but do not fail
-#        INTROSPECTION_CONTROLPLANE_SPEC      a path or URL instead of staging's
-#        INTROSPECTION_DATAPLANE_SPEC         a path or URL instead of staging's
+#        INTROSPECTION_CP_URL                 the Control Plane's base URL
+#        INTROSPECTION_DP_URL                 the Data Plane's base URL
+#        INTROSPECTION_CONTROLPLANE_SPEC      a path or URL instead of the CP's
+#        INTROSPECTION_DATAPLANE_SPEC         a path or URL instead of the DP's
+#        GITHUB_OUTPUT                        optional; receives references=read
 set -euo pipefail
 
 out="${1:?usage: api-drift-report.sh OUT_DIR [RUN_URL]}"
@@ -43,14 +47,13 @@ if [ ! -s "${report}" ]; then
   exit 2
 fi
 
-if grep -q "^API contract check skipped" "${report}"; then
-  state=skipped
-elif [ "${status}" -ne 0 ]; then
+if [ "${status}" -ne 0 ]; then
   state=red
 else
   state=green
 fi
 echo "${state}" >"${out}/state"
+echo "references=read" >>"${GITHUB_OUTPUT:-/dev/null}"
 headline="$(head -n 1 "${report}")"
 
 # Slack cuts a message at 40,000 characters, but one much past 10,000 is

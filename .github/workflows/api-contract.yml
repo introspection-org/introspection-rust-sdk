@@ -1,17 +1,36 @@
-# Checks the SDK's routes against the staging API reference
-# (https://api.staging.introspection.dev/openapi/{controlplane,dataplane}.json)
-# with crates/introspection-sdk/tests/api_contract_test.rs.
+# Checks the SDK's routes against the x-introspection flags of the staging
+# API references with crates/introspection-sdk/tests/api_contract_test.rs:
+# each plane's own /openapi.json, under the Control Plane and Data Plane base
+# URLs below.
+#
+# Where the base URLs come from (scripts/api-reference-urls.sh), first match:
+# 1. repository_dispatch api-reference-deployed: client_payload.cp_url and
+#    client_payload.dp_url. The pair is saved to the Actions cache after the
+#    run, drift or not, so the runs below can read it, but only when both
+#    /openapi.json documents were read: a pair that failed to fetch is never
+#    recorded, so later runs keep the last good one.
+# 2. workflow_dispatch: the cp_url and dp_url inputs, when set.
+# 3. Otherwise (pull requests, a manual run without inputs): the pair the
+#    newest dispatch saved. Pull requests read main's caches, and dispatches
+#    run on main.
+# With none of these the run fails: no staging reference URLs are recorded
+# yet. Run introspection-cloud's "API Reference Deployed" workflow by hand
+# (it dispatches here and refills the cache), or pass cp_url and dp_url.
+# No hostname is written down here or in the scripts.
 #
 # - Pull requests: a route the SDK calls that is in neither document fails.
-#   Operations flagged for the SDK that it doesn't call are only listed in the
-#   job summary, so a new API operation doesn't block unrelated work.
+#   Operations for the SDK that it doesn't call are only listed in the job
+#   summary, so a new API operation doesn't block unrelated work.
 # - After each staging deploy of the API (introspection-cloud sends the
 #   `api-reference-deployed` repository_dispatch; client_payload.sha is its
-#   commit), or by hand: both fail, and #main-build-alerts hears when the
-#   result changes (clean to drift, drift to clean).
+#   commit, client_payload.plane the plane it deployed, cp or dp; both planes
+#   are checked either way), or by hand: both fail, and #main-build-alerts
+#   hears when the result changes (clean to drift, drift to clean).
 #
-# A document staging answers with 404 (not deployed yet) skips the check
-# green, without a post and without touching the stored state.
+# A reference that cannot be read (any HTTP error, 404 included, a network
+# error or a body that is not JSON), like missing URLs, fails the run before
+# the check, so it posts nothing, the posted state stays as it was, and a
+# dispatch's URLs are not saved.
 #
 # Only a run on main may post to Slack, and a manual run only when its
 # post_for_real input is set. Any other run prints the message instead. The
@@ -28,6 +47,14 @@ on:
         description: "Post to Slack on a state change, as a deploy-triggered run does. Off prints the message instead."
         type: boolean
         default: false
+      cp_url:
+        description: "Control Plane base URL (its /openapi.json is read). Empty uses the pair the last deploy dispatch recorded."
+        type: string
+        default: ""
+      dp_url:
+        description: "Data Plane base URL (its /openapi.json is read). Empty uses the pair the last deploy dispatch recorded."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -45,12 +72,33 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # The base URLs the newest deploy dispatch sent. Like the posted state,
+      # each dispatch saves under a new key and the newest is restored by
+      # prefix.
+      - name: Restore the recorded reference URLs
+        uses: actions/cache/restore@v5
+        with:
+          path: .api-reference-urls
+          key: api-reference-urls-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: api-reference-urls-
+
+      - name: Pick the reference URLs
+        id: urls
+        env:
+          PAYLOAD_CP_URL: ${{ github.event.client_payload.cp_url }}
+          PAYLOAD_DP_URL: ${{ github.event.client_payload.dp_url }}
+          INPUT_CP_URL: ${{ inputs.cp_url }}
+          INPUT_DP_URL: ${{ inputs.dp_url }}
+        run: scripts/api-reference-urls.sh .api-reference-urls
+
       - name: Check the SDK's routes
         id: check
         env:
           INTROSPECTION_API_CONTRACT_UNCALLED: ${{ github.event_name == 'pull_request' && 'report' || 'fail' }}
           CLOUD_SHA: ${{ github.event.client_payload.sha }}
+          CLOUD_PLANE: ${{ github.event.client_payload.plane }}
         run: |
+          echo "introspection-cloud commit: ${CLOUD_SHA:-none}, plane: ${CLOUD_PLANE:-none}"
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if [ -n "${CLOUD_SHA}" ]; then
             run_url="${run_url} (after introspection-cloud ${CLOUD_SHA})"
@@ -59,10 +107,19 @@ jobs:
           cat "${RUNNER_TEMP}/api-drift/summary.md" >> "${GITHUB_STEP_SUMMARY}"
           echo "state=$(cat "${RUNNER_TEMP}/api-drift/state")" >> "${GITHUB_OUTPUT}"
 
+      # Only a dispatch that named both URLs saves them, and only when the
+      # check read both documents (references=read), drift or not.
+      - name: Save the reference URLs
+        if: always() && steps.urls.outputs.source == 'payload' && steps.check.outputs.references == 'read'
+        uses: actions/cache/save@v5
+        with:
+          path: .api-reference-urls
+          key: api-reference-urls-${{ github.run_id }}-${{ github.run_attempt }}
+
       # The state of the last real post. Caches are immutable, so each post
       # saves under a new key and the newest one is restored by prefix.
       - name: Restore the last posted state
-        if: github.event_name != 'pull_request' && steps.check.outputs.state != 'skipped'
+        if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v5
         with:
           path: .api-drift-state
@@ -71,7 +128,7 @@ jobs:
 
       - name: Notify #main-build-alerts
         id: notify
-        if: github.event_name != 'pull_request' && steps.check.outputs.state != 'skipped'
+        if: github.event_name != 'pull_request'
         env:
           REPORT_DIR: ${{ runner.temp }}/api-drift
           STATE_DIR: .api-drift-state

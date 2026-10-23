@@ -17,7 +17,9 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - CI runs `cargo clippy --all-targets --all-features -- -D warnings` at the workspace root. That compiles every member's examples, so a broken example fails CI.
 - CI never runs the examples. They need a live server.
 - `.github/workflows/api-contract.yml` runs the API contract check against staging: on pull requests, after each staging deploy of the API (`repository_dispatch` `api-reference-deployed`) and by hand. It is not part of `ci.yml`, so it is not in `all-green`.
-- The check (`crates/introspection-sdk/tests/api_contract_test.rs`) takes the documents' `x-introspection` flags as its only classification. Never add an exemption, allowlist or skip to it.
+- It reads `${cp_url}/openapi.json` and `${dp_url}/openapi.json`. The URLs come from the dispatch's `client_payload.cp_url` / `dp_url`, else a manual run's `cp_url` / `dp_url` inputs, else the pair the newest dispatch saved in the Actions cache (`api-reference-urls-`), saved only when both documents were read. A cache miss fails the run. Locally, set `INTROSPECTION_CP_URL` and `INTROSPECTION_DP_URL`. Never write a Data Plane hostname into the workflow or the scripts.
+- A document that cannot be read (404 included) fails the run without posting to Slack or changing the recorded drift state. There is no skip.
+- The check (`crates/introspection-sdk/tests/api_contract_test.rs`) takes the documents' `x-introspection` flags as its only classification: an operation without `clients` is for every client, one with `clients` only for those it names. Never add an exemption, allowlist or skip to it.
 - The check finds requests through the `HttpClient` methods, the `Paginator` constructors and `reqwest` builders (`tests/api_contract/calls.rs`). A new way of sending requests must be taught there, or its operations show up as not called.
 
 ## Examples

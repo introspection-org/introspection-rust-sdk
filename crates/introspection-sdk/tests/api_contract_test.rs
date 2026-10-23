@@ -1,14 +1,15 @@
 //! Checks this SDK against the Control Plane and Data Plane OpenAPI documents.
 //!
-//! The documents classify every route: each public operation carries
-//! `x-introspection: {visibility: public, clients: [...]}`, and a query
-//! parameter no client is expected to send carries `clients: []`. Those flags
-//! are the only classification; this check keeps no list of its own.
+//! Each plane serves its own document at `/openapi.json`. An operation is for
+//! every client unless it carries `x-introspection: {clients: [...]}`, which
+//! names the clients expected to call it; `[]` names none. Those flags are the
+//! only classification; this check keeps no list of its own.
 //!
 //! The check reads `crates/introspection-sdk/src` (see `api_contract/calls.rs`
 //! for how) and fails when:
 //!
-//! 1. an operation whose `clients` include `sdk` is not called anywhere in it;
+//! 1. an operation for the SDK (no `clients`, or `clients` include `sdk`) is
+//!    not called anywhere in it;
 //! 2. it calls a `/v1/...` route that is in neither document.
 //!
 //! Both compare method and path only.
@@ -17,14 +18,19 @@
 //! the network. The `API Contract` workflow runs it against staging: on pull
 //! requests with `INTROSPECTION_API_CONTRACT_UNCALLED=report`, so only check 2
 //! fails and a new API operation doesn't block unrelated work; after each
-//! staging deploy of the API with both checks failing. A document staging
-//! answers with 404 (not deployed yet) skips the check.
+//! staging deploy of the API with both checks failing. A document that cannot
+//! be read (any HTTP error, 404 included, a network error or a body that is
+//! not JSON) fails the test before it compares anything.
 //!
-//! Run against staging:
+//! No host is fixed here: `INTROSPECTION_CP_URL` and `INTROSPECTION_DP_URL`
+//! name the planes' base URLs, and their `/openapi.json` is read. Run against
+//! staging:
 //!
+//!     INTROSPECTION_CP_URL=https://api.staging.introspection.dev \
+//!     INTROSPECTION_DP_URL=https://api.gcp01.us-central1.gcp.introspection.dev \
 //!     cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
 //!
-//! Run against local copies (a path or a URL each):
+//! Run against local copies (a path or a URL each, in place of the base URLs):
 //!
 //!     INTROSPECTION_CONTROLPLANE_SPEC=path/to/controlplane.json \
 //!     INTROSPECTION_DATAPLANE_SPEC=path/to/dataplane.json \
@@ -40,11 +46,12 @@ use std::path::Path;
 use api_contract::index::Index;
 use api_contract::{calls, check, Document};
 
-const CONTROLPLANE_URL: &str = "https://api.staging.introspection.dev/openapi/controlplane.json";
-const DATAPLANE_URL: &str = "https://api.staging.introspection.dev/openapi/dataplane.json";
+/// Each plane's base URL; its document is `/openapi.json` under it.
+const CP_URL_ENV: &str = "INTROSPECTION_CP_URL";
+const DP_URL_ENV: &str = "INTROSPECTION_DP_URL";
 
-/// A local file or another URL to read instead of staging, for the window
-/// where an API change has landed in a branch but not on staging yet.
+/// A local file or another URL to read instead, for the window where an API
+/// change has landed in a branch but not on staging yet.
 const CONTROLPLANE_ENV: &str = "INTROSPECTION_CONTROLPLANE_SPEC";
 const DATAPLANE_ENV: &str = "INTROSPECTION_DATAPLANE_SPEC";
 
@@ -52,25 +59,31 @@ const REPORT_ENV: &str = "INTROSPECTION_API_CONTRACT_REPORT";
 /// `report` lists operations not called without failing on them.
 const UNCALLED_ENV: &str = "INTROSPECTION_API_CONTRACT_UNCALLED";
 
-/// The document, or `Err` with why the check is skipped: a URL that answers
-/// 404.
-fn load(plane: &'static str, env_var: &str, url: &str) -> Result<Document, String> {
-    let source = std::env::var(env_var).unwrap_or_else(|_| url.to_owned());
+fn env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+}
+
+/// The document, from `spec_env` when set, else `/openapi.json` under the
+/// base URL in `url_env`. Panics when it cannot be read.
+fn load(plane: &'static str, spec_env: &str, url_env: &str) -> Document {
+    let source = env(spec_env)
+        .or_else(|| env(url_env).map(|base| format!("{}/openapi.json", base.trim_end_matches('/'))))
+        .unwrap_or_else(|| {
+            panic!("could not read the API reference: {url_env} is unset or empty; set it to the {plane}'s base URL, or {spec_env} to its document")
+        });
     let fail =
         |e: &dyn std::fmt::Display| format!("could not read the API reference {source}: {e}");
     let spec = if source.starts_with("https://") || source.starts_with("http://") {
-        let response = reqwest::blocking::Client::builder()
+        reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("client builds")
             .get(&source)
             .send()
-            .unwrap_or_else(|e| panic!("{}", fail(&e)));
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(format!("{source} answered 404"));
-        }
-        response
-            .error_for_status()
+            .and_then(reqwest::blocking::Response::error_for_status)
             .and_then(reqwest::blocking::Response::json)
             .unwrap_or_else(|e| panic!("{}", fail(&e)))
     } else {
@@ -80,11 +93,11 @@ fn load(plane: &'static str, env_var: &str, url: &str) -> Result<Document, Strin
             .unwrap_or_else(|e| panic!("{}", fail(&e)));
         serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}", fail(&e)))
     };
-    Ok(Document {
+    Document {
         plane,
         source,
         spec,
-    })
+    }
 }
 
 fn repo_root() -> std::path::PathBuf {
@@ -99,26 +112,21 @@ fn sdk_source() -> Index {
 #[ignore = "reaches the network: reads the staging API reference"]
 fn sdk_matches_the_api_reference() {
     let documents = [
-        load("controlplane", CONTROLPLANE_ENV, CONTROLPLANE_URL),
-        load("dataplane", DATAPLANE_ENV, DATAPLANE_URL),
+        load("controlplane", CONTROLPLANE_ENV, CP_URL_ENV),
+        load("dataplane", DATAPLANE_ENV, DP_URL_ENV),
     ];
-    let documents: Result<Vec<Document>, String> = documents.into_iter().collect();
-    let (text, passed, summary) = match documents {
-        Ok(documents) => {
-            let mut report = check(&documents, &sdk_source());
-            report.uncalled_fail = std::env::var(UNCALLED_ENV).as_deref() != Ok("report");
-            (report.render(), report.passed(), report.summary())
-        }
-        Err(why) => (format!("API contract check skipped: {why}\n"), true, why),
-    };
+    let mut report = check(&documents, &sdk_source());
+    report.uncalled_fail = std::env::var(UNCALLED_ENV).as_deref() != Ok("report");
+    let text = report.render();
     println!("{text}");
     if let Ok(path) = std::env::var(REPORT_ENV) {
         std::fs::write(repo_root().join(&path), &text)
             .unwrap_or_else(|e| panic!("{REPORT_ENV}={path}: {e}"));
     }
     assert!(
-        passed,
-        "the SDK disagrees with the API reference: {summary}"
+        report.passed(),
+        "the SDK disagrees with the API reference: {}",
+        report.summary()
     );
 }
 
@@ -192,15 +200,20 @@ fn events_path(id: &str) -> String {
 "#;
 
 fn reference() -> Document {
-    let sdk = serde_json::json!({"visibility": "public", "clients": ["sdk"]});
-    let cli = serde_json::json!({"visibility": "public", "clients": ["cli"]});
+    let sdk = serde_json::json!({"clients": ["sdk"]});
+    let both = serde_json::json!({"clients": ["cli", "sdk"]});
+    let cli = serde_json::json!({"clients": ["cli"]});
+    let none = serde_json::json!({"clients": []});
     let spec = serde_json::json!({
         "paths": {
-            "/v1/widgets": {"post": {"x-introspection": sdk}, "get": {"x-introspection": sdk}},
-            "/v1/widgets/{widget_id}": {"get": {"x-introspection": sdk}, "put": {}},
+            "/v1/widgets": {"post": {}, "get": {"x-introspection": sdk}},
+            "/v1/widgets/{widget_id}": {"get": {"x-introspection": {}}, "put": {"x-introspection": both}},
             "/v1/widgets/{widget_id}/events": {"get": {"x-introspection": sdk}},
-            "/v1/widgets/{widget_id}/archive": {"post": {"x-introspection": sdk}},
-            "/v1/widgets/stats": {"get": {"x-introspection": cli}}
+            "/v1/widgets/{widget_id}/archive": {"post": {}},
+            "/v1/widgets/{widget_id}/restore": {"post": {"x-introspection": {}}},
+            "/v1/widgets/{widget_id}/share": {"post": {"x-introspection": both}},
+            "/v1/widgets/stats": {"get": {"x-introspection": cli}},
+            "/health": {"get": {"x-introspection": none}}
         }
     });
     Document {
@@ -216,11 +229,16 @@ fn reports_uncalled_operations_and_unknown_routes() {
     let report = check(&[reference()], &index);
     println!("{}", report.render());
 
-    // Only operations flagged for the SDK must be called: the cli-only
-    // `stats` is not reported, and neither is the unflagged `put`.
+    // An operation without `clients` is for every client, one with `clients`
+    // only for those it names: the cli-only `stats` and the no-client
+    // `/health` are not reported.
     assert_eq!(
         report.not_called,
-        ["dataplane POST /v1/widgets/{widget_id}/archive"]
+        [
+            "dataplane POST /v1/widgets/{widget_id}/archive",
+            "dataplane POST /v1/widgets/{widget_id}/restore",
+            "dataplane POST /v1/widgets/{widget_id}/share",
+        ]
     );
     assert_eq!(
         report.unknown_routes,

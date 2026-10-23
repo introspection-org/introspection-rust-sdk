@@ -46,12 +46,13 @@ impl Document {
                 if !op.is_object() {
                     continue;
                 }
+                // No `clients` list means every client.
                 let clients = op["x-introspection"]["clients"].as_array();
                 out.push(Operation {
                     plane: self.plane,
                     method: method.to_uppercase(),
                     path: path.clone(),
-                    for_client: clients.is_some_and(|c| c.iter().any(|c| c == CLIENT)),
+                    for_client: clients.is_none_or(|c| c.iter().any(|c| c == CLIENT)),
                 });
             }
         }
@@ -118,9 +119,9 @@ impl Report {
             self.call_sites
         );
         let not_called = if self.uncalled_fail {
-            "Operation not called (x-introspection clients include sdk; no call site in crates/introspection-sdk/src)"
+            "Operation not called (for the SDK by x-introspection; no call site in crates/introspection-sdk/src)"
         } else {
-            "Operation not called (listed only, does not fail here; x-introspection clients include sdk; no call site in crates/introspection-sdk/src)"
+            "Operation not called (listed only, does not fail here; for the SDK by x-introspection; no call site in crates/introspection-sdk/src)"
         };
         section(&mut out, not_called, &self.not_called);
         section(

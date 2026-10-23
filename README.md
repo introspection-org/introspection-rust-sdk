@@ -717,24 +717,26 @@ in that crate's `Cargo.toml` with a comment saying why.
 
 ### API contract
 
-The [API Contract](.github/workflows/api-contract.yml) workflow checks the SDK against the staging Control Plane and Data Plane OpenAPI documents. The documents mark every operation the SDK must call with `x-introspection: {clients: [sdk, ...]}`, and those flags are the check's only classification: it keeps no list of its own. It reads the requests in `crates/introspection-sdk/src` and compares method and path only:
+The [API Contract](.github/workflows/api-contract.yml) workflow checks the SDK against the staging Control Plane and Data Plane OpenAPI documents, each plane's own `/openapi.json`. An operation is for every client unless it carries `x-introspection: {clients: [...]}`, which names the clients that call it (`[]` names none); the SDK must call every operation without `clients` and every one whose `clients` include `sdk`. Those flags are the check's only classification: it keeps no list of its own. It reads the requests in `crates/introspection-sdk/src` and compares method and path only:
 
 - A route the SDK calls that neither document has fails, on pull requests too.
-- An operation flagged for the SDK that it never calls fails after each staging deploy of the API (introspection-cloud sends the `api-reference-deployed` `repository_dispatch`) and in a run by hand. On a pull request it is only listed in the job summary.
+- An operation for the SDK that it never calls fails after each staging deploy of the API (introspection-cloud sends the `api-reference-deployed` `repository_dispatch`) and in a run by hand. On a pull request it is only listed in the job summary.
 
-A deploy-triggered run posts to `#main-build-alerts` when the result changes from clean to drift or back. A document staging answers with 404 skips the check.
+The deploy dispatch carries both planes' base URLs (`client_payload.cp_url`, `client_payload.dp_url`), and the workflow keeps the newest pair in the Actions cache for pull requests and manual runs; a manual run can also pass `cp_url` and `dp_url`. A deploy-triggered run posts to `#main-build-alerts` when the result changes from clean to drift or back. A document that cannot be read (404 included) fails the run without posting or changing the recorded state.
 
 Run the check locally against staging, or against local copies:
 
 ```sh
-cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
+INTROSPECTION_CP_URL=https://api.staging.introspection.dev \
+INTROSPECTION_DP_URL=https://api.gcp01.us-central1.gcp.introspection.dev \
+  cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
 
 INTROSPECTION_CONTROLPLANE_SPEC=path/to/controlplane.json \
 INTROSPECTION_DATAPLANE_SPEC=path/to/dataplane.json \
   cargo test -p introspection-sdk --test api_contract_test -- --ignored --nocapture
 ```
 
-Each variable takes a path (relative to the repository root) or a URL.
+The `_SPEC` variables take a path (relative to the repository root) or a URL.
 
 ## License
 
