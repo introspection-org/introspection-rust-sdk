@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.33.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.32.0...v0.33.0) (2026-10-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* add the project administration and eval resources the CLI calls ([#123](https://github.com/introspection-org/introspection-rust-sdk/issues/123))
+
+### Features
+
+* add the project administration and eval resources the CLI calls ([#123](https://github.com/introspection-org/introspection-rust-sdk/issues/123)) ([82cce9d](https://github.com/introspection-org/introspection-rust-sdk/commit/82cce9d6d50cb0bfee3c6308acd2deb538f70cdb))
+
 ## [0.32.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.31.1...v0.32.0) (2026-10-23)
 
 
