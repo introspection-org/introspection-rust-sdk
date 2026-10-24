@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.33.0...v0.33.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **walk:** a poll reads a 404 as not yet ([#153](https://github.com/introspection-org/introspection-rust-sdk/issues/153)) ([9f1d83a](https://github.com/introspection-org/introspection-rust-sdk/commit/9f1d83ade8d2c8fb1fd2c519756d642e5352f014))
+* **walk:** concurrent walks never sweep each other's project ([#154](https://github.com/introspection-org/introspection-rust-sdk/issues/154)) ([dda9e7d](https://github.com/introspection-org/introspection-rust-sdk/commit/dda9e7d391d84586ac37259f7d326556a78d0b00))
+
 ## [0.33.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.32.0...v0.33.0) (2026-10-23)
 
 
