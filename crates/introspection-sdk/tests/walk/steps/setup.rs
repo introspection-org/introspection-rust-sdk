@@ -14,7 +14,6 @@ use introspection_sdk::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::cleanup::remove_walk_resources;
 use crate::steps::expect_not_found;
 use crate::support::{assert_stable, recordings_dir, settled, walk, Creds, Mode, BOOTSTRAP_FILE};
 use crate::{set, Walk};
@@ -78,23 +77,57 @@ pub const APPLICATION_SCOPES: [&str; 54] = [
 ];
 
 pub async fn clean_slate(w: &mut Walk) {
-    // The walk runs in the project the login names and never deletes it; a
-    // record run writes the id beside the recording, which is all replay
-    // needs to send the same read.
-    let project = w
-        .owner()
+    // Every run starts in a project of its own, created here on the login's
+    // deployment and deleted by the teardown. A record run writes both ids
+    // beside the recording, which is all replay needs to send the same calls.
+    let owner = w.owner();
+    let login_project = owner
         .projects()
         .get(w.settings.bootstrap_project_id.as_str())
         .await
         .expect("read the login's project");
+    // A run that crashed before its teardown left its project behind.
+    // todo: no `Projects::create` / `delete`.
+    let raw = w.owner.cp_raw();
+    let projects = owner
+        .projects()
+        .list(&ProjectListParams::default())
+        .collect_all(0)
+        .await
+        .expect("list projects");
+    for stale in projects {
+        if stale
+            .slug
+            .as_deref()
+            .is_some_and(|s| s.starts_with(walk::PROJECT_SLUG_PREFIX))
+        {
+            raw.delete(&format!("/v1/projects/{}", stale.id))
+                .await
+                .expect("delete a crashed run's project");
+        }
+    }
+    let project: Project = raw
+        .post(
+            "/v1/projects",
+            &json!({
+                "name": walk::PROJECT_NAME,
+                "slug": w.settings.project_slug,
+                "deployment_id": login_project.deployment_id,
+            }),
+        )
+        .await
+        .expect("create the walk's project");
     if w.mode == Mode::Record {
         std::fs::create_dir_all(recordings_dir()).expect("create the recordings directory");
         std::fs::write(
             recordings_dir().join(BOOTSTRAP_FILE),
-            json!({ "project_id": project.id }).to_string() + "\n",
+            json!({ "project_id": login_project.id, "project_slug": w.settings.project_slug })
+                .to_string()
+                + "\n",
         )
         .expect("write bootstrap.json");
     }
+    w.login_project = Some(login_project);
     // The owner's Data Plane token for the project: it carries `git:push`,
     // which no service account can, and the member-only Data Plane writes.
     // todo: no SDK method mints it.
@@ -116,26 +149,20 @@ pub async fn clean_slate(w: &mut Walk) {
     });
     w.original_description = project.description.clone();
     w.project = Some(project);
-    let member = w.member();
-    remove_walk_resources(w, &member).await;
 }
 
 pub async fn project(w: &mut Walk) {
     let owner = w.owner();
     let project = set(&w.project, "the project").clone();
-    // The project's name, slug and description are the login's.
-    assert_stable!(project, {
-        ".name" => "[login's]",
-        ".slug" => "[login's]",
-        ".description" => "[login's]",
-    }, @r#"
+    // The slug is new on every live run.
+    assert_stable!(project, { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
       "id": "[uuid]",
-      "name": "[login's]",
+      "name": "SDK end-to-end walk",
       "org_id": "[uuid]",
-      "slug": "[login's]"
+      "slug": "[per run]"
     }
     "#);
     let read = owner
@@ -171,8 +198,7 @@ pub async fn project(w: &mut Walk) {
         .expect("restore the description");
     assert_eq!(restored.description.unwrap_or_default(), original);
 
-    // Creating and deleting a project is the one write the login's own
-    // project must not see, so a sibling takes it.
+    // A sibling is created and deleted while the walk's project is in use.
     let sibling: Project = raw
         .post(
             "/v1/projects",
@@ -185,14 +211,14 @@ pub async fn project(w: &mut Walk) {
         .await
         .expect("create a sibling project");
     assert_eq!(sibling.deployment_id, project.deployment_id);
-    assert_stable!(sibling, { ".name" => "[login's]", ".slug" => "[login's]" }, @r#"
+    assert_stable!(sibling, { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
       "id": "[uuid]",
-      "name": "[login's]",
+      "name": "SDK end-to-end walk (walk)",
       "org_id": "[uuid]",
-      "slug": "[login's]"
+      "slug": "[per run]"
     }
     "#);
     raw.delete(&format!("/v1/projects/{}", sibling.id))

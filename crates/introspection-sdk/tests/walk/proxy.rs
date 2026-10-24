@@ -246,7 +246,9 @@ impl Recorder {
             headers,
             body,
         };
-        if exchange.header(QUIET_HEADER).is_none() {
+        // The step 3 `git push` crosses the proxy too; replay never pushes,
+        // so the pack stays out of the recording.
+        if exchange.header(QUIET_HEADER).is_none() && !exchange.url.contains("/v1/git/") {
             let entry = to_entry(
                 exchange,
                 &reply,

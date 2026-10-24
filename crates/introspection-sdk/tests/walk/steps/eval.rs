@@ -106,7 +106,7 @@ pub async fn eval(w: &mut Walk) {
         "sandbox_status": "provisioning"
       },
       "created_at": "[timestamp]",
-      "display_index": 5,
+      "display_index": "[number]",
       "id": "[uuid]",
       "is_archived": false,
       "kind": "eval",

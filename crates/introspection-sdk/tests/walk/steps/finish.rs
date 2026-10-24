@@ -189,14 +189,18 @@ pub async fn teardown(w: &mut Walk) {
             .get(application, Some(project.into()))
             .await,
     );
-    // The login's project is untouched: still there, as it was.
+    // The walk's project goes with it; the login's is untouched.
+    w.owner
+        .cp_raw()
+        .delete(&format!("/v1/projects/{project}"))
+        .await
+        .expect("delete the walk's project");
+    expect_not_found(owner.projects().get(project).await);
+    let login_project = set(&w.login_project, "the login's project").id;
     let after = owner
         .projects()
-        .get(project)
+        .get(login_project)
         .await
         .expect("read the login's project");
-    assert_eq!(
-        after.description.unwrap_or_default(),
-        w.original_description.clone().unwrap_or_default()
-    );
+    assert_eq!(after.id, login_project);
 }

@@ -1,9 +1,8 @@
 //! The SDK end-to-end walk: one ordered scenario from a clean project to a
-//! graded eval, every step an SDK call, replaying the recording the JS walk
-//! made against a local stack (introspection-cloud
-//! `docs/design/sdk-end-to-end-walk.md`, introspection-js-sdk
-//! `tests/walk/walk.test.ts`). The same steps, in the same order, under the
-//! same names, so the four SDKs' walks read side by side.
+//! graded eval, every step an SDK call, replaying this SDK's own recording
+//! against a local stack (introspection-cloud
+//! `docs/design/sdk-end-to-end-walk.md`). The design doc's steps, in its
+//! order, under its names, so the four SDKs' walks read side by side.
 //!
 //! Replay (the default) needs no stack, no keys and no network:
 //!
@@ -50,6 +49,7 @@ pub struct Walk {
     pub member: Option<Creds>,
     /// The walk's service account, from step 2 on.
     pub sa: Option<Creds>,
+    pub login_project: Option<Project>,
     pub project: Option<Project>,
     pub original_description: Option<String>,
     pub application: Option<Application>,
@@ -166,6 +166,7 @@ async fn sdk_end_to_end_walk() {
         owner,
         member: None,
         sa: None,
+        login_project: None,
         project: None,
         original_description: None,
         application: None,

@@ -27,6 +27,8 @@ use crate::proxy::{Replayer, QUIET_HEADER};
 /// values as the JS walk's `WALK`, since every SDK replays its recording.
 pub mod walk {
     pub const SIBLING_SUFFIX: &str = "-walk";
+    pub const PROJECT_NAME: &str = "SDK end-to-end walk";
+    pub const PROJECT_SLUG_PREFIX: &str = "sdk-walk-";
     pub const APPLICATION_NAME: &str = "sdk-coverage-walk";
     pub const TAG_NAME: &str = "walk";
     pub const API_KEY_NAME: &str = "walk";
@@ -97,7 +99,12 @@ impl Mode {
 pub struct Settings {
     pub base_api_url: String,
     pub cp_session: String,
+    /// The login's project: read only for the deployment the walk's own
+    /// project is created on.
     pub bootstrap_project_id: String,
+    /// The project the walk creates, runs in and deletes: new on every live
+    /// run, so each starts empty; replay sends the recorded one.
+    pub project_slug: String,
     pub dp_url: Option<String>,
     /// The recipe agent: `scripted` on Compose, `agent` with a real model.
     pub agent: String,
@@ -135,6 +142,10 @@ impl Settings {
                     .as_str()
                     .expect("bootstrap.json names the project")
                     .into(),
+                project_slug: bootstrap["project_slug"]
+                    .as_str()
+                    .expect("bootstrap.json names the walk's project")
+                    .into(),
                 dp_url: Some("http://localhost:8002".into()),
                 agent: "scripted".into(),
                 target: "compose".into(),
@@ -155,9 +166,10 @@ impl Settings {
             base_api_url: pick("INTROSPECTION_BASE_API_URL", "cp_url").expect(missing),
             cp_session: pick("INTROSPECTION_CP_SESSION", "cp_session").expect(missing),
             bootstrap_project_id: pick("INTROSPECTION_PROJECT_ID", "project_id").expect(
-                "the walk runs in the login's project: pick one with `introspection login` \
-                 or set INTROSPECTION_PROJECT_ID",
+                "the walk creates its project on the login's deployment: pick a project with \
+                 `introspection login` or set INTROSPECTION_PROJECT_ID",
             ),
+            project_slug: format!("{}{:08x}", walk::PROJECT_SLUG_PREFIX, fastrand::u32(..)),
             dp_url: pick("INTROSPECTION_DP_URL", "dp_url"),
             agent: std::env::var("WALK_AGENT").unwrap_or_else(|_| "scripted".into()),
             target: std::env::var("WALK_TARGET").unwrap_or_else(|_| "compose".into()),
@@ -480,7 +492,8 @@ static JWT: LazyLock<Regex> =
     LazyLock::new(|| re(r"^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"));
 static URL: LazyLock<Regex> = LazyLock::new(|| re(r"^https?://"));
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| re(r"\d"));
-static MEASURED_KEY: LazyLock<Regex> = LazyLock::new(|| re(r"(_ms$|_count$|_tokens$|^max_turn$)"));
+static MEASURED_KEY: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(_ms$|_count$|_tokens$|^max_turn$|^display_index$)"));
 static VOLATILE_KEY: LazyLock<Regex> = LazyLock::new(|| {
     re(
         r"(^id$|_at$|_sha$|token$|secret$|^key$|_key$|cookie$|^url$|_url$|^expires_in$|^client_id$|_prefix$|_suffix$|^prefix$|^key_display$|image_tag$|_image_name$|_bytes$)",
@@ -499,7 +512,7 @@ pub fn stable(value: &Value, key: &str) -> Value {
         }
         Value::String(s) => Value::String(stable_string(s, key)),
         // A measured number (a duration, a span or call count, a token
-        // total) moves between two runs of the same script; its bounds are
+        // total, a task's per-project index) moves between two runs; its bounds are
         // asserted beside the snapshot instead.
         Value::Number(_) if VOLATILE_KEY.is_match(key) || MEASURED_KEY.is_match(key) => {
             Value::String("[number]".into())
@@ -664,4 +677,19 @@ pub fn report(steps: &Steps, replayer: Option<&Replayer>) -> Value {
             .map(|(method, path)| json!({ "method": method, "path": path }))
             .collect::<Vec<_>>(),
     })
+}
+
+/// A UUIDv7-shaped id derived from the span an event annotates: the same on
+/// every replay (the span is recorded), new on every live run, where a fixed
+/// id would collide with the receipt a previous run left in the project.
+pub fn span_event_id(trace_id: &str, span_id: &str, label: &str) -> uuid::Uuid {
+    let digest = ring::digest::digest(
+        &ring::digest::SHA256,
+        format!("{trace_id}:{span_id}:{label}").as_bytes(),
+    );
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest.as_ref()[..16]);
+    bytes[6] = (bytes[6] & 0x0F) | 0x70;
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
 }

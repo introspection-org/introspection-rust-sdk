@@ -138,18 +138,20 @@ impl Har {
         }
     }
 
-    /// Whether the log reaches the walk's end: the teardown reads the
-    /// application it removed (`404`), then the login's project. A record run
-    /// that stopped short leaves a partial log, which replay must not take for
-    /// the contract.
+    /// Whether the log reaches the walk's end: the teardown reads the walk's
+    /// project it deleted (`404`), then the login's project. A record run that
+    /// stopped short leaves a partial log, which replay must not take for the
+    /// contract.
     pub fn is_complete(&self) -> bool {
         let entries = &self.log.entries;
-        let [.., app, last] = entries.as_slice() else {
+        let [.., gone, last] = entries.as_slice() else {
             return false;
         };
-        app.response.status == 404
-            && app.request.url.contains("/v1/applications/")
+        gone.request.method == "GET"
+            && gone.response.status == 404
+            && PROJECT_URL.is_match(&gone.request.url)
             && last.request.method == "GET"
+            && last.response.status == 200
             && PROJECT_URL.is_match(&last.request.url)
     }
 }

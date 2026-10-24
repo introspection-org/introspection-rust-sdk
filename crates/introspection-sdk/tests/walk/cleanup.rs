@@ -144,7 +144,7 @@ async fn remove_tasks_and_files(dp: &IntrospectionClient) {
 
 async fn remove_control_plane(w: &Walk, owner: &IntrospectionClient, project: Uuid) {
     remove_runtimes(&w.owner, owner, project).await;
-    remove_connectors(owner, project).await;
+    remove_connectors(&w.owner, owner, project).await;
     remove_settings(owner, project).await;
     remove_repositories(&w.owner, owner, project).await;
     remove_applications(owner, project).await;
@@ -228,7 +228,8 @@ async fn remove_applications(owner: &IntrospectionClient, project: Uuid) {
     }
 }
 
-async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
+async fn remove_connectors(creds: &Creds, owner: &IntrospectionClient, project: Uuid) {
+    let raw = creds.cp_raw();
     let connectors = owner
         .connectors()
         .list(&ConnectorListParams {
@@ -257,9 +258,9 @@ async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
                 .await
                 .expect("revoke connection");
         }
-        owner
-            .connectors()
-            .delete(c.id)
+        // todo: `Connectors::delete` sends no project, which an owner's
+        // session needs outside the login's project.
+        raw.delete(&format!("/v1/connectors/{}?project={project}", c.id))
             .await
             .expect("delete connector");
     }

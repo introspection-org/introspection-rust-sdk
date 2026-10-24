@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::steps::expect_not_found;
-use crate::support::{assert_stable, settled, walk};
+use crate::support::{assert_stable, settled, span_event_id, walk};
 use crate::{set, Walk};
 
 fn walk_metadata(extra: &[(&str, &str)]) -> HashMap<String, Value> {
@@ -243,7 +243,7 @@ pub async fn task(w: &mut Walk) {
     assert_stable!(task, { ".metadata" => "[platform's]" }, @r#"
     {
       "created_at": "[timestamp]",
-      "display_index": 4,
+      "display_index": "[number]",
       "id": "[uuid]",
       "is_archived": false,
       "kind": "agent",
@@ -747,16 +747,17 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         trace_id: item.trace_id.clone(),
         span_id: item.span_id.clone().expect("a span id"),
     };
-    let event = |id: &str| AnnotationEventOptions {
-        event_id: Some(id.parse().expect("an event id")),
+    let event = |label: &str| AnnotationEventOptions {
+        event_id: Some(span_event_id(&target.trace_id, &target.span_id, label)),
     };
-    // A fixed event id, so the request replays; the SDK would mint one.
+    // An event id derived from the span, so the request replays; the SDK
+    // would mint one.
     member
         .annotations()
         .create(
             target.clone(),
             AnnotationMutation::Labels(vec!["walk".into()]),
-            event("019a1000-0000-7000-8000-0000000000a1"),
+            event("labels"),
         )
         .await
         .expect("label the span");
@@ -768,7 +769,7 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         .create(
             target.clone(),
             AnnotationMutation::ReviewerEmails(vec![]),
-            event("019a1000-0000-7000-8000-0000000000a3"),
+            event("reviewers"),
         )
         .await
         .expect("clear the reviewers");
