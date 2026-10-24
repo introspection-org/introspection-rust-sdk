@@ -25,8 +25,8 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 
 ## The end-to-end walk
 
-- `crates/introspection-sdk/tests/walk` is the SDK end-to-end walk (introspection-cloud `docs/design/sdk-end-to-end-walk.md`): the JS walk's steps, in its order, replaying `tests/recordings/walk/recording.har` through a local forward proxy every SDK client reaches via `HTTP_PROXY`. It needs the `arrow` feature, so it runs under CI's `cargo test --all-features`.
-- The recording is the JS SDK's, so the four SDKs replay the same server responses. Refresh it with `scripts/sync-walk-recording.sh` (from GitHub `main`, or a JS SDK checkout as the argument); don't edit the HAR by hand.
+- `crates/introspection-sdk/tests/walk` is the SDK end-to-end walk (introspection-cloud `docs/design/sdk-end-to-end-walk.md`): the design doc's steps, in its order, replaying `tests/recordings/walk/recording.har` through a local forward proxy every SDK client reaches via `HTTP_PROXY`. It needs the `arrow` feature, so it runs under CI's `cargo test --all-features`.
+- The recording is this SDK's own, recorded against Compose (below); don't edit the HAR by hand, and take nothing from another SDK's.
 - A request the recording does not hold fails the step with the method, URL and a diff against the closest recorded requests. Fix the SDK or the step; widen the matcher only for a documented equivalence (the lists in `tests/walk/har.rs`).
 - Snapshots are insta inline snapshots through `assert_stable!`, whose one redaction mirrors the JS walk's `stable()`. Update them with `cargo insta test -p introspection-sdk --all-features --test walk --accept`.
 - A route the SDK has no method for is called through `support::Raw` with a `// todo:` and shows up in the run's report (`target/tmp/walk-report.json`). Don't add an SDK method from a walk PR.
