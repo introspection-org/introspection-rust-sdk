@@ -15,7 +15,9 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::steps::expect_not_found;
-use crate::support::{assert_stable, recordings_dir, settled, walk, Creds, Mode, BOOTSTRAP_FILE};
+use crate::support::{
+    assert_stable, recordings_dir, settled, walk, walk_project_born, Creds, Mode, BOOTSTRAP_FILE,
+};
 use crate::{set, Walk};
 
 /// Every scope a service-account application may hold that the walk uses.
@@ -86,8 +88,12 @@ pub async fn clean_slate(w: &mut Walk) {
         .get(w.settings.bootstrap_project_id.as_str())
         .await
         .expect("read the login's project");
-    // A run that crashed before its teardown left its project behind.
+    // A run that crashed before its teardown left its project behind; one
+    // still running is younger than the cutoff. Measured from this run's own
+    // slug, so replay decides as the recording did.
     // todo: no `Projects::create` / `delete`.
+    let now =
+        walk_project_born(&w.settings.project_slug).expect("the walk's own slug carries its time");
     let raw = w.owner.cp_raw();
     let projects = owner
         .projects()
@@ -96,11 +102,8 @@ pub async fn clean_slate(w: &mut Walk) {
         .await
         .expect("list projects");
     for stale in projects {
-        if stale
-            .slug
-            .as_deref()
-            .is_some_and(|s| s.starts_with(walk::PROJECT_SLUG_PREFIX))
-        {
+        let born = stale.slug.as_deref().and_then(walk_project_born);
+        if born.is_some_and(|born| now.saturating_sub(born) > walk::STALE_AFTER_SECONDS) {
             raw.delete(&format!("/v1/projects/{}", stale.id))
                 .await
                 .expect("delete a crashed run's project");

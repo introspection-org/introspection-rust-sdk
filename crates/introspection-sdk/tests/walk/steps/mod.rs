@@ -93,9 +93,14 @@ pub fn push_recipe(settings: &Settings, url: &str, bearer: &str) {
                 .env("GIT_CONFIG_VALUE_1", "");
         }
         let out = cmd.output().expect("run git");
+        let hint = if args.first() == Some(&"clone") {
+            "; set RECIPE_DIR to a recipe-harbor-mcp-agent checkout, or keep one beside this repository"
+        } else {
+            ""
+        };
         assert!(
             out.status.success(),
-            "git {args:?} failed: {}",
+            "git {args:?} failed: {}{hint}",
             String::from_utf8_lossy(&out.stderr)
         );
     };
