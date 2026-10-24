@@ -428,11 +428,13 @@ where
     if mode != Mode::Replay {
         let deadline = Instant::now() + timeout;
         loop {
-            let value = poll()
-                .await
-                .unwrap_or_else(|e| panic!("{label}: poll failed: {e}"));
-            if done(&value) {
-                break;
+            // A conversation reads 404 until its first spans are ingested: not
+            // yet, rather than gone.
+            match poll().await {
+                Ok(value) if done(&value) => break,
+                Ok(_) => {}
+                Err(e) if e.status() == Some(404) => {}
+                Err(e) => panic!("{label}: poll failed: {e}"),
             }
             assert!(
                 Instant::now() < deadline,
