@@ -93,7 +93,7 @@ httpdate = "1.0.3"
 
 [dev-dependencies]
 ring = "0.17"
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 # In-memory span / log exporters for the in-crate tests. As a dev-dependency
 # they are available under every feature set, so `cargo test --features otel`
 # builds the same tests as `--features testing`.
@@ -102,6 +102,15 @@ insta = { version = "1", features = ["json", "redactions"] }
 wiremock = "0.6"
 flate2 = "1"
 dotenvy = "0.15"
+# The end-to-end walk (tests/walk): a forward proxy that replays the shared
+# HAR recording, or records one, for every client the SDK builds.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+regex = "1"
+base64 = { workspace = true }
+url = { workspace = true }
+percent-encoding = { workspace = true }
 
 [[example]]
 name = "connectors-slack"
@@ -138,6 +147,13 @@ required-features = ["testing"]
 name = "export_timeout_test"
 path = "tests/export_timeout_test.rs"
 required-features = ["otel"]
+
+# The end-to-end walk replays a recording that includes the Arrow reads, so
+# it needs the decoder; CI runs `cargo test --all-features`.
+[[test]]
+name = "walk"
+path = "tests/walk/main.rs"
+required-features = ["arrow"]
 
 # Linting configuration
 # Run: cargo clippy -- -W clippy::all -W clippy::pedantic
