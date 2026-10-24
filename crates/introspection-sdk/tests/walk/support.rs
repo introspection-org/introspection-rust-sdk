@@ -28,7 +28,12 @@ use crate::proxy::{Replayer, QUIET_HEADER};
 pub mod walk {
     pub const SIBLING_SUFFIX: &str = "-walk";
     pub const PROJECT_NAME: &str = "SDK end-to-end walk";
-    pub const PROJECT_SLUG_PREFIX: &str = "sdk-walk-";
+    /// `sdk-walk-rust-<unix time, hex>-<random>`: the SDK, so walks of
+    /// different SDKs never sweep each other's project, and the time, which
+    /// the projects list does not carry, so a sweep spares a run still going.
+    pub const PROJECT_SLUG_PREFIX: &str = "sdk-walk-rust-";
+    /// A walk takes about a minute; one this old crashed before its teardown.
+    pub const STALE_AFTER_SECONDS: u64 = 3600;
     pub const APPLICATION_NAME: &str = "sdk-coverage-walk";
     pub const TAG_NAME: &str = "walk";
     pub const API_KEY_NAME: &str = "walk";
@@ -117,6 +122,17 @@ pub struct Settings {
 
 const RECIPE_REPOSITORY_URL: &str = "https://github.com/introspection-org/recipe-harbor-mcp-agent";
 
+/// A `recipe-harbor-mcp-agent` checkout beside this repository: the recipe is
+/// private, so cloning it needs GitHub credentials a local checkout does not.
+fn sibling_recipe() -> Option<String> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../recipe-harbor-mcp-agent");
+    dir.join(".git")
+        .exists()
+        .then(|| dir.canonicalize().ok())
+        .flatten()
+        .map(|d| d.display().to_string())
+}
+
 pub fn recordings_dir() -> PathBuf {
     std::env::var_os("WALK_RECORDINGS_DIR")
         .map(PathBuf::from)
@@ -169,13 +185,23 @@ impl Settings {
                 "the walk creates its project on the login's deployment: pick a project with \
                  `introspection login` or set INTROSPECTION_PROJECT_ID",
             ),
-            project_slug: format!("{}{:08x}", walk::PROJECT_SLUG_PREFIX, fastrand::u32(..)),
+            project_slug: format!(
+                "{}{:x}-{:04x}",
+                walk::PROJECT_SLUG_PREFIX,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("the clock is past the epoch")
+                    .as_secs(),
+                fastrand::u16(..)
+            ),
             dp_url: pick("INTROSPECTION_DP_URL", "dp_url"),
             agent: std::env::var("WALK_AGENT").unwrap_or_else(|_| "scripted".into()),
             target: std::env::var("WALK_TARGET").unwrap_or_else(|_| "compose".into()),
             recipe_repository_url: std::env::var("RECIPE_DIR")
                 .or_else(|_| std::env::var("RECIPE_REPOSITORY_URL"))
-                .unwrap_or_else(|_| RECIPE_REPOSITORY_URL.into()),
+                .unwrap_or_else(|_| {
+                    sibling_recipe().unwrap_or_else(|| RECIPE_REPOSITORY_URL.into())
+                }),
             recipe_git_ref: std::env::var("RECIPE_GIT_REF").unwrap_or_else(|_| "main".into()),
         }
     }
@@ -692,4 +718,11 @@ pub fn span_event_id(trace_id: &str, span_id: &str, label: &str) -> uuid::Uuid {
     bytes[6] = (bytes[6] & 0x0F) | 0x70;
     bytes[8] = (bytes[8] & 0x3F) | 0x80;
     uuid::Uuid::from_bytes(bytes)
+}
+
+/// When a walk project was created, from its slug (see
+/// `walk::PROJECT_SLUG_PREFIX`); `None` for anyone else's project.
+pub fn walk_project_born(slug: &str) -> Option<u64> {
+    let rest = slug.strip_prefix(walk::PROJECT_SLUG_PREFIX)?;
+    u64::from_str_radix(rest.split('-').next()?, 16).ok()
 }
