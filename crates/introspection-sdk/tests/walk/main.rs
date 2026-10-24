@@ -16,6 +16,10 @@
 //!   WALK_MODE=record cargo test --all-features --test walk        # re-record
 //!   WALK_MODE=passthrough cargo test --all-features --test walk   # live, records nothing
 
+// The walk's helpers return the SDK's own `ApiResult` so a step sees the
+// public error contract; boxing it to shrink them would change what they see.
+#![allow(clippy::result_large_err)]
+
 mod cleanup;
 mod har;
 mod proxy;
