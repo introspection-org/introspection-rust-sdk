@@ -1,7 +1,8 @@
 //! What the project-administration namespaces (API keys, Applications,
 //! credentials, variables, integrations, judges, projects, `oidc/me`) and the
 //! eval namespaces (images, task commands) send and decode, backed by
-//! `wiremock`. `live_api_test` pins that a deployment answers the same calls.
+//! `wiremock`. The end-to-end walk (`tests/walk`) pins that a deployment
+//! answers the same calls.
 
 use futures::StreamExt;
 use introspection_sdk::{
