@@ -1,6 +1,6 @@
 [package]
 name = "introspection-sdk"
-version = "0.33.0"
+version = "0.33.1"
 edition.workspace = true
 description = "Rust SDK for Introspection — continuously improve your AI systems with production feedback and frontier practices"
 license.workspace = true
