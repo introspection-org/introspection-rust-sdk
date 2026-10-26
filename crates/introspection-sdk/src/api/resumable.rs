@@ -3,10 +3,11 @@
 //!
 //! # Cursor
 //!
-//! The first attach requests replay from cursor `0`, so output produced
-//! before the first connection is included. Every reconnect resumes from the
-//! last content cursor (`Last-Event-ID`). Only new content advances the
-//! cursor; lifecycle events, heartbeats and duplicate content do not.
+//! The first attach requests replay from [`StreamOptions::since`] (default
+//! `0`), so output produced before the first connection is included. Every
+//! reconnect resumes from the last content cursor (`Last-Event-ID`). Only new
+//! content advances the cursor; lifecycle events, heartbeats and duplicate
+//! content do not.
 //!
 //! # Completion
 //!
@@ -32,8 +33,11 @@
 //! window after every piece of output. The timeout is checked only when
 //! recovery is needed; it never interrupts an open, healthy connection. A run
 //! that is not attachable yet answers `429`, which the stream waits out with
-//! `Retry-After` as the floor. Tune all of this with [`StreamOptions`]
-//! through [`TaskRuns::stream_with`].
+//! `Retry-After` as the floor; once the window runs out it ends with
+//! [`IntrospectionAPIError::RunNotReady`]. By default the server holds the
+//! first attach open until the run starts; [`StreamOptions::wait_for_start`]
+//! `Some(false)` asks it to answer `429` instead. Tune all of this with
+//! [`StreamOptions`] through [`TaskRuns::stream_with`].
 //!
 //! # Past the replay buffer
 //!
@@ -42,7 +46,7 @@
 //! messages so far. Its id becomes the new cursor, and [`RunHandle::text`]
 //! takes its assistant text in place of what it had read. When the server
 //! holds neither the frames nor a snapshot, it answers `410` and the stream
-//! ends with [`IntrospectionAPIError::StreamIncomplete`]. Runtime images that
+//! ends with [`IntrospectionAPIError::StreamHistoryUnavailable`]. Runtime images that
 //! predate the snapshot send `CUSTOM resume_gap` instead. Raw streams pass
 //! that event through, and [`RunHandle::text`] fails with `StreamIncomplete`
 //! on it.
@@ -70,7 +74,15 @@
 //! SHA-256; intentional contract changes must update all four copies and
 //! their expected hashes together.
 //!
+//! # Raw frames
+//!
+//! [`TaskRuns::stream_frames`] yields each event as a [`RunFrame`]: the typed
+//! [`Event`] together with the SSE frame it came from (`id`, `event` name and
+//! `data` verbatim), for a caller that keeps the cursor itself or forwards
+//! the wire form. It applies the same recovery as the typed stream.
+//!
 //! [`TaskRuns::stream`]: crate::api::TaskRuns::stream
+//! [`TaskRuns::stream_frames`]: crate::api::TaskRuns::stream_frames
 //! [`TaskRuns::stream_with`]: crate::api::TaskRuns::stream_with
 //! [`RunHandle::text`]: crate::RunHandle::text
 
@@ -86,7 +98,7 @@ use crate::agui::{introspection::reconnect_event, Event};
 use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
-use crate::api::schemas::{TaskRun, TaskStatus};
+use crate::api::schemas::{SseEvent, TaskRun, TaskStatus};
 use crate::api::sse::{decode_agui_event, parse_sse_response, AG_UI_FRAME};
 
 /// Options controlling the resilient run stream ([`stream_resumable`]).
@@ -106,6 +118,13 @@ pub struct StreamOptions {
     /// is otherwise fully transparent. Consumers branch on
     /// `Event::Custom(e) if e.name == agui::introspection::RECONNECT_EVENT_NAME`.
     pub emit_reconnect_events: bool,
+    /// The content cursor to start from: the last numeric SSE `id:` already
+    /// received. `0` (the default) replays the run from its start.
+    pub since: u64,
+    /// `wait_for_start` on each attach. `None` leaves the server default, which
+    /// holds the attach open until the run starts. `Some(false)` asks for a
+    /// `429` with the readiness phase instead, which the stream waits out.
+    pub wait_for_start: Option<bool>,
 }
 
 impl Default for StreamOptions {
@@ -115,6 +134,8 @@ impl Default for StreamOptions {
             backoff: Duration::from_millis(500),
             timeout: Duration::from_secs(300),
             emit_reconnect_events: false,
+            since: 0,
+            wait_for_start: None,
         }
     }
 }
@@ -123,6 +144,23 @@ impl Default for StreamOptions {
 /// (RUN_* lifecycle, heartbeats) carry a non-numeric `c-…` id that is not.
 fn content_cursor(id: &Option<String>) -> bool {
     matches!(id, Some(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// One event of a run stream with the SSE frame it was decoded from.
+#[derive(Debug, Clone)]
+pub struct RunFrame {
+    /// The frame as the server sent it: `id`, `event` name and `data`.
+    /// `None` for an event the SDK synthesised, the opt-in
+    /// `introspection.reconnect` event.
+    pub frame: Option<SseEvent>,
+    /// The frame's `data` decoded as an AG-UI event.
+    pub event: Event,
+}
+
+impl RunFrame {
+    fn synthetic(event: Event) -> Self {
+        Self { frame: None, event }
+    }
 }
 
 /// Consume a run's SSE stream as a resumable sequence of typed AG-UI
@@ -136,17 +174,31 @@ pub fn stream_resumable(
     run_id: &str,
     opts: StreamOptions,
 ) -> impl Stream<Item = ApiResult<Event>> {
+    stream_resumable_frames(http, task_id, run_id, opts).map(|item| item.map(|f| f.event))
+}
+
+/// [`stream_resumable`], yielding each event with its SSE frame
+/// ([`RunFrame`]).
+pub fn stream_resumable_frames(
+    http: Arc<HttpClient>,
+    task_id: &str,
+    run_id: &str,
+    opts: StreamOptions,
+) -> impl Stream<Item = ApiResult<RunFrame>> {
     let run_path = format!(
         "/v1/tasks/{}/runs/{}",
         crate::api::encoding::encode(task_id),
         crate::api::encoding::encode(run_id),
     );
 
-    let path = format!("{run_path}/stream");
+    let path = match opts.wait_for_start {
+        Some(wait) => format!("{run_path}/stream?wait_for_start={}", u8::from(wait)),
+        None => format!("{run_path}/stream"),
+    };
 
     stream! {
         let mut last_progress = Instant::now();
-        let mut last_event_id = Some("0".to_string());
+        let mut last_event_id = Some(opts.since.to_string());
         let mut reconnects: u32 = 0;
         // Readiness waits are counted separately from reconnects: they are
         // not failed attempts, but the delay still has to grow or a DP that
@@ -166,18 +218,18 @@ pub fn stream_resumable(
                     let remaining = opts.timeout.checked_sub(last_progress.elapsed());
                     match remaining {
                         None => {
-                            yield Err(timeout_error());
+                            yield Err(IntrospectionAPIError::RunNotReady { phase, retry_after });
                             return;
                         }
                         Some(rem) => {
                             if opts.emit_reconnect_events {
-                                yield Ok(reconnect_event(json!({
+                                yield Ok(RunFrame::synthetic(reconnect_event(json!({
                                     "reason": "readiness",
                                     "attempt": reconnects,
                                     "last_event_id": last_event_id,
                                     "phase": phase,
                                     "retry_after_ms": retry_after.map(|d| d.as_millis() as u64),
-                                })));
+                                }))));
                             }
                             tokio::time::sleep(
                                 backoff_delay(readiness_waits, opts.backoff, retry_after)
@@ -216,7 +268,7 @@ pub fn stream_resumable(
                                         }
                                         if matches!(&event, Event::RunFinished(e) if e.result.as_ref().and_then(|v| v.get("reason")).and_then(|v| v.as_str()) == Some("stream_close")) { continue; }
                                         let settled = matches!(event, Event::RunFinished(_) | Event::RunError(_));
-                                        yield Ok(event);
+                                        yield Ok(RunFrame { frame: Some(frame), event });
                                         if settled { return; }
                                     }
                                     Err(e) => {
@@ -252,11 +304,11 @@ pub fn stream_resumable(
                         return;
                     }
                     if opts.emit_reconnect_events {
-                        yield Ok(reconnect_event(json!({
+                        yield Ok(RunFrame::synthetic(reconnect_event(json!({
                             "reason": if severed.is_some() { "severed" } else { "stream_close" },
                             "attempt": reconnects,
                             "last_event_id": last_event_id,
-                        })));
+                        }))));
                     }
                     let rem = opts.timeout.saturating_sub(last_progress.elapsed());
                     tokio::time::sleep(backoff_delay(reconnects, opts.backoff, None).min(rem)).await;
@@ -265,7 +317,12 @@ pub fn stream_resumable(
                 // The runtime holds neither the frames after this cursor nor a
                 // snapshot covering them, so no reconnect can complete the stream.
                 Ok(res) if res.status().as_u16() == 410 => {
-                    yield Err(IntrospectionAPIError::StreamIncomplete("The stream history is no longer available; read the conversation transcript".into()));
+                    let cursor = last_event_id.as_deref().and_then(|id| id.parse().ok()).unwrap_or(0);
+                    let detail = res.text().await.ok().filter(|t| !t.is_empty());
+                    yield Err(IntrospectionAPIError::StreamHistoryUnavailable {
+                        cursor,
+                        message: detail.unwrap_or_else(|| "The stream history is no longer available; read the conversation transcript".into()),
+                    });
                     return;
                 }
                 // Other non-2xx — surface it (won't fix on retry).
@@ -293,11 +350,11 @@ pub fn stream_resumable(
                         return;
                     }
                     if opts.emit_reconnect_events {
-                        yield Ok(reconnect_event(json!({
+                        yield Ok(RunFrame::synthetic(reconnect_event(json!({
                             "reason": "connect_error",
                             "attempt": reconnects,
                             "last_event_id": last_event_id,
-                        })));
+                        }))));
                     }
                     tokio::time::sleep(backoff_delay(reconnects, opts.backoff, None)).await;
                     continue;
@@ -315,10 +372,4 @@ async fn readiness_phase(res: reqwest::Response) -> Option<String> {
         .get("status")
         .and_then(|s| s.as_str())
         .map(str::to_string)
-}
-
-fn timeout_error() -> IntrospectionAPIError {
-    IntrospectionAPIError::Timeout(
-        "run stream did not become attachable before the timeout".to_string(),
-    )
 }

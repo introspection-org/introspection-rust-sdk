@@ -145,18 +145,23 @@
 //! with the SSE-standard `Last-Event-ID` so the server replays the frames the
 //! client missed, yielding one gap-free [`Event`] sequence (INT-252, see
 //! [`resumable`]). Readiness folds in the same way — a not-yet-attachable run
-//! answers with `429` + `Retry-After`, honoured as a backoff floor and retried,
-//! never surfaced. Use [`TaskRuns::stream_with`] to tune the recovery bounds or
-//! opt into an `introspection.reconnect` `CUSTOM` event on each reconnect.
+//! answers with `429` + `Retry-After`, honoured as a backoff floor and retried
+//! until the recovery window runs out ([`IntrospectionAPIError::RunNotReady`]).
+//! A `410` ends the stream with
+//! [`IntrospectionAPIError::StreamHistoryUnavailable`]. Use
+//! [`TaskRuns::stream_with`] to tune the recovery bounds, start from a cursor,
+//! or opt into an `introspection.reconnect` `CUSTOM` event on each reconnect.
 //!
-//! The raw frame layer ([`parse_sse_response`] / [`crate::SseEvent`]) remains
-//! available for advanced callers who want the untyped `event` / `data` / `id`
-//! wire shape.
+//! [`TaskRuns::stream_frames`] yields the same events, each with the SSE frame
+//! (`id` / `event` / `data`) it came from. The raw frame layer
+//! ([`parse_sse_response`] / [`crate::SseEvent`]) remains available for
+//! advanced callers who want the untyped wire shape without recovery.
 //!
 //! [`Event`]: crate::agui::Event
 //! [`Event::Unknown`]: crate::agui::Event::Unknown
 //! [`Event::TextMessageContent`]: crate::agui::Event::TextMessageContent
 //! [`TaskRuns::stream_with`]: tasks::TaskRuns::stream_with
+//! [`TaskRuns::stream_frames`]: tasks::TaskRuns::stream_frames
 //!
 //! # Errors
 //!
@@ -209,7 +214,7 @@ pub use genai_span::{
 };
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
-pub use resumable::{stream_resumable, StreamOptions};
+pub use resumable::{stream_resumable, stream_resumable_frames, RunFrame, StreamOptions};
 pub use schemas::{
     AgentInfo, AnnotationEvent, AnnotationPayload, ApiKey, ApiKeyAcknowledgement, ApiKeyCapability,
     ApiKeyCreateParams, ApiKeyCreated, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus,

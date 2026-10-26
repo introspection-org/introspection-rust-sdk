@@ -344,7 +344,7 @@ fn default_task_status() -> TaskStatus {
 /// traverse outside the task's files directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskFileRef {
-    pub id: String,
+    pub id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -368,6 +368,8 @@ pub struct TaskRepoRequest {
     pub repo: String,
     #[serde(default, rename = "ref")]
     pub git_ref: Option<String>,
+    /// Shallow-clone depth, `0` for the full history. `None` takes the
+    /// platform default, a depth of `1`.
     #[serde(default)]
     pub depth: Option<u32>,
 }
@@ -458,6 +460,9 @@ pub struct TaskListParams {
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_automation_id: Option<bool>,
+    /// Only tasks created for this runtime.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<Uuid>,
     /// Filter by one `key:value` tag. ANDed with the ownership predicate, so
     /// it only ever narrows.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -480,6 +485,13 @@ pub struct TaskPrompt {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TaskRunCreate {
+    /// Stable identity of this message across retries (1..256 characters).
+    /// Resend a request whose outcome is unknown with the same `delivery_id`
+    /// and the same body: the API answers with the run it already accepted
+    /// instead of starting a second turn. Reusing it for a different body
+    /// answers `409`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<TaskPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
