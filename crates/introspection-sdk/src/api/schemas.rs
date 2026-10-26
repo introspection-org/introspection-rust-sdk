@@ -7806,6 +7806,21 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, IntrospectionAPIError::InvalidConfig(_)));
     }
+
+    #[test]
+    fn trajectory_tool_call_record_serializes_content_null() {
+        // A tool-call record is told apart from prose by `content: null`, so
+        // the null must survive serialization, not be skipped like other
+        // `None`s.
+        let wire = json!({
+            "role": "assistant",
+            "content": null,
+            "timestamp": "2025-01-01T00:00:01Z",
+            "tool_calls": [{"id": "call_1", "name": "edit", "args": "{}"}],
+        });
+        let record: TrajectoryRecord = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&record).unwrap(), wire);
+    }
 }
 
 // ----- trajectory-v1 (conversation export) ----------------------------------
@@ -7884,6 +7899,7 @@ pub struct TrajectoryReasoningRecord {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryAssistantRecord {
+    #[serialize_always]
     pub content: Option<String>,
     /// ISO-8601 timestamp.
     pub timestamp: String,
