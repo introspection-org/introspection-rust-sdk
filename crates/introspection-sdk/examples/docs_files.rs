@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .start(&TaskCreate {
             prompt: Some("Review contract.pdf".into()),
             files: Some(vec![TaskFileRef {
-                id: f.id.to_string(),
+                id: f.id,
                 ..Default::default()
             }]),
             ..Default::default()

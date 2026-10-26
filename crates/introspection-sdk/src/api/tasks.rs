@@ -11,7 +11,7 @@ use crate::agui::Event;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::resumable::{stream_resumable, StreamOptions};
+use crate::api::resumable::{stream_resumable, stream_resumable_frames, RunFrame, StreamOptions};
 use crate::api::schemas::{
     Task, TaskCancelOptions, TaskCancelResponse, TaskCommand, TaskCommandListParams,
     TaskCommandSpec, TaskCreate, TaskCreateResponse, TaskListParams, TaskRun, TaskRunCreate,
@@ -54,6 +54,13 @@ impl RunHandle {
     pub fn stream_with(&self, opts: StreamOptions) -> impl Stream<Item = ApiResult<Event>> {
         self.runs
             .stream_with(&self.run.task_id.to_string(), &self.run.id, opts)
+    }
+
+    /// [`Self::stream_with`], yielding each event with the SSE frame it came
+    /// from ([`RunFrame`]).
+    pub fn stream_frames(&self, opts: StreamOptions) -> impl Stream<Item = ApiResult<RunFrame>> {
+        self.runs
+            .stream_frames(&self.run.task_id.to_string(), &self.run.id, opts)
     }
 
     /// Consume this handle and return a pinned stream of AG-UI [`Event`]s.
@@ -190,8 +197,9 @@ impl TaskRuns {
     /// Reconnects with a content cursor, starting at zero. Nonterminal EOF
     /// checks the specific run's status. A reconnect behind the replay buffer
     /// yields one `MESSAGES_SNAPSHOT`; a `410` ends the stream as
-    /// [`IntrospectionAPIError::StreamIncomplete`]. Use [`Self::stream_with`] to
-    /// tune recovery bounds or opt into reconnect events.
+    /// [`IntrospectionAPIError::StreamHistoryUnavailable`]. Use
+    /// [`Self::stream_with`] to tune recovery bounds, start from a cursor, or
+    /// opt into reconnect events.
     pub async fn stream(
         &self,
         task_id: &str,
@@ -208,6 +216,18 @@ impl TaskRuns {
         opts: StreamOptions,
     ) -> impl Stream<Item = ApiResult<Event>> {
         stream_resumable(self.http.clone(), task_id, run_id, opts)
+    }
+
+    /// [`Self::stream_with`], yielding each event with the SSE frame it came
+    /// from ([`RunFrame`]): its `id` (the content cursor to pass back as
+    /// [`StreamOptions::since`]), `event` name and `data`.
+    pub fn stream_frames(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        opts: StreamOptions,
+    ) -> impl Stream<Item = ApiResult<RunFrame>> {
+        stream_resumable_frames(self.http.clone(), task_id, run_id, opts)
     }
 }
 
