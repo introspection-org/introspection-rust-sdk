@@ -124,6 +124,9 @@ fn scenarios() -> Vec<Scenario> {
 fn error_kind(error: &IntrospectionAPIError) -> &str {
     match error {
         IntrospectionAPIError::StreamIncomplete(_) => "stream_incomplete",
+        // A `410` is the typed form of an incomplete stream: the shared
+        // fixtures name the outcome, this SDK names its cause.
+        IntrospectionAPIError::StreamHistoryUnavailable { .. } => "stream_incomplete",
         IntrospectionAPIError::RunFailed { .. } => "run_failed",
         _ => "unexpected",
     }
