@@ -93,8 +93,9 @@ pub async fn files_in(w: &mut Walk) {
     let text_version = sa
         .files()
         .versions
+        // A version extends the chain's head, which is now the second version.
         .create_text(
-            &id,
+            &version.id.to_string(),
             &FileVersionCreateText {
                 content: format!("{} (v3)", walk::INPUT_FILE_TEXT),
                 mime_type: Some("text/plain".into()),

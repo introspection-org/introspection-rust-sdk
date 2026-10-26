@@ -777,7 +777,8 @@ pub struct FileCreateText {
 
 /// Body for [`FileVersions::create_text`](crate::api::FileVersions::create_text)
 /// (`POST /v1/files/{id}/versions` as JSON) — a new text version of an
-/// existing file. The file id travels in the path.
+/// existing file. The file id travels in the path and must be the chain's
+/// newest version.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FileVersionCreateText {
     pub content: String,

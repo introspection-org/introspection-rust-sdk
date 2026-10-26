@@ -176,7 +176,8 @@ impl FileVersions {
     }
 
     /// `POST /v1/files/{id}/versions` (JSON) — a new text version by
-    /// content.
+    /// content. `file_id` must be the chain's current head (its newest
+    /// version); an older id answers 409, as does a stale `expected_sha256`.
     pub async fn create_text(
         &self,
         file_id: &str,
