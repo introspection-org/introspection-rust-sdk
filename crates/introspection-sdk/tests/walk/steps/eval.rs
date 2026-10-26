@@ -539,9 +539,10 @@ pub async fn automations(w: &mut Walk) {
             automation.id,
             &AutomationUpdateParams {
                 description: Some("triggered once by the walk".into()),
-                // Metadata is free-form: a key the SDK does not name is kept.
+                // A member may set only `cron_schedules` and `timezone`; an
+                // administrator's free-form keys would land in `other`.
                 metadata: Some(AutomationMetadata {
-                    other: [("suite".to_string(), json!("walk"))].into(),
+                    timezone: Some("UTC".into()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -549,8 +550,8 @@ pub async fn automations(w: &mut Walk) {
         )
         .await
         .expect("describe the automation");
-    let suite = described.typed_metadata().map(|m| m.other["suite"].clone());
-    assert_eq!(suite, Some(json!("walk")));
+    let metadata = described.typed_metadata().expect("typed metadata");
+    assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
     let listed = sa
         .automations()
         .list(&AutomationListParams::default())
