@@ -7,13 +7,12 @@
 
 use std::sync::Arc;
 
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
-use crate::api::schemas::{Recipe, RecipeListParams};
+use crate::api::schemas::{ProjectSelector, Recipe, RecipeListParams, StringOrUuid};
 
 /// `client.recipes` namespace. Holds a CP-bound HTTP client.
 #[derive(Clone)]
@@ -33,11 +32,12 @@ impl Recipes {
             .expect("RecipeListParams must serialize to a JSON object")
     }
 
-    /// `GET /v1/recipes/{id}`.
-    pub async fn get(&self, recipe_id: Uuid) -> ApiResult<Recipe> {
-        #[derive(Serialize)]
-        struct Q {}
+    /// `GET /v1/recipes/{id}`. `project` is needed only when the credential
+    /// does not already name one; a CLI session gets a 422 without it.
+    pub async fn get(&self, recipe_id: Uuid, project: Option<StringOrUuid>) -> ApiResult<Recipe> {
         let path = format!("/v1/recipes/{}", recipe_id);
-        self.http.get_json(&path, &Q {}).await
+        self.http
+            .get_json(&path, &ProjectSelector::new(project))
+            .await
     }
 }
