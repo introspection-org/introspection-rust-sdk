@@ -346,12 +346,18 @@ const UNTYPED: &[(&str, &str, &str)] = &[
     ("GET", r"^/v1/organizations/me$", "no SDK method"),
 ];
 
-/// The SDK type for a JSON export, picked by its media type.
-fn export_check(mime: &str) -> Check {
+/// The SDK type for a JSON export, picked by its media type. The replay and
+/// ATIF exports have none: `Conversations::export_json_value` returns them
+/// as the server's JSON.
+fn export_check(mime: &str) -> Option<Check> {
     if mime.starts_with("application/vnd.letta.trajectory+json") {
-        round_trip::<Trajectory>
+        Some(round_trip::<Trajectory>)
+    } else if mime.starts_with("application/vnd.introspection.conversation-replay+json")
+        || mime.starts_with("application/vnd.harbor.atif+json")
+    {
+        None
     } else {
-        round_trip::<GenAiSpanList>
+        Some(round_trip::<GenAiSpanList>)
     }
 }
 
@@ -422,7 +428,10 @@ fn every_recorded_response_round_trips() {
         let label = format!("{method} {url}");
 
         let check = if path.ends_with("/export") && method == "GET" {
-            Some(export_check(mime))
+            match export_check(mime) {
+                Some(check) => Some(check),
+                None => continue,
+            }
         } else {
             TYPED
                 .iter()
