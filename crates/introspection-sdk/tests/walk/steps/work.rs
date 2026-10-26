@@ -106,7 +106,30 @@ pub async fn files_in(w: &mut Walk) {
         )
         .await
         .expect("add a text version");
-    assert_eq!(text_version.name, walk::INPUT_FILE_NAME);
+    assert_stable!(text_version, @r#"
+    {
+      "created_at": "[timestamp]",
+      "expires_at": "[timestamp]",
+      "file_type": "filesystem",
+      "id": "[uuid]",
+      "member_id": "[uuid]",
+      "metadata": {
+        "blob_checksum": "[digest]",
+        "original_filename": "walk-input.txt",
+        "suite": "walk"
+      },
+      "mime_type": "text/plain",
+      "name": "walk-input.txt",
+      "org_id": "[uuid]",
+      "parent_id": "[uuid]",
+      "project_id": "[uuid]",
+      "size_bytes": "[number]",
+      "storage_path": "[uuid]/[uuid]/files/[uuid]/walk-input.txt",
+      "tags": [],
+      "updated_at": "[timestamp]",
+      "version": 3
+    }
+    "#);
     let versions = sa
         .files()
         .versions
