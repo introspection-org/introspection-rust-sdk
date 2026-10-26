@@ -51,6 +51,7 @@ pub async fn files_in(w: &mut Walk) {
     assert_stable!(input, @r#"
     {
       "created_at": "[timestamp]",
+      "expires_at": "[timestamp]",
       "file_type": "filesystem",
       "id": "[uuid]",
       "member_id": "[uuid]",
@@ -104,7 +105,7 @@ pub async fn files_in(w: &mut Walk) {
         )
         .await
         .expect("add a text version");
-    assert_stable!(text_version, @"");
+    assert_eq!(text_version.name, walk::INPUT_FILE_NAME);
     let versions = sa
         .files()
         .versions
