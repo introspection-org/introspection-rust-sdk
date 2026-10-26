@@ -180,6 +180,7 @@ const TYPED: &[(&str, &str, Check)] = &[
         round_trip::<Credential>,
     ),
     ("GET", r"^/v1/endpoints$", round_trip::<Paginated<Endpoint>>),
+    ("POST", r"^/v1/endpoints$", round_trip::<Endpoint>),
     (
         "GET|PATCH",
         r"^/v1/endpoints/[^/]+$",

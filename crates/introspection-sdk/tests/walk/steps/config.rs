@@ -1,15 +1,17 @@
 //! Steps 5 to 8: what a runtime reads (a credential, a variable), the MCP
 //! connector, the runtime versions, and the grant that binds them.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
     ConnectionListParams, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
     ConnectorCreateParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams, CredentialCreateParams, CredentialUpdateParams, Endpoint,
-    EndpointListParams, IntrospectionClient, Runtime, RuntimeListParams, RuntimeSettingListParams,
-    RuntimeUpdateParams, Secret, VariableCreateParams, VariableKind, VariableUpdateParams,
+    ConnectorUpdateParams, CredentialCreateParams, CredentialUpdateParams, EndpointCreateParams,
+    EndpointKind, EndpointListParams, EndpointUpdateParams, IntrospectionClient, Lane, Runtime,
+    RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret, VariableCreateParams,
+    VariableKind, VariableUpdateParams,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -445,7 +447,7 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
     }
     assert!(seen);
 
-    endpoint(w, &sa, project).await;
+    endpoint(&sa, project).await;
     // todo: `ConnectionTokenParams` has no `runtime`, so the runtime-scoped
     // token read the JS SDK sends cannot be expressed; it goes by hand.
     let token: Value = set(&w.sa, "the service account")
@@ -477,7 +479,7 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
     assert_stable!(requirements["mcp_requirements"], @"[]");
 }
 
-async fn endpoint(w: &Walk, sa: &IntrospectionClient, project: Uuid) {
+async fn endpoint(sa: &IntrospectionClient, project: Uuid) {
     let endpoints = sa
         .endpoints()
         .list(&EndpointListParams {
@@ -519,16 +521,61 @@ async fn endpoint(w: &Walk, sa: &IntrospectionClient, project: Uuid) {
         .await
         .expect("read the endpoint");
     assert_eq!(read.kind.as_str(), "mcp");
-    // todo: no `Endpoints::update`.
-    let renamed: Endpoint = set(&w.sa, "the service account")
-        .cp_raw()
-        .patch(
-            &format!("/v1/endpoints/{}?project={project}", endpoint.id),
-            &json!({ "name": "hello-mcp (walk)" }),
+    let renamed = sa
+        .endpoints()
+        .update(
+            endpoint.id,
+            &EndpointUpdateParams {
+                name: Some("hello-mcp (walk)".into()),
+                ..Default::default()
+            },
+            Some(project.into()),
         )
         .await
         .expect("rename the endpoint");
     assert_eq!(renamed.name, "hello-mcp (walk)");
+    api_endpoint(sa, project).await;
+}
+
+/// An `api` binding the walk writes itself: created with a literal header,
+/// re-scoped to every environment, and deleted. The create upserts by host,
+/// so a crashed run's leftover is reused rather than duplicated.
+async fn api_endpoint(sa: &IntrospectionClient, project: Uuid) {
+    let created = sa
+        .endpoints()
+        .create(
+            &EndpointCreateParams {
+                kind: Some(EndpointKind::Api),
+                headers: BTreeMap::from([(
+                    "X-Walk-Key".to_string(),
+                    Secret::new(walk::API_ENDPOINT_HEADER),
+                )]),
+                environment: Some(Lane::Staging),
+                ..EndpointCreateParams::new(walk::API_ENDPOINT_NAME, walk::API_ENDPOINT_HOST)
+            },
+            Some(project.into()),
+        )
+        .await
+        .expect("create the api endpoint");
+    assert_eq!(created.kind, EndpointKind::Api);
+    assert_eq!(created.header_names, vec!["X-Walk-Key"]);
+    let everywhere = sa
+        .endpoints()
+        .update(
+            created.id,
+            &EndpointUpdateParams {
+                environment: Some(None),
+                ..Default::default()
+            },
+            Some(project.into()),
+        )
+        .await
+        .expect("serve the api endpoint in every environment");
+    assert_eq!(everywhere.environment, None);
+    sa.endpoints()
+        .delete(created.id, Some(project.into()))
+        .await
+        .expect("delete the api endpoint");
 }
 
 /// Complete the OAuth grant the way the MCP scenario harness does: follow

@@ -53,11 +53,16 @@
 //!
 //! A resource the `introspection` CLI addresses gets its typed client here
 //! first, so the CLI calls this crate rather than building JSON by hand.
-//! Writing endpoint bindings is the one CLI surface not here yet. Two things
-//! stay out by design: authoring runtimes, recipes, experiments and judges
-//! happens by publishing a Recipe, and the `introspection dev` tunnel
-//! (`/v1/remotes/connect`) is a protobuf WebSocket protocol owned by the CLI's
-//! `introspection-remote-protocol` crate.
+//!
+//! Project authoring is behind the `authoring` cargo feature, off by default
+//! since a runner never needs it: `Runtimes::create` / `Runtimes::delete`,
+//! `Recipes::create` / `Recipes::update` / `Recipes::delete`,
+//! `Endpoints::create` / `Endpoints::update` / `Endpoints::delete`, and
+//! `Repositories::create` (hosted, or a linked GitHub repository) /
+//! `Repositories::delete`. Experiments and judges are still authored by
+//! publishing a Recipe. The `introspection dev` tunnel
+//! (`/v1/remotes/connect`) stays out by design: it is a protobuf WebSocket
+//! protocol owned by the CLI's `introspection-remote-protocol` crate.
 
 pub mod aauth;
 pub mod annotations;

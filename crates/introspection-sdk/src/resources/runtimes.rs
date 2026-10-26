@@ -1,4 +1,5 @@
-//! `client.runtimes` (CP) — read, resolve, update, and run runtimes.
+//! `client.runtimes` (CP) — read, resolve, update, and run runtimes, and
+//! with the `authoring` feature create and delete them.
 
 use std::sync::Arc;
 
@@ -9,6 +10,8 @@ use crate::api::encoding::encode;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
+#[cfg(feature = "authoring")]
+use crate::api::schemas::RuntimeCreateParams;
 use crate::api::schemas::{
     RunRequest, RunnerSpec, Runtime, RuntimeListParams, RuntimeUpdateParams, StringOrUuid,
 };
@@ -73,6 +76,29 @@ impl Runtimes {
             path.push_str(&encode(&project.to_string()));
         }
         self.http.patch_json(&path, params).await
+    }
+
+    /// `POST /v1/runtimes` — create a Git runtime from a Recipe. Needs
+    /// `runtimes:write` and a member identity (a member login or the
+    /// project's service account), so a project API key gets 403.
+    ///
+    /// The Recipe's repository must be one the project may read. A slug the
+    /// project already has answers 409; so does `bootstrap` when the group
+    /// already has a live version.
+    #[cfg(feature = "authoring")]
+    pub async fn create(&self, params: &RuntimeCreateParams) -> ApiResult<Runtime> {
+        self.http.post_json("/v1/runtimes", params).await
+    }
+
+    /// `DELETE /v1/runtimes/{id}[?project=...]` — soft-delete the runtime
+    /// group and every version of it; `runtime_id` may name any of them.
+    /// Needs `runtimes:delete`. `project` is needed only when the credential
+    /// does not already name one; see [`Self::update`].
+    #[cfg(feature = "authoring")]
+    pub async fn delete(&self, runtime_id: Uuid, project: Option<StringOrUuid>) -> ApiResult<()> {
+        let path =
+            crate::resources::with_project(&format!("/v1/runtimes/{runtime_id}"), project.as_ref());
+        self.http.delete_empty(&path).await
     }
 
     /// Look up a runtime by runtime group slug or ID and return a [`RuntimeHandle`].

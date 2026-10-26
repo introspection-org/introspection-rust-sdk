@@ -143,15 +143,14 @@ async fn remove_tasks_and_files(dp: &IntrospectionClient) {
 }
 
 async fn remove_control_plane(w: &Walk, owner: &IntrospectionClient, project: Uuid) {
-    remove_runtimes(&w.owner, owner, project).await;
+    remove_runtimes(owner, project).await;
     remove_connectors(&w.owner, owner, project).await;
     remove_settings(owner, project).await;
-    remove_repositories(&w.owner, owner, project).await;
+    remove_repositories(owner, project).await;
     remove_applications(owner, project).await;
 }
 
-async fn remove_runtimes(creds: &Creds, owner: &IntrospectionClient, project: Uuid) {
-    let raw = creds.cp_raw();
+async fn remove_runtimes(owner: &IntrospectionClient, project: Uuid) {
     let experiments = owner
         .experiments()
         .list(&ExperimentListParams {
@@ -181,12 +180,8 @@ async fn remove_runtimes(creds: &Creds, owner: &IntrospectionClient, project: Uu
         .await
         .expect("list runtimes");
     for r in runtimes {
-        // todo: no `Runtimes::delete`. Deleting the group's live version
-        // takes its siblings with it.
-        ignore_404(
-            raw.delete(&format!("/v1/runtimes/{}?project={project}", r.id))
-                .await,
-        );
+        // Deleting the group's live version takes its siblings with it.
+        ignore_404(owner.runtimes().delete(r.id, Some(project.into())).await);
     }
     let endpoints = owner
         .endpoints()
@@ -199,11 +194,7 @@ async fn remove_runtimes(creds: &Creds, owner: &IntrospectionClient, project: Uu
         .await
         .expect("list endpoints");
     for e in endpoints {
-        // todo: no `Endpoints::delete`.
-        ignore_404(
-            raw.delete(&format!("/v1/endpoints/{}?project={project}", e.id))
-                .await,
-        );
+        ignore_404(owner.endpoints().delete(e.id, Some(project.into())).await);
     }
 }
 
@@ -305,8 +296,7 @@ async fn remove_settings(owner: &IntrospectionClient, project: Uuid) {
     }
 }
 
-async fn remove_repositories(creds: &Creds, owner: &IntrospectionClient, project: Uuid) {
-    let raw = creds.cp_raw();
+async fn remove_repositories(owner: &IntrospectionClient, project: Uuid) {
     let repositories = owner
         .repositories()
         .list(&RepositoryListParams {
@@ -328,13 +318,15 @@ async fn remove_repositories(creds: &Creds, owner: &IntrospectionClient, project
             .await
             .expect("list recipes");
         for r in recipes {
-            // todo: no `Recipes::delete`.
-            raw.delete(&format!("/v1/recipes/{}?project={project}", r.id))
+            owner
+                .recipes()
+                .delete(r.id, Some(project.into()))
                 .await
                 .expect("delete recipe");
         }
-        // todo: no `Repositories::delete`.
-        raw.delete(&format!("/v1/repositories/{}?project={project}", repo.id))
+        owner
+            .repositories()
+            .delete(repo.id, project)
             .await
             .expect("delete repository");
     }

@@ -185,6 +185,12 @@ pub use api::{
 // jscpd:ignore-end
 #[cfg(feature = "arrow")]
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
+#[cfg(feature = "authoring")]
+pub use api::{
+    EndpointCreateParams, EndpointUpdateParams, GithubRepositoryCreateParams,
+    HostedRepositoryCreateParams, RecipeCreateParams, RecipeRepositorySource, RecipeUpdateParams,
+    RecipeValidationUpdate, RepositoryCreateParams, RuntimeCreateParams,
+};
 // AG-UI protocol event surface yielded by the task-run stream. The full
 // taxonomy lives in `crate::agui`; these aliases give the common types a
 // discoverable name at the crate root (`Event` alone would be ambiguous).

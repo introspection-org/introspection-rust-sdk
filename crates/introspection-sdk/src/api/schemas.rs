@@ -67,6 +67,18 @@ impl Serialize for StringOrUuid {
     }
 }
 
+/// Reads a UUID-shaped string as [`StringOrUuid::Uuid`] and any other as a
+/// slug, so a document naming a project either way reads back.
+impl<'de> Deserialize<'de> for StringOrUuid {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(d)?;
+        Ok(match Uuid::parse_str(&value) {
+            Ok(id) => Self::Uuid(id),
+            Err(_) => Self::String(value),
+        })
+    }
+}
+
 // ----- enums -----------------------------------------------------------------
 
 /// Execution shape of a task — mirrors the DP `TaskKind` enum.
@@ -885,6 +897,105 @@ pub struct RecipeListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Where a new Recipe's GitHub repository comes from, when the project has no
+/// repository row for it yet: the Control Plane links it to the project.
+#[cfg(feature = "authoring")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RecipeRepositorySource {
+    pub integration_id: Uuid,
+    /// `owner/repo`.
+    pub full_name: String,
+}
+
+/// Body of `POST /v1/recipes`. Name the repository with `repository_id`, or
+/// with `repository` for a GitHub one the project has not linked yet.
+#[cfg(feature = "authoring")]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RecipeCreateParams {
+    /// Project slug or id.
+    pub project: StringOrUuid,
+    /// Operator label; versions of one Recipe may share it.
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub repository_id: Option<Uuid>,
+    #[serde(default)]
+    pub repository: Option<RecipeRepositorySource>,
+    /// Branch, tag or short sha.
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    /// The full 40-character commit sha.
+    #[serde(default)]
+    pub git_commit_sha: Option<String>,
+    #[serde(default)]
+    pub git_commit_subject: Option<String>,
+    /// The Recipe's directory inside the repository (monorepo support).
+    #[serde(default)]
+    pub sub_path: Option<String>,
+    /// Derived from the name and the short sha when unset.
+    #[serde(default)]
+    pub slug: Option<String>,
+}
+
+#[cfg(feature = "authoring")]
+impl RecipeCreateParams {
+    pub fn new(project: impl Into<StringOrUuid>, name: impl Into<String>) -> Self {
+        Self {
+            project: project.into(),
+            name: name.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// The one validation change a client may ask for: back to `pending`, which
+/// runs the Recipe check again.
+#[cfg(feature = "authoring")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RecipeValidationUpdate {
+    /// Only `pending` is accepted.
+    pub status: String,
+}
+
+#[cfg(feature = "authoring")]
+impl RecipeValidationUpdate {
+    pub fn pending() -> Self {
+        Self {
+            status: "pending".into(),
+        }
+    }
+}
+
+/// Body of `PATCH /v1/recipes/{id}`. A field left `None` is not sent and stays
+/// unchanged. The git pin cannot change: pinning other content is a new
+/// Recipe.
+#[cfg(feature = "authoring")]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RecipeUpdateParams {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// See [`Self::retry_validation`].
+    #[serde(default)]
+    pub validation: Option<RecipeValidationUpdate>,
+}
+
+#[cfg(feature = "authoring")]
+impl RecipeUpdateParams {
+    /// `{"validation": {"status": "pending"}}`: run the Recipe check again.
+    /// Answers 409 unless the validation is `pending` or `failed`.
+    pub fn retry_validation() -> Self {
+        Self {
+            validation: Some(RecipeValidationUpdate::pending()),
+            ..Default::default()
+        }
+    }
+}
+
 // ----- repositories (CP) -----------------------------------------------------
 
 /// Who serves a repository's Git, which decides how a client reaches it.
@@ -1039,6 +1150,79 @@ pub struct RepositoryListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Body of `POST /v1/repositories?project=…`: a repository the project's data
+/// plane hosts, or a GitHub repository to link.
+///
+/// The variant is the body's `provider`, so a document read with serde must
+/// name it (`introspection`, or `hosted`, the name it shipped under, or
+/// `github`).
+#[cfg(feature = "authoring")]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "provider")]
+pub enum RepositoryCreateParams {
+    #[serde(rename = "introspection", alias = "hosted")]
+    Hosted(HostedRepositoryCreateParams),
+    #[serde(rename = "github")]
+    Github(GithubRepositoryCreateParams),
+}
+
+#[cfg(feature = "authoring")]
+impl RepositoryCreateParams {
+    /// A hosted repository seeded with the deployment's default template.
+    pub fn hosted(slug: impl Into<String>) -> Self {
+        Self::Hosted(HostedRepositoryCreateParams {
+            slug: slug.into(),
+            default_branch: None,
+            seed_template: None,
+        })
+    }
+
+    /// The GitHub repository `owner/repo`, reached through the installation
+    /// `integration_id` names.
+    pub fn github(integration_id: Uuid, full_name: &str) -> Self {
+        Self::Github(GithubRepositoryCreateParams {
+            integration_id,
+            url: format!("https://github.com/{full_name}"),
+            name: full_name.to_string(),
+        })
+    }
+}
+
+/// [`RepositoryCreateParams::Hosted`]. Idempotent on `slug`: a repeat answers
+/// the live row. The hosted copy exists once the first push lands; see
+/// [`Repository::provisioning_status`].
+#[cfg(feature = "authoring")]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct HostedRepositoryCreateParams {
+    /// A Runtime slug.
+    pub slug: String,
+    /// `main` when unset.
+    #[serde(default)]
+    pub default_branch: Option<String>,
+    /// The template rendered as the first commit. `None` sends nothing and
+    /// takes the deployment's default; `Some(None)` sends `null`, an empty
+    /// repository.
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub seed_template: Option<Option<String>>,
+}
+
+/// [`RepositoryCreateParams::Github`]. A second link of the same URL answers
+/// 409 `repository_already_registered`.
+#[cfg(feature = "authoring")]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GithubRepositoryCreateParams {
+    /// The GitHub App installation that reaches the repository.
+    pub integration_id: Uuid,
+    pub url: String,
+    /// `owner/repo`.
+    pub name: String,
 }
 
 // ----- repository contents (DP) ----------------------------------------------
@@ -1671,6 +1855,48 @@ impl RuntimeUpdateParams {
     pub fn unyank() -> Self {
         Self {
             yanked: Some(false),
+            ..Default::default()
+        }
+    }
+}
+
+/// Body of `POST /v1/runtimes`: a Git runtime built from a Recipe.
+#[cfg(feature = "authoring")]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RuntimeCreateParams {
+    /// Project slug or id.
+    pub project: StringOrUuid,
+    pub recipe_id: Uuid,
+    /// The runtime group name, shared across versions.
+    pub name: String,
+    /// The runtime group slug; derived from the name when unset. A slug the
+    /// project already has answers 409.
+    #[serde(default)]
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// `byor` (the default) or `byoh`; `platform` is refused.
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub llm_mode: Option<RuntimeLlmMode>,
+    /// Its `connectors` entry is validated by the server.
+    #[serde(default)]
+    pub config_json: Option<BTreeMap<String, serde_json::Value>>,
+    /// Create only the group's first live version, as zero-to-one setup
+    /// does; answers 409 when the group already has one.
+    #[serde(default)]
+    pub bootstrap: Option<bool>,
+}
+
+#[cfg(feature = "authoring")]
+impl RuntimeCreateParams {
+    pub fn new(project: impl Into<StringOrUuid>, recipe_id: Uuid, name: impl Into<String>) -> Self {
+        Self {
+            project: project.into(),
+            recipe_id,
+            name: name.into(),
             ..Default::default()
         }
     }
@@ -3239,6 +3465,110 @@ pub struct EndpointListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Body of `POST /v1/endpoints`, which upserts by host, runtime scope and
+/// environment.
+///
+/// Header values are plaintext on the wire and stored encrypted; a `${NAME}`
+/// in one is a credential reference resolved at egress. An error from the
+/// call has every header value replaced by `[redacted]`, since a validation
+/// error can echo the request.
+#[cfg(feature = "authoring")]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct EndpointCreateParams {
+    /// Display label; not unique.
+    pub name: String,
+    /// Hostname only: no scheme, path or port.
+    pub host: String,
+    /// Full base URL overriding `https://{host}`; its host must be `host`.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// `llm` when unset.
+    #[serde(default)]
+    pub kind: Option<EndpointKind>,
+    #[serde(default)]
+    pub metadata: Option<EndpointMetadata>,
+    /// Header name to value. May be empty, for a public or allowlist-only
+    /// host.
+    #[serde(default)]
+    pub headers: BTreeMap<String, Secret>,
+    /// Extra claims for the identity assertion; not with a stored
+    /// `Authorization` header.
+    #[serde(default)]
+    pub assertion_claims: Option<BTreeMap<String, String>>,
+    /// Only this runtime may use the endpoint. At most one of `runtime_id`
+    /// and `runtime_group_id`.
+    #[serde(default)]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default)]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default)]
+    pub environment: Option<Lane>,
+    /// A path the save first `GET`s, and which must answer 2xx (else 422
+    /// `endpoint_verify_failed`).
+    #[serde(default)]
+    pub verify_path: Option<String>,
+    /// The application that signs this endpoint's identity assertions; not
+    /// with a stored `Authorization` header.
+    #[serde(default)]
+    pub authorized_application_id: Option<Uuid>,
+}
+
+#[cfg(feature = "authoring")]
+impl EndpointCreateParams {
+    pub fn new(name: impl Into<String>, host: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            host: host.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// Body of `PATCH /v1/endpoints/{id}`. A field left `None` is not sent and
+/// stays unchanged. `runtime_id`, `runtime_group_id` and `verify_path` cannot
+/// be cleared; delete and recreate the endpoint instead.
+///
+/// Changing `headers`, `host`, `base_url` or `verify_path` on an endpoint with
+/// a `verify_path` verifies it again first. Header values are redacted from
+/// an error as for [`EndpointCreateParams`].
+#[cfg(feature = "authoring")]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct EndpointUpdateParams {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub kind: Option<EndpointKind>,
+    #[serde(default)]
+    pub metadata: Option<EndpointMetadata>,
+    /// Replaces the headers wholesale.
+    #[serde(default)]
+    pub headers: Option<BTreeMap<String, Secret>>,
+    #[serde(default)]
+    pub assertion_claims: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub runtime_id: Option<Uuid>,
+    #[serde(default)]
+    pub runtime_group_id: Option<Uuid>,
+    /// `Some(None)` sends `null`: every environment.
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub environment: Option<Option<Lane>>,
+    #[serde(default)]
+    pub verify_path: Option<String>,
+    /// Cannot be cleared.
+    #[serde(default)]
+    pub authorized_application_id: Option<Uuid>,
 }
 
 // ----- projects (CP) ---------------------------------------------------------
