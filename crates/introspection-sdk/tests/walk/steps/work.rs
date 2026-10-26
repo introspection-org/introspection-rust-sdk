@@ -10,7 +10,7 @@ use introspection_sdk::{
     AnnotationTarget, ApprovalListParams, ConversationContains, ConversationExportFormat,
     ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
     ConversationListParams, EventListParams, File, FileCreateText, FileListParams, FileUpdate,
-    FileUpload, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
+    FileUpload, FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
     MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
     MetricsQuery, MissionListParams, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
     TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams,
@@ -201,16 +201,28 @@ async fn settled_task(w: &Walk, label: &str, id: &str, done: impl Fn(&Task) -> b
 
 pub async fn task(w: &mut Walk) {
     let sa = w.sa();
-    let runtime = set(&w.runtime, "the runtime").id;
+    let runtime = set(&w.runtime, "the runtime");
+    // Every `/run` option the CLI sends: the project as a check, the service
+    // account's own environment, this Runtime version's Recipe, and bindings
+    // that must materialize.
+    let recipe_id = runtime.recipe_id.expect("the runtime pins a recipe");
     let runner = sa
         .runtimes()
-        .handle(runtime)
+        .handle(runtime.id)
+        .with_project(w.project_id())
         .run(RunRequest {
             agent_name: Some(w.settings.agent.clone()),
+            environment: Some(Lane::Production),
+            recipe_id: Some(recipe_id),
+            bindings_required: Some(true),
             ..Default::default()
         })
         .await
         .expect("open a runner on the runtime");
+    assert_eq!(runner.context().recipe_id, recipe_id);
+    // What a caller with its own HTTP client needs to reach the DP.
+    assert!(!runner.session_token().is_empty());
+    assert!(runner.deployment().endpoint.starts_with("http"));
     let started = runner
         .tasks()
         .start(&TaskCreate {
