@@ -172,6 +172,7 @@ pub struct InputMessage {
     /// The role of the message sender (e.g. `"user"`, `"system"`, `"assistant"`, `"tool"`).
     pub role: String,
     /// The message content as an ordered list of parts.
+    #[serde(default)]
     pub parts: Vec<ContentPart>,
 }
 
@@ -215,6 +216,9 @@ pub struct OutputMessage {
     /// The role of the message sender (typically `"assistant"`).
     pub role: String,
     /// The message content as an ordered list of parts.
+    // A turn that ends before producing content (`finish_reason: "aborted"`)
+    // is stored without `parts`.
+    #[serde(default)]
     pub parts: Vec<ContentPart>,
     /// Finish reason (e.g. `"stop"`, `"tool-calls"`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -389,6 +393,30 @@ mod tests {
             }
             other => panic!("expected a tool call response, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_aborted_output_message_without_parts_decodes_empty() {
+        // As the Data Plane serves an aborted turn on the conversation items list.
+        let msg: OutputMessage = serde_json::from_value(serde_json::json!({
+            "role": "assistant",
+            "finish_reason": "aborted",
+            "provider": "introspection",
+            "model": "scripted-llm",
+            "api": "openai-completions"
+        }))
+        .unwrap();
+
+        assert!(msg.parts.is_empty());
+        assert_eq!(msg.finish_reason.as_deref(), Some("aborted"));
+    }
+
+    #[test]
+    fn test_input_message_without_parts_decodes_empty() {
+        let msg: InputMessage =
+            serde_json::from_value(serde_json::json!({"role": "assistant"})).unwrap();
+
+        assert!(msg.parts.is_empty());
     }
 
     #[test]
