@@ -451,9 +451,8 @@ pub async fn commands(w: &mut Walk) {
     // through the egress. On the scripted target that grader is the model
     // double, which returns no verdict, so a judgement is asserted only
     // where a real model grades (design doc §10).
-    // todo: no `judge_id` on `EventListParams`.
     let params = EventListParams {
-        filters: Some([("judge_id".to_string(), json!(set(&w.judge, "the judge").id))].into()),
+        judge_id: Some(set(&w.judge, "the judge").id),
         ..EventListParams::new(IntrospectionEventName::Judgement)
     };
     let judgements = sa
@@ -545,4 +544,18 @@ pub async fn automations(w: &mut Walk) {
         .await
         .expect("list automations");
     assert!(listed.iter().any(|a| a.id == automation.id));
+    // Its triggers and skips in one page: the two families share a row shape
+    // and a visibility class, so the server merges them. The trigger's event
+    // lands asynchronously, so the page is read, not counted.
+    let params = EventListParams {
+        extra_event_names: Some(vec![IntrospectionEventName::AutomationSkipped]),
+        automation_id: Some(automation.id),
+        ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+    };
+    sa.events()
+        .list(&params)
+        .expect("an events paginator")
+        .collect_all(0)
+        .await
+        .expect("the automation's triggers and skips");
 }

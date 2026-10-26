@@ -48,20 +48,39 @@ pub const TRAJECTORY_MEDIA_TYPE: &str = "application/vnd.letta.trajectory+json";
 /// Accept header selecting the pinned trajectory-v1 export representation.
 pub const TRAJECTORY_V1_ACCEPT: &str = "application/vnd.letta.trajectory+json;version=1";
 
-/// Wire representation selected for a complete conversation export.
+/// Accept header selecting the pinned replay-v1 export: the turn-aware
+/// representation a managed Recipe replays a conversation from.
+pub const REPLAY_V1_ACCEPT: &str =
+    "application/vnd.introspection.conversation-replay+json;version=1";
+
+/// Accept header selecting Harbor's ATIF trajectory. No `version` is pinned:
+/// the server serves the ATIF schema version its own release implements, and
+/// the body names it in `schema_version`.
+pub const ATIF_ACCEPT: &str = "application/vnd.harbor.atif+json";
+
+/// Wire representation selected for a complete conversation export — one of
+/// the representations `GET /v1/conversations/{id}/export` negotiates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConversationExportFormat {
     Json,
     Trajectory,
     Arrow,
+    /// The turn-aware replay export ([`REPLAY_V1_ACCEPT`]).
+    Replay,
+    /// Harbor's ATIF trajectory ([`ATIF_ACCEPT`]).
+    Atif,
 }
 
 impl ConversationExportFormat {
-    fn accept(self) -> &'static str {
+    /// The `Accept` header that negotiates this representation.
+    pub fn accept(self) -> &'static str {
         match self {
             Self::Json => "application/json",
             Self::Trajectory => TRAJECTORY_V1_ACCEPT,
             Self::Arrow => "application/vnd.apache.arrow.stream",
+            Self::Replay => REPLAY_V1_ACCEPT,
+            Self::Atif => ATIF_ACCEPT,
         }
     }
 }
@@ -138,6 +157,36 @@ impl Conversations {
                 &Self::export_path(conversation_id),
                 &params.to_wire(),
                 Some("application/json"),
+            )
+            .await?;
+        crate::api::http::decode_json(response).await
+    }
+
+    /// `GET /v1/conversations/{id}/export` in any JSON representation,
+    /// returned as the server sent it.
+    ///
+    /// For the representations this SDK does not model — the replay and ATIF
+    /// exports — and for callers that forward an export unchanged. The typed
+    /// reads are [`Self::export_json`] and [`Self::export_trajectory`].
+    /// [`ConversationExportFormat::Arrow`] is not JSON, so it is refused
+    /// with [`IntrospectionAPIError::InvalidConfig`] before any request.
+    pub async fn export_json_value(
+        &self,
+        conversation_id: &str,
+        format: ConversationExportFormat,
+        params: &ConversationExportParams,
+    ) -> ApiResult<serde_json::Value> {
+        if format == ConversationExportFormat::Arrow {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "the Arrow export is not JSON; use export_arrow or export_stream".to_string(),
+            ));
+        }
+        let response = self
+            .http
+            .get_raw(
+                &Self::export_path(conversation_id),
+                &params.to_wire(),
+                Some(format.accept()),
             )
             .await?;
         crate::api::http::decode_json(response).await
@@ -309,9 +358,10 @@ impl Events {
 
     /// `GET /v1/events` — cursor paginator (JSON).
     ///
-    /// [`EventListParams::event_name`] is **required** (compile-enforced) —
-    /// exactly one canonical family per request, so every page
-    /// is homogeneous and each record deserializes into the matching typed
+    /// [`EventListParams::event_name`] is **required** (compile-enforced).
+    /// [`EventListParams::extra_event_names`] adds families that share its
+    /// row shape and visibility class; the server merges them into one page
+    /// and refuses (`422`) a set that does not. Each record deserializes into the matching typed
     /// [`Event`] variant (envelope + nested typed payload). Rows whose
     /// `event_name` this SDK build doesn't recognise surface as
     /// [`Event::Unknown`] rather than failing the page. Per-family filters
@@ -379,5 +429,23 @@ impl Metrics {
     pub async fn query(&self, query: &MetricsQuery) -> ApiResult<MetricsResponse> {
         let wire = query.to_wire()?;
         self.http.post_json("/v1/metrics", &wire).await
+    }
+
+    /// `POST /v1/metrics` with the request body sent unchanged and the
+    /// response returned as the server sent it.
+    ///
+    /// For callers that forward a metrics document they did not build, such
+    /// as a query read from a file: the Data Plane owns the metrics grammar,
+    /// so a request or response shape newer than this SDK build passes
+    /// through instead of failing to (de)serialize. The only local check is
+    /// that `request` is a JSON object, which every metrics request is; any
+    /// other value is an [`IntrospectionAPIError::InvalidConfig`] sent nowhere.
+    pub async fn query_raw(&self, request: &serde_json::Value) -> ApiResult<serde_json::Value> {
+        if !request.is_object() {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "a metrics request must be a JSON object".to_string(),
+            ));
+        }
+        self.http.post_json("/v1/metrics", request).await
     }
 }
