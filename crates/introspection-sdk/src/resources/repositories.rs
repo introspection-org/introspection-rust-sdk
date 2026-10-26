@@ -178,6 +178,7 @@ fn directory_page(body: serde_json::Value) -> ApiResult<Paginated<RepositoryEntr
             count: dir.count,
             total_count: None,
             next: dir.next,
+            extra: std::collections::BTreeMap::new(),
         }),
         RepositoryContent::File(file) => Err(IntrospectionAPIError::Decode(format!(
             "{:?} is a file, not a directory; read it with RepositoryContents::get",

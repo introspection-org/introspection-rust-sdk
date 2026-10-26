@@ -3,9 +3,12 @@
 //! These types mirror the gen_ai semantic convention schema and match
 //! the message representation the backend stores and returns.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// A text content part.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TextPart {
     /// Always `"text"`.
@@ -13,6 +16,10 @@ pub struct TextPart {
     pub r#type: String,
     /// The text content.
     pub content: String,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl TextPart {
@@ -21,11 +28,13 @@ impl TextPart {
         Self {
             r#type: "text".to_string(),
             content: content.into(),
+            extra: BTreeMap::new(),
         }
     }
 }
 
 /// A tool call request part (assistant requests tool use).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolCallRequestPart {
     /// Always `"tool_call"`.
@@ -37,6 +46,10 @@ pub struct ToolCallRequestPart {
     pub name: String,
     /// The arguments as a JSON string.
     pub arguments: String,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolCallRequestPart {
@@ -51,11 +64,13 @@ impl ToolCallRequestPart {
             id: id.into(),
             name: name.into(),
             arguments: arguments.into(),
+            extra: BTreeMap::new(),
         }
     }
 }
 
 /// A tool call response part (result returned from executing a tool).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolCallResponsePart {
     /// Always `"tool_call_response"`.
@@ -68,8 +83,12 @@ pub struct ToolCallResponsePart {
     /// The `result` alias reads back parts written by older deployments, which
     /// used that key before the semantic convention settled on `response`. It
     /// is a read-side compatibility shim only — we always write `response`.
-    #[serde(alias = "result", skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "result")]
     pub response: Option<String>,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolCallResponsePart {
@@ -79,22 +98,26 @@ impl ToolCallResponsePart {
             r#type: "tool_call_response".to_string(),
             id: id.into(),
             response,
+            extra: BTreeMap::new(),
         }
     }
 }
 
 /// A reasoning/thinking content part.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ThinkingPart {
     /// Always `"thinking"`.
     #[serde(rename = "type")]
     pub r#type: String,
     /// The reasoning/thinking summary content.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     /// Encrypted reasoning signature (maps to OpenAI encrypted_content).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl ThinkingPart {
@@ -104,6 +127,7 @@ impl ThinkingPart {
             r#type: "thinking".to_string(),
             content,
             signature,
+            extra: BTreeMap::new(),
         }
     }
 }
@@ -167,6 +191,7 @@ impl<'de> Deserialize<'de> for ContentPart {
 }
 
 /// An input message in an LLM conversation (user, system, assistant, tool).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InputMessage {
     /// The role of the message sender (e.g. `"user"`, `"system"`, `"assistant"`, `"tool"`).
@@ -174,6 +199,10 @@ pub struct InputMessage {
     /// The message content as an ordered list of parts.
     #[serde(default)]
     pub parts: Vec<ContentPart>,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl InputMessage {
@@ -182,6 +211,7 @@ impl InputMessage {
         Self {
             role: "user".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
+            extra: BTreeMap::new(),
         }
     }
 
@@ -190,6 +220,7 @@ impl InputMessage {
         Self {
             role: "system".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
+            extra: BTreeMap::new(),
         }
     }
 
@@ -198,6 +229,7 @@ impl InputMessage {
         Self {
             role: "assistant".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
+            extra: BTreeMap::new(),
         }
     }
 
@@ -206,11 +238,13 @@ impl InputMessage {
         Self {
             role: role.into(),
             parts,
+            extra: BTreeMap::new(),
         }
     }
 }
 
 /// An output message from an LLM (typically role `"assistant"`).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OutputMessage {
     /// The role of the message sender (typically `"assistant"`).
@@ -221,8 +255,11 @@ pub struct OutputMessage {
     #[serde(default)]
     pub parts: Vec<ContentPart>,
     /// Finish reason (e.g. `"stop"`, `"tool-calls"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl OutputMessage {
@@ -232,6 +269,7 @@ impl OutputMessage {
             role: "assistant".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
             finish_reason: Some("stop".to_string()),
+            extra: BTreeMap::new(),
         }
     }
 
@@ -241,6 +279,7 @@ impl OutputMessage {
             role: role.into(),
             parts,
             finish_reason: None,
+            extra: BTreeMap::new(),
         }
     }
 }
@@ -306,6 +345,7 @@ mod tests {
                 ContentPart::Text(TextPart::new("The answer is 42.")),
             ],
             finish_reason: Some("stop".to_string()),
+            extra: Default::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"thinking""#));
@@ -322,6 +362,7 @@ mod tests {
                 Some("encrypted-blob".into()),
             ))],
             finish_reason: None,
+            extra: Default::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"thinking""#));
@@ -427,6 +468,7 @@ mod tests {
                 "call_123",
                 Some("result data".into()),
             ))],
+            extra: Default::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"tool_call_response""#));

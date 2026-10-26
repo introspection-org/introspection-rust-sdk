@@ -322,7 +322,10 @@ async fn an_asserted_identity_carries_member_metadata_on_run() {
     let request = RunRequest {
         identity: Some(RunnerIdentity {
             user_id: Some("u_demo".into()),
-            metadata: Some(HashMap::from([("plan".into(), "enterprise".into())])),
+            metadata: Some(std::collections::BTreeMap::from([(
+                "plan".into(),
+                "enterprise".into(),
+            )])),
             ..Default::default()
         }),
         ..Default::default()

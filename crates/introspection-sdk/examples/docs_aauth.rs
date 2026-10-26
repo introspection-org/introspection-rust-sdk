@@ -33,7 +33,7 @@ async fn decide_approval(
 
     // #region docs:identity/aauth/decide-approval
     let decision = ApprovalDecision::approve(DecidedBy::user("dana@acme.example"))
-        .with_budget(Budget { amount: 300_000, unit: "USD".into(), decimals: 2 });
+        .with_budget(Budget { amount: 300_000, unit: "USD".into(), decimals: 2, extra: Default::default() });
     client.aauth().approvals().decide(approval_id, &decision).await?;
     // #endregion docs:identity/aauth/decide-approval
     Ok(())

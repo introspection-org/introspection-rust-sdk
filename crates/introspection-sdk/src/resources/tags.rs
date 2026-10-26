@@ -7,7 +7,7 @@
 //! a slug that must have one. [`TagCreate`] is an enum per kind so that rule
 //! is unrepresentable rather than validated.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
@@ -46,6 +46,7 @@ impl fmt::Display for TagKind {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tag {
     pub kind: TagKind,
@@ -57,6 +58,10 @@ pub struct Tag {
     pub description: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A tag to add. The kind picks the variant, so an `access` tag has no colour

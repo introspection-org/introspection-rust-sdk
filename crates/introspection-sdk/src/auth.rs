@@ -55,7 +55,7 @@ pub use email_code::{
     EmailCodeAuthConfigBuilder, EMAIL_CODE_GRANT,
 };
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::env;
 use std::time::Duration;
 
@@ -78,6 +78,7 @@ const SUBJECT_TOKEN_TYPE_ID_TOKEN: &str = "urn:ietf:params:oauth:token-type:id_t
 /// one (`authorization_code`, `email_code`) return it, with the `session_id`
 /// and `org_id` the refresh grant is keyed on, in [`Self::extra`];
 /// [`AuthSession::from_token`] reads them out.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthToken {
     /// Project-scoped RS256 access token (`Authorization: Bearer …`).
@@ -101,7 +102,7 @@ pub struct OAuthToken {
     /// Kept rather than dropped so a field the CP adds is reachable without
     /// waiting on a release of this crate.
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_token_type() -> String {

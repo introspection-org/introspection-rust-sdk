@@ -63,6 +63,9 @@ reqwest = { workspace = true, features = ["blocking", "multipart", "query", "str
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+# `skip_serializing_none` on the response types: a `None` is left out when a
+# record serializes, the way the server leaves it out or sends `null`.
+serde_with = { version = "3", default-features = false, features = ["macros"] }
 
 # Utilities
 uuid = { workspace = true, features = ["serde"] }

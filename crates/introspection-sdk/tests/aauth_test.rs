@@ -104,6 +104,7 @@ async fn a_decision_names_the_approver_by_identity() {
             amount: 300_000,
             unit: "USD".into(),
             decimals: 2,
+            extra: Default::default(),
         });
     let decided = aauth(&server)
         .approvals()

@@ -7,6 +7,7 @@
 //! approver's answer. Agent sessions never hold `approvals:*`, so an agent
 //! cannot decide its own approval.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -18,11 +19,16 @@ use crate::api::paginator::Paginator;
 use crate::api::schemas::PaginationParams;
 
 /// A draft-hardt-aauth-budgets budget: `amount / 10^decimals` in `unit`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Budget {
     pub amount: i64,
     pub unit: String,
     pub decimals: u32,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -48,6 +54,7 @@ pub enum ApprovalStatus {
 }
 
 /// A decision the hosted Person Server waits on.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Approval {
     pub id: Uuid,
@@ -79,15 +86,22 @@ pub struct Approval {
     pub expires_at: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// The approver as your app knows them: the identity a runner takes.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ApproverIdentity {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub anonymous_id: Option<String>,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Who decided: recorded as a member id, never as free text.
@@ -104,6 +118,7 @@ impl DecidedBy {
         Self::Identity(ApproverIdentity {
             user_id: Some(user_id.into()),
             anonymous_id: None,
+            extra: BTreeMap::new(),
         })
     }
 
@@ -111,6 +126,7 @@ impl DecidedBy {
         Self::Identity(ApproverIdentity {
             user_id: None,
             anonymous_id: Some(anonymous_id.into()),
+            extra: BTreeMap::new(),
         })
     }
 
@@ -189,13 +205,19 @@ impl ApprovalListParams {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MissionLogEntry {
     pub at: String,
     pub entry: String,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A mission the Person Server approved, and what it has spent.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Mission {
     pub id: Uuid,
@@ -218,6 +240,10 @@ pub struct Mission {
     pub completed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Fields this SDK build does not model, kept so the record serializes
+    /// back unchanged.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

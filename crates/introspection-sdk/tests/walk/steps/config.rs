@@ -294,7 +294,6 @@ pub async fn runtime(w: &mut Walk) {
         .expect("the push-versioned runtime");
     assert_stable!(runtime, @r#"
     {
-      "allow_hot_swap": false,
       "config_json": {
         "connectors": [
           "hello-mcp"
@@ -308,13 +307,22 @@ pub async fn runtime(w: &mut Walk) {
         "production"
       ],
       "id": "[uuid]",
-      "is_active": false,
+      "image_build_metadata": {
+        "built_at": "[timestamp]",
+        "external_image_name": "[redacted]",
+        "image_tag": "[redacted]",
+        "size_bytes": "[number]",
+        "verdict_by": "[timestamp]"
+      },
+      "image_build_status": "ready",
       "kind": "byor",
       "llm_mode": "managed",
       "name": "hello-mcp",
       "org_id": "[uuid]",
       "project_id": "[uuid]",
       "recipe_id": "[uuid]",
+      "recipe_kind": "production",
+      "recipe_ref": "main",
       "runtime_group_id": "[uuid]",
       "slug": "hello-mcp",
       "updated_at": "[timestamp]"
@@ -495,6 +503,7 @@ async fn endpoint(w: &Walk, sa: &IntrospectionClient, project: Uuid) {
       "kind": "mcp",
       "metadata": {
         "connector_id": "[uuid]",
+        "extra_hosts": [],
         "mcp_server_id": "hello-mcp"
       },
       "name": "hello-mcp",

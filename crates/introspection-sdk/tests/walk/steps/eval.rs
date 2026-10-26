@@ -115,6 +115,7 @@ pub async fn eval(w: &mut Walk) {
       "metadata": "[platform's]",
       "org_id": "[uuid]",
       "project_id": "[uuid]",
+      "runtime_group_id": "[uuid]",
       "runtime_id": "[uuid]",
       "status": "pending",
       "tags": [],
@@ -192,14 +193,19 @@ async fn experiment(w: &mut Walk) {
       "arms": [
         {
           "arm_label": "v1",
+          "id": "[uuid]",
+          "initial_weight": 50,
           "runtime_id": "[uuid]"
         },
         {
           "arm_label": "v2",
+          "id": "[uuid]",
+          "initial_weight": 50,
           "runtime_id": "[uuid]"
         }
       ],
       "created_at": "[timestamp]",
+      "created_by_member_id": "[uuid]",
       "environment": "production",
       "goal_json": {
         "components": [
@@ -272,14 +278,19 @@ async fn experiment(w: &mut Walk) {
       "arms": [
         {
           "arm_label": "v1",
+          "id": "[uuid]",
+          "initial_weight": 50,
           "runtime_id": "[uuid]"
         },
         {
           "arm_label": "v2",
+          "id": "[uuid]",
+          "initial_weight": 50,
           "runtime_id": "[uuid]"
         }
       ],
       "created_at": "[timestamp]",
+      "created_by_member_id": "[uuid]",
       "description": "two versions, one judge",
       "ended_at": "[timestamp]",
       "environment": "production",
