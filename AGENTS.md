@@ -29,5 +29,6 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - The recording is this SDK's own, recorded against Compose (below); don't edit the HAR by hand, and take nothing from another SDK's.
 - A request the recording does not hold fails the step with the method, URL and a diff against the closest recorded requests. Fix the SDK or the step; widen the matcher only for a documented equivalence (the lists in `tests/walk/har.rs`).
 - Snapshots are insta inline snapshots through `assert_stable!`, whose one redaction mirrors the JS walk's `stable()`. Update them with `cargo insta test -p introspection-sdk --all-features --test walk --accept`.
+- `--all-features` turns on `strict-schema`, so a response field the SDK does not model fails the step with its JSON path. Model the field; don't drop it from the recording. `tests/round_trip_test.rs` fails on it too.
 - A route the SDK has no method for is called through `support::Raw` with a `// todo:` and shows up in the run's report (`target/tmp/walk-report.json`). Don't add an SDK method from a walk PR.
 - Re-record against Compose with `WALK_MODE=record cargo test -p introspection-sdk --all-features --test walk` and a signed-in `introspection login`; record mode proxies plain `http` only, which is what Compose serves.

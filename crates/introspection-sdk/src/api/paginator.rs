@@ -23,7 +23,7 @@ type PageFut<T> = Pin<Box<dyn Future<Output = ApiResult<Paginated<T>>> + Send>>;
 
 /// Lowers an endpoint's page body into the shared envelope, for an endpoint
 /// whose page carries more than `Paginated<T>` or can answer a non-page.
-pub(crate) type PageDecoder<T> = fn(serde_json::Value) -> ApiResult<Paginated<T>>;
+pub(crate) type PageDecoder<T> = fn(serde_json::Value, &str) -> ApiResult<Paginated<T>>;
 
 /// Async paginator over a DP list endpoint.
 ///
@@ -149,7 +149,7 @@ where
             None => http.get_json(&path, &params).await,
             Some(decode) => {
                 let body: serde_json::Value = http.get_json(&path, &params).await?;
-                decode(body)
+                decode(body, &path)
             }
         }
     }

@@ -5,9 +5,12 @@
 //! Field names are kept on-the-wire (`snake_case`) so the JSON round-trips
 //! verbatim — no camelCase translation layer.
 //!
-//! Unknown fields on responses are silently ignored. Enum values added by
-//! the DP after this SDK is compiled deserialize into the `Other`/`Unknown`
-//! fallback variant so callers can still read the rest of the record.
+//! A response type serializes back to the JSON the server sent, except for
+//! its `null` fields: a `None` is left out. A field this SDK build does not
+//! model is ignored, or reported by the `strict-schema` feature. Enum values
+//! added by the DP after this SDK is compiled deserialize into the
+//! `Other`/`Unknown` fallback variant so callers can still read the rest of
+//! the record.
 
 use serde::de::Deserializer;
 use serde::ser::Serializer;
@@ -241,6 +244,7 @@ impl<'de> Deserialize<'de> for FileType {
 // ----- pagination ------------------------------------------------------------
 
 /// Cursor pagination envelope shared by every DP list endpoint.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Paginated<T> {
     pub records: Vec<T>,
@@ -264,14 +268,16 @@ pub struct PaginationParams {
 
 // ----- tasks -----------------------------------------------------------------
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AgentInfo {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub sandbox_status: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub session_id: Option<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Task {
     pub id: Uuid,
@@ -279,33 +285,35 @@ pub struct Task {
     pub project_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub display_index: Option<i64>,
     #[serde(default)]
     pub kind: TaskKind,
     #[serde(default = "default_task_status")]
     pub status: TaskStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub member_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub automation_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_id: Option<Uuid>,
     #[serde(default)]
+    pub runtime_group_id: Option<Uuid>,
+    #[serde(default)]
     pub is_archived: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub completed_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_user_message_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conversation_metadata: Option<HashMap<String, String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub conversation_metadata: Option<BTreeMap<String, String>>,
+    #[serde(default)]
     pub agent: Option<AgentInfo>,
     /// `key:value` grouping tags stamped on this task.
     #[serde(default)]
@@ -342,12 +350,13 @@ pub struct TaskFileRef {
 /// default branch. Nothing is stored server-side to make that work — the ref
 /// stays null and git resolves the remote's HEAD, so it cannot go stale on a
 /// rename.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskRepoRequest {
     pub repo: String,
-    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "ref")]
     pub git_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub depth: Option<u32>,
 }
 
@@ -496,29 +505,38 @@ pub struct TaskRunResume {
     pub resume: Vec<ResumeEntry>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskRun {
     pub id: String,
     pub task_id: Uuid,
     pub status: TaskStatus,
+    /// Why the run failed; set only on a failed run.
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub completion_reason: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskCreateResponse {
     pub task: Task,
     pub run: TaskRun,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskRunResponse {
     pub run: TaskRun,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskCancelResponse {
     pub id: String,
 }
@@ -549,6 +567,7 @@ pub enum ShareResourceType {
     Channel,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ResourceShare {
     pub id: Uuid,
@@ -651,6 +670,7 @@ pub struct ShareListParams {
 
 // ----- files -----------------------------------------------------------------
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct File {
     pub id: Uuid,
@@ -665,7 +685,7 @@ pub struct File {
     #[serde(default = "default_mime")]
     pub mime_type: String,
     #[serde(default)]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub member_id: Option<Uuid>,
     /// Task this file was created from (accounting only).
@@ -679,6 +699,12 @@ pub struct File {
     pub parent_id: Option<Uuid>,
     #[serde(default)]
     pub storage_version_id: Option<String>,
+    /// Task whose run generated this file as an output.
+    #[serde(default)]
+    pub generated_output_task_id: Option<Uuid>,
+    /// When the file is deleted; `None` keeps it.
+    #[serde(default)]
+    pub expires_at: Option<String>,
     /// Grouping tags stamped on this file. Tags belong to the file rather than
     /// to a version, so they carry forward when a new version is written.
     #[serde(default)]
@@ -807,6 +833,7 @@ impl SseEvent {
 
 // ----- recipes (CP) ----------------------------------------------------------
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Recipe {
     pub id: Uuid,
@@ -818,9 +845,21 @@ pub struct Recipe {
     pub git_ref: String,
     pub git_commit_sha: String,
     #[serde(default)]
+    pub git_commit_subject: Option<String>,
+    #[serde(default)]
     pub sub_path: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// MCP servers the recipe declares (`id`, `required`, `tools`).
+    #[serde(default)]
+    pub mcp_servers: Option<Vec<serde_json::Value>>,
+    /// The recipe's Cedar policies (`schema`, `policies`, `routes`).
+    #[serde(default)]
+    pub policies: Option<serde_json::Value>,
+    /// Result of the recipe check (`status`, `validator_name`,
+    /// `validator_version`, `checked_at`, `error_message`, `diagnostics`).
+    #[serde(default)]
+    pub validation: Option<BTreeMap<String, serde_json::Value>>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
@@ -947,6 +986,7 @@ fn default_branch() -> String {
 
 /// A repository registered to a project — the Git source a recipe pins.
 /// Mirrors the CP `RepositoryResponse`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Repository {
     pub id: Uuid,
@@ -1055,6 +1095,7 @@ impl<'de> Deserialize<'de> for RepositoryEntryType {
 }
 
 /// One entry of a repository directory listing.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryEntry {
     pub name: String,
@@ -1067,6 +1108,7 @@ pub struct RepositoryEntry {
 }
 
 /// One page of a directory listing.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryDirectory {
     pub path: String,
@@ -1080,6 +1122,7 @@ pub struct RepositoryDirectory {
 }
 
 /// A file's content at one commit.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryFile {
     pub name: String,
@@ -1123,6 +1166,7 @@ pub struct ContentsQuery {
 // ----- repository commits (DP) -----------------------------------------------
 
 /// The author or committer of a commit.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryCommitPerson {
     pub name: String,
@@ -1133,6 +1177,7 @@ pub struct RepositoryCommitPerson {
 }
 
 /// One commit of a repository's history.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryCommit {
     pub sha: String,
@@ -1195,6 +1240,7 @@ impl<'de> Deserialize<'de> for RepositoryCommitFileStatus {
 }
 
 /// One file a commit changed.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryCommitFile {
     pub filename: String,
@@ -1208,6 +1254,7 @@ pub struct RepositoryCommitFile {
 }
 
 /// `GET /v1/repositories/{id}/commits/{sha}` — a commit with what it changed.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryCommitDetail {
     #[serde(flatten)]
@@ -1249,6 +1296,7 @@ pub struct RepositoryMergeCreate {
 
 /// The merge commit a `201` answers with. For a `base` with no commits, `sha`
 /// equals `head_sha` and `parents` is `[head_sha]`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryMergeCommit {
     pub sha: String,
@@ -1309,6 +1357,7 @@ impl<'de> Deserialize<'de> for RuntimeLlmMode {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Runtime {
     pub id: Uuid,
@@ -1317,7 +1366,7 @@ pub struct Runtime {
     /// `None` until a recipe is pinned; the CP declares it nullable.
     #[serde(default)]
     pub recipe_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
@@ -1331,28 +1380,42 @@ pub struct Runtime {
     /// Set when the runtime has been withdrawn: it never resolves as the
     /// active runtime for its environment, while in-flight sticky runs keep
     /// using it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub yanked_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub yanked_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
-    pub is_active: bool,
-    #[serde(default)]
-    pub allow_hot_swap: bool,
     /// LLM credential source. Defaults to `Managed` when the CP omits
     /// the field (older servers) or sends `"managed"` explicitly.
     #[serde(default)]
     pub llm_mode: RuntimeLlmMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_json: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub config_json: Option<BTreeMap<String, serde_json::Value>>,
     /// Per-environment git ref each lane tracks (`environment` -> `main` /
     /// `pr/N` / commit sha), projected from the runtime group.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_ref: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub environment_ref: Option<BTreeMap<String, String>>,
+    /// Git ref the runtime's recipe tracks (`main`, `pr/N`, a commit sha).
+    #[serde(default)]
+    pub recipe_ref: Option<String>,
+    /// Kind of recipe the runtime serves (`production`, `preview`, ...).
+    #[serde(default)]
+    pub recipe_kind: Option<String>,
+    /// State of the runtime's image build (`pending`, `building`, `ready`,
+    /// `failed`, ...).
+    #[serde(default)]
+    pub image_build_status: Option<String>,
+    #[serde(default)]
+    pub image_build_metadata: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub image_build_error_message: Option<String>,
+    /// The MCP servers the runtime needs connected; sent only for
+    /// `include=mcp_requirements`.
+    #[serde(default)]
+    pub mcp_requirements: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1671,11 +1734,12 @@ pub enum ExperimentGoalDirection {
 }
 
 /// Canary bound over one goal component's rate.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ExperimentGoalGuard {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub min: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max: Option<f64>,
 }
 
@@ -1686,27 +1750,29 @@ fn default_component_weight() -> f64 {
 /// Judge-backed reward component. `judge_id` comes from `GET /v1/judges` —
 /// judges cannot be created through the API; author a `judges/*.yaml` in the
 /// recipe repository and it syncs when a runtime versions that commit.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct JudgeGoalComponent {
     pub judge_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub judge_definition_hash: Option<String>,
     #[serde(default = "default_component_weight")]
     pub weight: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub guard: Option<ExperimentGoalGuard>,
 }
 
 /// Reserved shape for future telemetry-backed reward components.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TelemetryGoalComponent {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub column: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub aggregation: Option<String>,
     #[serde(default = "default_component_weight")]
     pub weight: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub guard: Option<ExperimentGoalGuard>,
 }
 
@@ -1725,6 +1791,7 @@ fn default_goal_kind() -> String {
 /// Composite objective the bandit optimizes. A create goal must carry at
 /// least one `Judge` component with `weight > 0` — the v1 scorer only
 /// implements judge-backed reward.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExperimentGoal {
     #[serde(default = "default_goal_kind")]
@@ -1750,51 +1817,59 @@ impl Default for ExperimentGoal {
 /// optional `agent_overrides` are sent; reads may carry additional
 /// server-set fields (arm id, seeded weight) which deserialize is happy to
 /// ignore.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Arm {
+    pub id: Uuid,
     pub runtime_id: Uuid,
     pub arm_label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_overrides: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub agent_overrides: Option<BTreeMap<String, String>>,
+    /// Share of traffic the arm starts with, before the bandit reweights.
+    pub initial_weight: i64,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Experiment {
     pub id: Uuid,
     pub org_id: Uuid,
     pub project_id: Uuid,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub environment: Option<String>,
     pub status: ExperimentStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub routing_strategy: Option<String>,
     #[serde(default)]
     pub arms: Vec<Arm>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub goal_json: Option<ExperimentGoal>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scoring_interval_seconds: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub hash_key_fields: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub sample_rate: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub posterior_json: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub weights_json: Option<HashMap<String, i64>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub posterior_json: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub weights_json: Option<BTreeMap<String, i64>>,
+    #[serde(default)]
     pub started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ended_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub halted_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub halted_reason: Option<String>,
+    pub created_by_member_id: Uuid,
+    #[serde(default)]
+    pub archived_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -2064,6 +2139,7 @@ pub enum ConnectionBrokerSubjectType {
 /// not have them. `requires_runtime` is server-derived and is the **only**
 /// signal for whether [`ConnectorAuthorizeParams::runtime`] must be set;
 /// never hardcode a provider list.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Connector {
     pub id: Uuid,
@@ -2080,34 +2156,34 @@ pub struct Connector {
     /// Create-time fact (`development` / `staging` / `production`), not
     /// updatable.
     pub environment: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub agent_member_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub authorization_endpoint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub token_endpoint: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
     #[serde(default)]
     pub api_hosts: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub person_server_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub application_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub assertion_audience: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub webhook_url: Option<String>,
     pub status: ConnectorStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
     /// Cedar entities the recipe's policies read when a request reaches this
     /// connector's hosts.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub policy_entities: Option<Vec<PolicyEntity>>,
     /// Server-derived: whether [`Connectors::authorize`] must name a runtime
     /// for this connector (chat providers need the agent that replies).
@@ -2119,6 +2195,7 @@ pub struct Connector {
 
 /// A connection under a connector. Access/refresh tokens are **never**
 /// serialized by the API, so they do not appear here.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Connection {
     pub id: Uuid,
@@ -2128,16 +2205,16 @@ pub struct Connection {
     pub connector_id: Uuid,
     /// `None` = org-owned (app subject); for a Slack workspace install this
     /// points at the workspace customer member.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub member_id: Option<Uuid>,
     /// The member who performed the grant, as distinct from `member_id`
     /// (whose credential this is). For `app` and `workspace` subjects those
     /// are never the same principal. `None` for grants made before the
     /// column existed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
     /// Runtime group answering this connection's channels.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     pub subject_type: ConnectionSubjectType,
     #[serde(default)]
@@ -2147,14 +2224,14 @@ pub struct Connection {
     /// dedicated host.
     ///
     /// [`Connectors::list_apps`]: crate::resources::connectors::Connectors::list_apps
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub provider_app: Option<String>,
     /// The provider's own identifier for the connected account. An opaque
     /// routing id, not a secret.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub provider_account_id: Option<String>,
     pub status: ConnectionStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub token_expires_at: Option<String>,
 }
 
@@ -2326,16 +2403,18 @@ pub struct ConnectorUpdateParams {
 
 /// A Cedar entity a recipe's policies read, in Cedar's JSON entity format:
 /// e.g. a company and the seniority its business-class bookings need.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PolicyEntity {
     pub uid: EntityUid,
     #[serde(default)]
-    pub attrs: HashMap<String, serde_json::Value>,
+    pub attrs: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub parents: Vec<EntityUid>,
 }
 
 /// A Cedar entity reference, `{"type": "Company", "id": "acme"}`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct EntityUid {
     #[serde(rename = "type")]
@@ -2515,6 +2594,7 @@ impl ConnectorCustomAppSearchParams {
 ///
 /// [`Connectors::list_apps`]: crate::resources::connectors::Connectors::list_apps
 /// [`Connectors::search_custom_apps`]: crate::resources::connectors::Connectors::search_custom_apps
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectorApp {
     pub slug: String,
@@ -2601,12 +2681,13 @@ impl<'de> Deserialize<'de> for ClientRegistrationMethod {
 /// Response of `POST /v1/connectors/discover-oauth` — the provider's OAuth
 /// metadata plus, when the provider allows it, a client the platform
 /// registered for itself.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectorOAuthDiscovery {
     pub issuer: String,
     pub authorization_endpoint: String,
     pub token_endpoint: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub registration_endpoint: Option<String>,
     #[serde(default)]
     pub token_endpoint_auth_methods_supported: Vec<String>,
@@ -2618,18 +2699,18 @@ pub struct ConnectorOAuthDiscovery {
     pub client_id_metadata_document_supported: bool,
     /// RFC 9728 resource identifier when discovery started at an MCP server;
     /// sent as the RFC 8707 `resource` parameter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub resource: Option<String>,
     /// The callback this deployment sends. A client registered by hand must
     /// be given exactly this.
     pub redirect_uri: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub client_secret: Option<String>,
     /// How `client_id` was obtained; `None` when the provider offers no
     /// automatic registration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub client_registration: Option<ClientRegistrationMethod>,
 }
 
@@ -2640,6 +2721,7 @@ pub struct ConnectorOAuthDiscovery {
 /// different URLs, and responses must never be cached — mint a new one per
 /// hand-off. The `state` is deliberately not a response field and must never
 /// be parsed out of the URL, logged, or surfaced.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectorAuthorization {
     pub authorize_url: String,
@@ -2688,16 +2770,18 @@ pub struct ConnectionTokenParams {
     pub requested_permissions: Option<ConnectionMissionConstraints>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectionToken {
     pub token: String,
     pub token_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expires_at: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectionAuthorizationPending {
     pub status: String,
@@ -2771,6 +2855,7 @@ impl<'de> Deserialize<'de> for MemberType {
 /// narrows a list. A tag also still grants implicit read and write over every
 /// file and task whose tags intersect the member's own, but that is being
 /// retired in favour of tag shares.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Member {
     pub id: Uuid,
@@ -2779,15 +2864,15 @@ pub struct Member {
     pub updated_at: String,
     /// Set for a business member; a customer member carries one only when a
     /// brokered IdP supplied it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub email: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
     /// The identity a customer member is keyed on, tier-prefixed (e.g.
     /// `user:abc`); the IdP subject for a business member.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub external_user_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub image_url: Option<String>,
     /// `owner` / `admin` / `member` for a business member.
     pub role: String,
@@ -2802,15 +2887,15 @@ pub struct Member {
     /// Customer-defined `key: value` labels. Grants nothing; filter on them
     /// with [`MemberListParams::metadata`].
     #[serde(default)]
-    pub metadata: HashMap<String, String>,
+    pub metadata: BTreeMap<String, String>,
     /// The brokered IdP a customer member came through.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub application_idp_id: Option<Uuid>,
     /// The connector whose verified delivery minted a customer member.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub connector_id: Option<Uuid>,
     /// The org's own provider install a channel customer member came through.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub integration_id: Option<Uuid>,
     /// Server-derived: whether this is one of the fixed agents an API key or
     /// Application may act as.
@@ -2819,8 +2904,8 @@ pub struct Member {
     /// Facts the recipe's Cedar policies read about this member (its
     /// principal's attributes); an `{"__entity": {...}}` value references a
     /// [`PolicyEntity`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub policy_attributes: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// Filters supported by `GET /v1/members`.
@@ -3058,22 +3143,24 @@ impl<'de> Deserialize<'de> for EndpointKind {
 /// Non-secret metadata on an [`Endpoint`]. An MCP binding names its server
 /// in `mcp_server_id`, and how it authenticates in `connector_id` (a stored
 /// connection) or `provider_app` (one app on a multi-app host).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct EndpointMetadata {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub mcp_server_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub connector_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub provider_app: Option<String>,
     /// Hosts the endpoint hands out URLs on that carry their own credential.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub extra_hosts: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub auth_audience: Option<String>,
-    /// The metadata is open: keys this SDK predates ride along here.
+    /// Open by design: the server stores and returns metadata keys it does not
+    /// declare (`extra="allow"`), so they are kept here.
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// An endpoint binding (`/v1/endpoints`): a host the project's agents reach,
@@ -3081,6 +3168,7 @@ pub struct EndpointMetadata {
 ///
 /// `headers` carries configured values with `${NAME}` credential references
 /// left unresolved; a credential's secret value is never returned.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Endpoint {
     pub id: Uuid,
@@ -3090,33 +3178,33 @@ pub struct Endpoint {
     /// Hostname only: no scheme, path or port.
     pub host: String,
     /// Full base URL, when the binding overrides `https://{host}`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub base_url: Option<String>,
     pub kind: EndpointKind,
     #[serde(default)]
     pub metadata: EndpointMetadata,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assertion_claims: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub assertion_claims: Option<BTreeMap<String, String>>,
     /// Set when the binding is scoped to one runtime; unset, it serves every
     /// runtime in the project.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub environment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub verify_path: Option<String>,
     #[serde(default)]
-    pub headers: HashMap<String, String>,
+    pub headers: BTreeMap<String, String>,
     #[serde(default)]
     pub header_names: Vec<String>,
     #[serde(default)]
     pub credential_refs: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_verified_at: Option<String>,
     /// The application that signs this endpoint's identity assertions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub authorized_application_id: Option<Uuid>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
@@ -3157,6 +3245,7 @@ pub struct EndpointListParams {
 
 /// A project, as `GET /v1/projects` and `GET /v1/projects/{project}` return
 /// it.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Project {
     pub id: Uuid,
@@ -3166,13 +3255,13 @@ pub struct Project {
     pub name: String,
     /// The stable identifier the CLI and dashboard URLs use. The CP declares
     /// it nullable; a project created before slugs existed may have none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub slug: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub settings: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
 }
 
@@ -3310,11 +3399,12 @@ open_wire_enum! {
 }
 
 /// One condition stored in an automation's metadata.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AutomationCondition {
     #[serde(rename = "type")]
     pub condition_type: AutomationConditionType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
 }
 
@@ -3333,6 +3423,7 @@ impl AutomationCondition {
 /// The runtime group is the top-level `runtime_group_id`; the API rejects it
 /// inside metadata, so there is no field for it here. Empty lists are not
 /// sent. On update the whole object replaces the stored one.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AutomationMetadata {
     /// Repositories a task-run automation clones.
@@ -3342,7 +3433,7 @@ pub struct AutomationMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cron_schedules: Vec<String>,
     /// IANA time zone the cron schedules are evaluated in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<AutomationCondition>,
@@ -3350,6 +3441,7 @@ pub struct AutomationMetadata {
 
 /// A stored automation: a prompt run as an agent task, or platform work when
 /// `kind` is set. The read model of every `/v1/automations` route.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Automation {
     pub id: Uuid,
@@ -3358,32 +3450,32 @@ pub struct Automation {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub trigger_type: AutomationTriggerType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cron_schedule: Option<String>,
     /// `None` for an automation a person created; a platform automation
     /// carries its kind.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub kind: Option<AutomationKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub prompt: Option<String>,
     /// The runtime group it runs on (or clusters); `None` for
     /// [`AutomationKind::ObservationSynthesis`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     /// The existing task each firing posts the prompt into; `None` creates a
     /// task per firing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub task_id: Option<Uuid>,
     /// The person who created it; `None` on a platform automation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
     /// Why the scheduler will not run this automation, when it will not.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub execution_blocked_reason: Option<String>,
     /// Whether the caller may change it.
     #[serde(default)]
@@ -3391,20 +3483,20 @@ pub struct Automation {
     /// `operator` for one that runs as a task (a person's automation or
     /// [`AutomationKind::ProjectCheckIn`]), `None` for one that runs on the
     /// platform's own workers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub owner_role: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     /// Open-ended as stored; read the known fields with
     /// [`Self::typed_metadata`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
     pub last_triggered_at: Option<String>,
     /// The next slot: derived from the schedule for a cron automation,
     /// client-set for a one-off manual automation and cleared once that slot
     /// fires.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub next_trigger_at: Option<String>,
 }
 
@@ -3538,14 +3630,15 @@ pub struct AutomationListParams {
 
 /// `POST /v1/automations/{id}/trigger` response. A `skipped` status carries
 /// its `reason` and records no event.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AutomationTriggerResponse {
     pub status: AutomationExecutionStatus,
     pub automation_id: Uuid,
     /// The task created, or posted into.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub task_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub reason: Option<String>,
 }
 
@@ -3554,6 +3647,7 @@ pub struct AutomationTriggerResponse {
 /// An app (Gmail, Slack, …) a member connected for themself, which the agent
 /// acts with in that member's sessions. Distinct from a connector's
 /// [`Connection`].
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemberConnection {
     pub id: Uuid,
@@ -3562,7 +3656,7 @@ pub struct MemberConnection {
     /// Provider application slug, e.g. `"gmail"`.
     pub app: String,
     /// The provider account connected, when the provider names one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub account_name: Option<String>,
     /// `false` when the connection needs reconnecting.
     pub healthy: bool,
@@ -3610,12 +3704,13 @@ impl MemberConnectionCreate {
 
 /// Response of `POST /v1/connections`: a connect page for one app, which ends
 /// on a page saying the app is connected. Mint a new one per hand-off.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectPage {
     pub authorize_url: String,
     /// Seconds the URL stays valid.
     pub expires_in: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expires_at: Option<String>,
 }
 
@@ -3698,32 +3793,33 @@ open_wire_enum! {
 
 /// A project API key. The plaintext key is never readable after create; see
 /// [`ApiKeyCreated`].
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiKey {
     pub id: Uuid,
     pub org_id: Uuid,
     pub project_id: Uuid,
     pub created_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
     pub environment: Lane,
     #[serde(default)]
     pub allow: Vec<ApiKeyCapability>,
     pub scope: String,
     /// The agent member the key acts as, when it is not the default one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub member_id: Option<Uuid>,
     pub key_prefix: String,
     pub key_suffix: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub redacted_key: Option<String>,
     pub status: ApiKeyStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expires_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_used_at: Option<String>,
     /// Set once [`crate::ApiKeys::acknowledge`] records the key as saved.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub acknowledged_at: Option<String>,
     pub key_display: String,
     pub prefix: String,
@@ -3731,11 +3827,12 @@ pub struct ApiKey {
 
 /// Response of `POST /v1/api-keys`: the key, plus its plaintext — the only
 /// time the API returns it.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiKeyCreated {
     #[serde(flatten)]
     pub key: ApiKey,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub api_key: Option<Secret>,
 }
 
@@ -3789,6 +3886,7 @@ pub struct ApiKeyDeleteParams {
 }
 
 /// Response of `POST /v1/api-keys/{id}/acknowledge`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiKeyAcknowledgement {
     pub acknowledged: bool,
@@ -3816,6 +3914,7 @@ open_wire_enum! {
 }
 
 /// An OAuth client registered in a project.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Application {
     pub id: Uuid,
@@ -3833,13 +3932,13 @@ pub struct Application {
     #[serde(default)]
     pub allowed_scopes: Vec<String>,
     pub client_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub agent_member_id: Option<Uuid>,
     #[serde(default)]
     pub allowed_grants: Vec<ApplicationGrant>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_used_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub revoked_at: Option<String>,
     pub created_by_member_id: Uuid,
 }
@@ -3920,6 +4019,7 @@ open_wire_enum! {
 
 /// An identity provider brokered into an Application, whose users sign in as
 /// customer members.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApplicationIdp {
     pub id: Uuid,
@@ -3932,18 +4032,18 @@ pub struct ApplicationIdp {
     pub client_id: String,
     #[serde(default)]
     pub scopes: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub external_org_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub external_idp_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub audience_client_id: Option<String>,
     pub status: ApplicationIdpStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub error_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub disabled_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub client_secret: Option<Secret>,
     pub is_active: bool,
 }
@@ -3976,6 +4076,7 @@ open_wire_enum! {
 
 /// A client secret of a confidential Application. `secret` is set only on the
 /// create response.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApplicationSecret {
     pub id: Uuid,
@@ -3985,16 +4086,16 @@ pub struct ApplicationSecret {
     pub updated_at: String,
     pub secret_prefix: String,
     pub secret_suffix: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expires_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub disabled_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_used_at: Option<String>,
     pub created_by_member_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub secret: Option<Secret>,
     pub status: ApplicationSecretStatus,
 }
@@ -4008,6 +4109,7 @@ pub struct ApplicationSecretCreateParams {
 
 /// A signing key of a `jwks` Application: the public half, published at the
 /// Application's JWKS URL.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApplicationKey {
     pub id: Uuid,
@@ -4018,7 +4120,7 @@ pub struct ApplicationKey {
     pub kid: String,
     pub algorithm: String,
     pub public_key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
 }
 
@@ -4026,6 +4128,7 @@ pub struct ApplicationKey {
 
 /// A runtime credential. The secret is write-only: reads report only whether
 /// one is set and a display hint.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Credential {
     pub id: Uuid,
@@ -4034,18 +4137,18 @@ pub struct Credential {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     /// `None` applies to every lane.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub environment: Option<Lane>,
     #[serde(default)]
     pub has_secret: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub secret_display: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub secret_set_at: Option<String>,
     pub created_by_member_id: Uuid,
 }
@@ -4117,6 +4220,7 @@ open_wire_enum! {
 }
 
 /// A runtime environment variable.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Variable {
     pub id: Uuid,
@@ -4126,13 +4230,13 @@ pub struct Variable {
     pub updated_at: String,
     pub name: String,
     pub kind: VariableKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub value: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub environment: Option<Lane>,
     pub created_by_member_id: Uuid,
 }
@@ -4210,6 +4314,7 @@ open_wire_enum! {
 
 /// The org's own install of a provider (a GitHub App installation, a Slack
 /// workspace). At most one live integration per type per org.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Integration {
     pub id: Uuid,
@@ -4218,19 +4323,19 @@ pub struct Integration {
     pub updated_at: String,
     #[serde(rename = "type")]
     pub integration_type: IntegrationType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
     /// The provider's id for the install, set once it is activated.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub external_id: Option<String>,
     pub status: IntegrationStatus,
     pub created_by_member_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub token_expires_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub data: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// Body of `POST /v1/integrations`. The row is always created `pending`; the
@@ -4278,6 +4383,7 @@ pub struct IntegrationUpdateParams {
 
 /// A judge a Recipe declares. Its definition is authored in the Recipe; only
 /// `enabled` and `sample_rate` are operational and changeable here.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Judge {
     pub id: Uuid,
@@ -4287,19 +4393,19 @@ pub struct Judge {
     pub created_at: String,
     pub updated_at: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
     pub enabled: bool,
     pub sample_rate: f64,
     pub source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub repository_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub recipe_git_commit_sha: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub source_path: Option<String>,
     pub definition_hash: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
 }
 
@@ -4337,26 +4443,27 @@ pub enum FeatureFlagValue {
 }
 
 /// Response of `GET /v1/oidc/me`: who the credential is.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Me {
     #[serde(default = "default_true")]
     pub authenticated: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub org_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub member_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub email: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub picture: Option<String>,
     #[serde(default)]
-    pub feature_flags: HashMap<String, FeatureFlagValue>,
+    pub feature_flags: BTreeMap<String, FeatureFlagValue>,
     /// Set while an operator impersonates this member.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub impersonating_member_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub impersonator_email: Option<String>,
 }
 
@@ -4403,6 +4510,7 @@ open_wire_enum! {
 
 /// An image in the plane's registry, which is what an eval task's compose
 /// services run as.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Image {
     pub id: Uuid,
@@ -4412,66 +4520,66 @@ pub struct Image {
     /// returns this row.
     pub content_id: String,
     pub source_kind: ImageSourceKind,
-    pub source: HashMap<String, serde_json::Value>,
+    pub source: BTreeMap<String, serde_json::Value>,
     pub build_platform: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub service: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub repository_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub git_sha: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub git_ref: Option<String>,
     #[serde(default)]
     pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub task_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub trigger: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub base_image_digest: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub base_image_tag: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_artifacts: Option<HashMap<String, String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub external_artifacts: Option<BTreeMap<String, String>>,
+    #[serde(default)]
     pub external_image_name: Option<String>,
     pub status: ImageStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub image_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub image_digest: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub size_bytes: Option<u64>,
     #[serde(default)]
     pub warnings: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scan_status: Option<ImageScanStatus>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scan_started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scanned_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub scan_db_built_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scan_summary: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub scan_summary: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
     pub scan_report_file_id: Option<Uuid>,
     pub created_at: String,
     pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub finished_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_used_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub evicted_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub retired_at: Option<String>,
 }
 
@@ -4523,15 +4631,16 @@ pub enum ImageSource {
 
 /// Where a Recipe publish built an image from, and the compose service it
 /// runs as.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ImageProvenance {
     /// The compose service name, a DNS label.
     pub service: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub repository_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub git_sha: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path: Option<String>,
 }
 
@@ -4630,29 +4739,30 @@ impl TaskCommandSpec {
 }
 
 /// A recorded command and, once terminal, its outcome.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskCommand {
     pub id: Uuid,
     pub task_id: Uuid,
     pub kind: TaskCommandKind,
     /// The spec as the API normalized it.
-    pub spec: HashMap<String, serde_json::Value>,
+    pub spec: BTreeMap<String, serde_json::Value>,
     pub status: TaskCommandStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub exit_code: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub stdout: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub stderr: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub output_file_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub started_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub finished_at: Option<String>,
 }
 
@@ -4672,13 +4782,14 @@ pub struct TaskCommandListParams {
 /// stamp it onto `task.metadata.identity` + forward as
 /// `TASK_USER_ID` / `TASK_ANONYMOUS_ID` / `TASK_CONVERSATION_ID`
 /// sandbox env.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RunnerIdentity {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub user_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub anonymous_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub conversation_id: Option<String>,
     /// Tags to stamp on the `customer` member this identity mints, **if that
     /// member is new**. Tags grant access (through tag shares), so this is
@@ -4686,7 +4797,7 @@ pub struct RunnerIdentity {
     /// to the asserting agent member's own tags, and applied on create only —
     /// an existing member's tags are never changed here. Tags use the same
     /// opaque, exact-match validation as every other tag write.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub tags: Option<Vec<String>>,
     /// Metadata to set on the `customer` member this identity names. Unlike
     /// `tags` it grants nothing, so it applies to an existing member too: the
@@ -4694,8 +4805,8 @@ pub struct RunnerIdentity {
     /// an admin set) and keeping the rest. `None` or an empty map changes
     /// nothing. Same bounds as [`MemberUpdateParams::metadata`]; not carried
     /// on the access-token claims.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, String>>,
 }
 
 /// Optional segment.io-style observability payload attached to a
@@ -4705,49 +4816,52 @@ pub struct RunnerIdentity {
 /// a privacy + stability footgun.
 ///
 /// Unknown fields ride along verbatim via [`Self::extra`].
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RunCaller {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ip: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub user_agent: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub locale: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub library: Option<RunCallerLibrary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub page: Option<RunCallerPage>,
     /// Any additional fields the caller supplied (app / device / os /
     /// campaign / network / screen / timezone / traits / custom keys)
     /// pass through verbatim.
     #[serde(default, flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RunCallerLibrary {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub version: Option<String>,
     #[serde(default, flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RunCallerPage {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub referrer: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub search: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub url: Option<String>,
     #[serde(default, flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `POST /v1/runtimes/{id}/run` and `/v1/experiments/{id}/run` body.
@@ -4774,7 +4888,8 @@ pub struct RunRequest {
 
 /// Resolved context attached to a [`RunnerSpec`] — the runtime / arm /
 /// identity CP picked. Surfaced on `runner.context()` for telemetry.
-#[derive(Debug, Clone, Deserialize)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RunnerContext {
     pub runtime_id: Uuid,
     #[serde(default)]
@@ -4802,6 +4917,7 @@ pub struct RunnerContext {
 /// DP deployment the runner should talk to. CP picks per project /
 /// deployment and surfaces the resolved endpoint plus its slug + region
 /// for telemetry / UX.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RunnerDeployment {
     /// DP base URL (e.g. `https://api.gcp01.introspection.dev`).
@@ -4816,7 +4932,8 @@ pub struct RunnerDeployment {
 ///
 /// The fields it omits are server-internal and are never returned to
 /// customer callers.
-#[derive(Debug, Clone, Deserialize)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RunnerSpec {
     pub session_id: String,
     /// DP deployment the runner should talk to.
@@ -4840,9 +4957,7 @@ pub struct RunnerSpec {
 // [`crate::DataPlaneResources`] on the client and the runner alike. The
 // stores are append-only (`otel_traces` → `/v1/conversations`, `otel_logs` →
 // `/v1/events`); all aggregation goes through the bounded `POST /v1/metrics`
-// contract. Records carry open telemetry attributes, so the typed structs keep
-// a `#[serde(flatten)] extra` bag — unknown fields ride along verbatim rather
-// than being dropped.
+// contract.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -5046,22 +5161,24 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationAgent {
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub parent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub invocation_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub depth: Option<i64>,
 }
 
 /// `total_input_tokens` is every input token the conversation's model calls
 /// read (uncached input plus cache reads and writes), not the sum of its
 /// items' `gen_ai.usage.input_tokens`, which counts uncached input only.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct ConversationUsage {
@@ -5070,79 +5187,90 @@ pub struct ConversationUsage {
     pub total_tokens: i64,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationCost {
     pub usd: f64,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationMetrics {
     pub duration_ms: f64,
     pub trace_count: i64,
     /// The highest `introspection.turn` stamped on the conversation's spans.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_turn: Option<i64>,
     pub span_count: i64,
     pub tool_use_count: i64,
     pub failed_tool_use_count: i64,
+    #[serde(default)]
+    pub llm_call_count: i64,
+    #[serde(default)]
+    pub failed_llm_call_count: i64,
     pub has_errors: bool,
 }
 
 /// The runtime that served a conversation, nested as its items'
 /// `introspection.runtime.*`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationRuntime {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub group_id: Option<Uuid>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationExperiment {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub id: Option<Uuid>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationRecipe {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub git_commit_sha: Option<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationOwner {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub key: Option<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct Conversation {
     pub object: String,
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub task_title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub agents: Option<Vec<ConversationAgent>>,
     pub usage: ConversationUsage,
     pub cost: ConversationCost,
     pub metrics: ConversationMetrics,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub environment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub service_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime: Option<ConversationRuntime>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub experiment: Option<ConversationExperiment>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub recipe: Option<ConversationRecipe>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub owner: Option<ConversationOwner>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, String>>,
 }
 
 /// `resolution` filter on `GET /v1/conversations`.
@@ -5551,29 +5679,30 @@ impl fmt::Display for IntrospectionEventName {
 /// surface. `org`/`project` never appear on the wire (tenant scope is implied
 /// by auth). The `event_name` discriminator lives on the [`Event`] enum tag,
 /// not duplicated here.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TypedEvent<P> {
     pub id: String,
     /// Per-family semantics: observation → `observed_at`, pattern →
     /// `updated_at` (catalog cursor), stream families → emit/observed time.
     pub timestamp: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub trace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub span_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub conversation_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub service_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub environment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub experiment_id: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub recipe_git_commit_sha: Option<String>,
     /// Family detail — one of the `*Payload` types, fixed by the
     /// [`Event`] variant.
@@ -5583,223 +5712,232 @@ pub struct TypedEvent<P> {
 /// `introspection.observation` payload — one **resolved** observation (the
 /// server-side fold: supersession applied, current pattern assignment
 /// joined). All fields optional except the `observation_id` identity.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ObservationPayload {
     pub observation_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lens: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub severity: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub confidence: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub segment: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub sentiment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub resolution: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub evidence_refs: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub prompt_version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub source_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub replaces_observation_id: Option<Uuid>,
     /// CURRENT pattern assignment (fold), not the assignment history.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pattern_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub assignment_score: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub assignment_method: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// `introspection.pattern` payload — one **folded** catalog row (current
 /// state: latest lifecycle action, status, fold timestamps).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PatternPayload {
     pub pattern_id: String,
     /// Latest lifecycle action (`created` / `updated` / `retired`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub action: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lens: Option<String>,
     /// `active` | `retired` (fold).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub status: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub created_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub updated_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub retired_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_detected_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub replacement_pattern_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub derived_from_pattern_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub run_id: Option<String>,
 }
 
 /// `introspection.pattern.assignment` payload — one observation→pattern
 /// assignment event (stream family). `observation_id` is the sole identity
 /// field; `pattern_id: None` means the observation was explicitly unassigned.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PatternAssignmentPayload {
     pub observation_id: Uuid,
     /// Target pattern; `None` = explicitly unassigned.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pattern_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub method: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub score: Option<f64>,
 }
 
 /// `introspection.observation_clustering.run` payload — one clustering run
 /// (stream family).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ClusteringRunPayload {
     pub run_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub lens: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub status: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub trigger: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub observation_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pattern_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub noise_count: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub params: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub params: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
     pub replaces_run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub error: Option<String>,
 }
 
 /// `introspection.feedback` payload — mirrors what the SDK `feedback()`
 /// surfaces actually emit (`properties.*` / `identity.*` attributes).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FeedbackPayload {
     /// The feedback label (`"thumbs_up"`, …) — `properties.name`.
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub comments: Option<String>,
     /// Numeric axis, when present — `properties.value`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub value: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub user_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub anonymous_id: Option<String>,
     /// Optional **emitted** field (positive/negative/neutral) — never derived
     /// server-side.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub sentiment: Option<String>,
     /// Response the feedback anchors to —
     /// `gen_ai.request.previous_response_id`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub previous_response_id: Option<String>,
     /// `gen_ai.agent.name`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub agent_name: Option<String>,
     /// `gen_ai.agent.id`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub agent_id: Option<String>,
     /// Remaining `properties.*` extras.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub properties: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub properties: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// `introspection.annotation` payload — one member-authored mutation.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnotationPayload {
     pub member_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub labels: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub comment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub assignee_member_ids: Option<Vec<Uuid>>,
 }
 
 /// `introspection.judgement` payload — mirrors the runtime-agent judges
 /// emitter (`introspection.judgement.*` / `introspection.judge.*` attributes).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct JudgementPayload {
     pub judgement_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub judge_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub result: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub definition_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub contract_version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub sequence_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub experiment_arm_id: Option<Uuid>,
 }
 
 /// `introspection.automation.triggered` payload — one automation trigger
 /// that ran (stream family, owned by the task's member).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AutomationTriggeredPayload {
     pub automation_id: Uuid,
     pub automation_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub prompt: Option<String>,
     pub trigger_type: AutomationTriggerType,
     /// The `next_trigger_at` a scheduled trigger claimed; `None` for a hand
     /// trigger.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub slot: Option<String>,
     /// The task created, or posted into when `posted` is true.
     pub task_id: Uuid,
     pub posted: bool,
     /// The task's member, who owns the event.
     pub member_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     /// The person who triggered it by hand.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub triggered_by_member_id: Option<Uuid>,
 }
 
 /// `introspection.automation.skipped` payload — one scheduled automation
 /// trigger that ran nothing (stream family, project-owned).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AutomationSkippedPayload {
     pub automation_id: Uuid,
     pub trigger_type: AutomationTriggerType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub slot: Option<String>,
     /// Set only when the automation targets an existing task.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub task_id: Option<Uuid>,
     pub reason: AutomationSkipReason,
 }
@@ -6285,14 +6423,13 @@ fn encode_err(e: serde_json::Error) -> IntrospectionAPIError {
 /// Response from `POST /v1/metrics`. Every row has the same shape whatever
 /// the view: the grouping values in `dimensions`, and one value per requested
 /// metric in `metrics`, in request order.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MetricsResponse {
     #[serde(default)]
     pub data: Vec<MetricRow>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub meta: Option<MetricsMeta>,
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
 }
 
 impl MetricsResponse {
@@ -6304,10 +6441,11 @@ impl MetricsResponse {
 }
 
 /// One row of a [`MetricsResponse`].
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetricRow {
     /// Bucket start; set only with a `time_dimension`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub timestamp: Option<i64>,
     #[serde(default)]
     pub dimensions: Vec<MetricDimensionValue>,
@@ -6334,6 +6472,7 @@ impl MetricRow {
 }
 
 /// One grouping value of a [`MetricRow`].
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetricDimensionValue {
     pub field: String,
@@ -6342,30 +6481,32 @@ pub struct MetricDimensionValue {
 
 /// One aggregated value of a [`MetricRow`]; `metric_index` points into the
 /// request's `metrics`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetricValue {
     pub metric_index: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub measure: Option<String>,
     pub aggregation: String,
     pub value: f64,
 }
 
 /// What a [`MetricsResponse`] answered for.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MetricsMeta {
     #[serde(default)]
     pub view: String,
     /// The window the query ran over after the server resolved it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub window: Option<MetricsWindow>,
     #[serde(default)]
     pub row_count: u64,
     #[serde(default)]
     pub row_limit: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub interval: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub step_seconds: Option<i64>,
     #[serde(default)]
     pub approximate: bool,
@@ -6377,11 +6518,13 @@ pub struct MetricsMeta {
     /// with one; a member login reads the whole project.
     #[serde(default)]
     pub owner_scoped: bool,
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    /// The `order_by` the query ran with, after the server's defaults.
+    #[serde(default)]
+    pub order_by: Vec<OrderTerm>,
 }
 
 /// `meta.window` of a [`MetricsResponse`].
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct MetricsWindow {
     pub start: String,
@@ -6646,6 +6789,7 @@ mod tests {
                     {"source": "judge", "judge_id": "0195c0de-0000-7000-8000-00000000000d", "weight": 1.0}
                 ]
             },
+            "created_by_member_id": "0195c0de-0000-7000-8000-000000000004",
             "created_at": "2025-01-01T00:00:00Z",
             "updated_at": "2025-01-01T00:00:00Z"
         }))
@@ -7313,6 +7457,21 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, IntrospectionAPIError::InvalidConfig(_)));
     }
+
+    #[test]
+    fn trajectory_tool_call_record_serializes_content_null() {
+        // A tool-call record is told apart from prose by `content: null`, so
+        // the null must survive serialization, not be skipped like other
+        // `None`s.
+        let wire = json!({
+            "role": "assistant",
+            "content": null,
+            "timestamp": "2025-01-01T00:00:01Z",
+            "tool_calls": [{"id": "call_1", "name": "edit", "args": "{}"}],
+        });
+        let record: TrajectoryRecord = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&record).unwrap(), wire);
+    }
 }
 
 // ----- trajectory-v1 (conversation export) ----------------------------------
@@ -7323,6 +7482,7 @@ mod tests {
 /// trajectory-v1 contract rather than an oversight here: the encoded value is
 /// an object, and a malformed or scalar source value arrives as
 /// `{"_raw": ...}` so the evidence survives without breaking the schema.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryToolCall {
     /// Identifier linking this call to its [`TrajectoryRecord::Tool`] result.
@@ -7334,19 +7494,21 @@ pub struct TrajectoryToolCall {
 }
 
 /// Leading record identifying the session the trajectory came from.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryMetaRecord {
     /// Harness that produced the session, e.g. `"claude-code"`.
     pub source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub git_branch: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub model: Option<String>,
 }
 
 /// A user turn.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryUserRecord {
     pub content: String,
@@ -7355,6 +7517,7 @@ pub struct TrajectoryUserRecord {
 }
 
 /// Model reasoning, when the source exposed it.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryReasoningRecord {
     pub content: String,
@@ -7368,17 +7531,20 @@ pub struct TrajectoryReasoningRecord {
 /// `tool_calls`; a tool-call record carries `content: null`. That null is
 /// load-bearing and always present on the wire, so `content` is
 /// `Option<String>` rather than a skipped field.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryAssistantRecord {
+    #[serialize_always]
     pub content: Option<String>,
     /// ISO-8601 timestamp.
     pub timestamp: String,
     /// Present only on a tool-call record, and then never empty.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub tool_calls: Option<Vec<TrajectoryToolCall>>,
 }
 
 /// A tool result, linked to its call by `tool_call_id`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrajectoryToolRecord {
     pub tool_call_id: String,
@@ -7386,7 +7552,7 @@ pub struct TrajectoryToolRecord {
     /// ISO-8601 timestamp.
     pub timestamp: String,
     /// Source-native success status; absent when the source exposes none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ok: Option<bool>,
 }
 

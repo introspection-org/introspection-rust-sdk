@@ -46,6 +46,7 @@ impl fmt::Display for TagKind {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tag {
     pub kind: TagKind,

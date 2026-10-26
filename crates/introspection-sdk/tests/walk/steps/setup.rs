@@ -417,15 +417,12 @@ pub async fn repository(w: &mut Walk) {
     {
       "created_at": "[timestamp]",
       "default_branch": "main",
-      "head_commit_sha": null,
       "id": "[uuid]",
-      "integration_id": null,
       "is_recipe_source": false,
       "name": "hello-mcp",
       "project_id": "[uuid]",
       "provider": "introspection",
       "provisioning_status": "pending",
-      "pushed_at": null,
       "seed_template": "pi-agent",
       "slug": "hello-mcp",
       "url": "[url]"
@@ -615,13 +612,33 @@ pub async fn recipe(w: &mut Walk) {
       "git_commit_sha": "[sha]",
       "git_ref": "main",
       "id": "[uuid]",
+      "mcp_servers": [
+        {
+          "id": "[redacted]",
+          "required": true,
+          "tools": {
+            "exclude": [],
+            "include": [
+              "echo"
+            ]
+          }
+        }
+      ],
       "name": "hello-mcp",
       "org_id": "[uuid]",
       "project_id": "[uuid]",
       "repository_id": "[uuid]",
       "slug": "hello-mcp-production-main-543b8db50a83",
       "sub_path": ".",
-      "updated_at": "[timestamp]"
+      "updated_at": "[timestamp]",
+      "validation": {
+        "checked_at": "[timestamp]",
+        "diagnostics": [],
+        "error_message": null,
+        "status": "valid",
+        "validator_name": "introspection-recipe-check",
+        "validator_version": "0.12.0"
+      }
     }
     "#);
 

@@ -60,8 +60,7 @@ fn conversation_item(id: &str) -> serde_json::Value {
                 ]}
             },
             "acme": {"tenant": "x"}
-        },
-        "future_server_field": "preserved"
+        }
     })
 }
 
@@ -1090,7 +1089,15 @@ async fn a_data_plane_still_sending_input_tokens_parses() {
         .mount(&server)
         .await;
 
-    let conversation = conversations.get("conv-1").await.unwrap();
+    let result = conversations.get("conv-1").await;
+
+    // With `strict-schema` the retired field is reported, not dropped.
+    if cfg!(feature = "strict-schema") {
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("$.usage.input_tokens"), "{error}");
+        return;
+    }
+    let conversation = result.unwrap();
     assert_eq!(conversation.usage.total_input_tokens, 0);
     assert_eq!(conversation.usage.total_tokens, 7);
     assert_eq!(conversation.metrics.max_turn, None);
@@ -1420,14 +1427,9 @@ async fn conversation_items_get_fetches_detail_with_includes() {
     // message-family `include` left to forget.
     assert_eq!(item.input_messages().len(), 1);
     assert_eq!(item.operation_name(), Some("invoke_agent"));
-    // Both open seams survive: an unmodelled top-level field and an entire
-    // unmodelled attribute family.
+    // An attribute family the SDK does not type survives in the open map.
     assert_eq!(
-        item.extra.get("future_server_field"),
-        Some(&json!("preserved"))
-    );
-    assert_eq!(
-        item.attributes.extra.get("acme"),
+        item.attributes.other.get("acme"),
         Some(&json!({"tenant": "x"}))
     );
 }

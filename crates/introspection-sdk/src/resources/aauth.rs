@@ -18,6 +18,7 @@ use crate::api::paginator::Paginator;
 use crate::api::schemas::PaginationParams;
 
 /// A draft-hardt-aauth-budgets budget: `amount / 10^decimals` in `unit`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Budget {
     pub amount: i64,
@@ -48,6 +49,7 @@ pub enum ApprovalStatus {
 }
 
 /// A decision the hosted Person Server waits on.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Approval {
     pub id: Uuid,
@@ -82,11 +84,10 @@ pub struct Approval {
 }
 
 /// The approver as your app knows them: the identity a runner takes.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ApproverIdentity {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub anonymous_id: Option<String>,
 }
 
@@ -189,6 +190,7 @@ impl ApprovalListParams {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MissionLogEntry {
     pub at: String,
@@ -196,6 +198,7 @@ pub struct MissionLogEntry {
 }
 
 /// A mission the Person Server approved, and what it has spent.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Mission {
     pub id: Uuid,

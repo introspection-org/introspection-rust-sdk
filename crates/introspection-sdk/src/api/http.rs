@@ -444,9 +444,77 @@ fn is_retryable_status(status: StatusCode, idempotent: bool) -> bool {
 }
 
 pub(crate) async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {
+    let route = res.url().path().to_string();
     let bytes = res.bytes().await?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| IntrospectionAPIError::Decode(format!("failed to parse JSON response: {e}")))
+    decode_slice(&bytes, &route)
+}
+
+/// Decode a JSON response body read from `route`.
+///
+/// With the `strict-schema` feature, a field in the body that `R` does not
+/// model fails the decode too, and the error lists every such field.
+pub(crate) fn decode_slice<R: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    route: &str,
+) -> ApiResult<R> {
+    let mut de = serde_json::Deserializer::from_slice(bytes);
+    let value = decode_from(&mut de, route)?;
+    de.end().map_err(parse_error)?;
+    Ok(value)
+}
+
+/// [`decode_slice`] for a body already parsed into a [`Value`].
+pub(crate) fn decode_value<R: serde::de::DeserializeOwned>(
+    value: Value,
+    route: &str,
+) -> ApiResult<R> {
+    decode_from(value, route)
+}
+
+fn parse_error(e: serde_json::Error) -> IntrospectionAPIError {
+    IntrospectionAPIError::Decode(format!("failed to parse JSON response: {e}"))
+}
+
+#[cfg(not(feature = "strict-schema"))]
+fn decode_from<'de, D, R>(de: D, _route: &str) -> ApiResult<R>
+where
+    D: serde::Deserializer<'de, Error = serde_json::Error>,
+    R: serde::Deserialize<'de>,
+{
+    R::deserialize(de).map_err(parse_error)
+}
+
+#[cfg(feature = "strict-schema")]
+fn decode_from<'de, D, R>(de: D, route: &str) -> ApiResult<R>
+where
+    D: serde::Deserializer<'de, Error = serde_json::Error>,
+    R: serde::Deserialize<'de>,
+{
+    let mut unknown = Vec::new();
+    let value = serde_ignored::deserialize(de, |path| unknown.push(json_path(&path)))
+        .map_err(parse_error)?;
+    if unknown.is_empty() {
+        Ok(value)
+    } else {
+        Err(IntrospectionAPIError::Decode(format!(
+            "{route}: response fields this SDK does not model: {}",
+            unknown.join(", ")
+        )))
+    }
+}
+
+/// `$.data[0].foo` for a field `serde_ignored` reports.
+#[cfg(feature = "strict-schema")]
+fn json_path(path: &serde_ignored::Path<'_>) -> String {
+    use serde_ignored::Path;
+    match path {
+        Path::Root => "$".to_string(),
+        Path::Seq { parent, index } => format!("{}[{index}]", json_path(parent)),
+        Path::Map { parent, key } => format!("{}.{key}", json_path(parent)),
+        Path::Some { parent }
+        | Path::NewtypeStruct { parent }
+        | Path::NewtypeVariant { parent } => json_path(parent),
+    }
 }
 
 async fn expect_ok(res: Response) -> ApiResult<Response> {
@@ -557,6 +625,84 @@ fn extract_message(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn page_with_unknown_fields() -> Value {
+        serde_json::json!({
+            "records": [
+                {"id": "t1", "name": "a", "color": "red"},
+                {"id": "t2", "name": "b", "shade": {"dark": true}}
+            ],
+            "count": 2,
+            "cursor_v2": "x"
+        })
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Tag {
+        #[allow(dead_code)]
+        id: String,
+        #[allow(dead_code)]
+        name: String,
+    }
+
+    #[test]
+    #[cfg(not(feature = "strict-schema"))]
+    fn unknown_response_fields_are_ignored() {
+        let page: crate::api::schemas::Paginated<Tag> =
+            decode_value(page_with_unknown_fields(), "/v1/tags").unwrap();
+        assert_eq!(page.records.len(), 2);
+    }
+
+    #[test]
+    #[cfg(feature = "strict-schema")]
+    fn strict_schema_reports_every_unknown_field_with_the_route() {
+        let bytes = serde_json::to_vec(&page_with_unknown_fields()).unwrap();
+
+        let from_bytes = decode_slice::<crate::api::schemas::Paginated<Tag>>(&bytes, "/v1/tags")
+            .unwrap_err()
+            .to_string();
+        let from_value = decode_value::<crate::api::schemas::Paginated<Tag>>(
+            page_with_unknown_fields(),
+            "/v1/tags",
+        )
+        .unwrap_err()
+        .to_string();
+
+        // `Value` keeps its keys sorted, so `cursor_v2` comes first.
+        let expected = "/v1/tags: response fields this SDK does not model: \
+                        $.cursor_v2, $.records[0].color, $.records[1].shade";
+        assert!(from_bytes.ends_with(expected), "{from_bytes}");
+        assert!(from_value.ends_with(expected), "{from_value}");
+    }
+
+    #[test]
+    #[cfg(feature = "strict-schema")]
+    fn strict_schema_reports_inside_the_span_attributes_but_not_the_open_maps() {
+        let body = serde_json::json!({
+            "object": "list",
+            "data": [{
+                "trace_id": "t",
+                "start_time": "2026-08-04T22:14:34Z",
+                "attributes": {
+                    "gen_ai": {"vendor_specific": 1, "request": {"thinking_budget": 2}},
+                    "introspection": {"tenant_tier": "max"},
+                    "acme": {"a": 1}
+                }
+            }]
+        });
+
+        let error = decode_value::<crate::api::genai_span::GenAiSpanList>(body, "/v1/x")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.ends_with(
+                "/v1/x: response fields this SDK does not model: \
+                             $.data[0].attributes.introspection.tenant_tier"
+            ),
+            "{error}"
+        );
+    }
 
     #[test]
     fn retry_policy_429_any_method_5xx_get_only() {

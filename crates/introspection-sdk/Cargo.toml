@@ -36,6 +36,11 @@ otel = [
 # response and decode it into `RecordBatch`es.
 arrow = ["dep:arrow"]
 testing = ["otel", "opentelemetry_sdk/testing"]
+# Fail a response decode on any field the SDK does not model, listing every
+# such field with its JSON path. Off by default, where an unknown field is
+# ignored. The end-to-end walk runs with it (CI's `--all-features`), so a field
+# the server added shows up as API drift.
+strict-schema = ["dep:serde_ignored"]
 
 [dependencies]
 # Async runtime
@@ -63,6 +68,11 @@ reqwest = { workspace = true, features = ["blocking", "multipart", "query", "str
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+# `skip_serializing_none` on the response types: a `None` is left out when a
+# record serializes, the way the server leaves it out or sends `null`.
+serde_with = { version = "3", default-features = false, features = ["macros"] }
+# Reports the fields a decode ignored, for the `strict-schema` feature.
+serde_ignored = { version = "0.1", optional = true }
 
 # Utilities
 uuid = { workspace = true, features = ["serde"] }
@@ -99,6 +109,9 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 # builds the same tests as `--features testing`.
 opentelemetry_sdk = { version = "0.33.0", default-features = false, features = ["testing"] }
 insta = { version = "1", features = ["json", "redactions"] }
+# The round-trip test also fails on an unknown field that only ever arrives
+# as `null`, which the diff cannot see.
+serde_ignored = "0.1"
 wiremock = "0.6"
 flate2 = "1"
 dotenvy = "0.15"

@@ -87,28 +87,35 @@ impl AuthSession {
         received_at: SystemTime,
         previous: Option<&AuthSession>,
     ) -> Self {
-        let extra = |key: &str| {
-            token
-                .extra
-                .get(key)
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        };
         let received = received_at
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
         Self {
             access_token: token.access_token.clone(),
-            refresh_token: extra("refresh_token")
+            refresh_token: token
+                .refresh_token
+                .clone()
                 .or_else(|| previous.and_then(|p| p.refresh_token.clone())),
             expires_at: u64::try_from(token.expires_in)
                 .ok()
                 .map(|expires_in| received.saturating_add(expires_in)),
-            session_id: extra("session_id").or_else(|| previous.and_then(|p| p.session_id.clone())),
-            org_id: extra("org_id").or_else(|| previous.and_then(|p| p.org_id.clone())),
-            project_id: extra("project_id").or_else(|| previous.and_then(|p| p.project_id.clone())),
-            member_id: extra("member_id").or_else(|| previous.and_then(|p| p.member_id.clone())),
+            session_id: token
+                .session_id
+                .clone()
+                .or_else(|| previous.and_then(|p| p.session_id.clone())),
+            org_id: token
+                .org_id
+                .clone()
+                .or_else(|| previous.and_then(|p| p.org_id.clone())),
+            project_id: token
+                .project_id
+                .clone()
+                .or_else(|| previous.and_then(|p| p.project_id.clone())),
+            member_id: token
+                .member_id
+                .clone()
+                .or_else(|| previous.and_then(|p| p.member_id.clone())),
             dp_url: token
                 .dp_url
                 .clone()

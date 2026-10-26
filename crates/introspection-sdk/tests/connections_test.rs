@@ -45,7 +45,6 @@ fn connection_json() -> serde_json::Value {
         "account_name": "ada@example.com",
         "healthy": true,
         "created_at": "2026-10-04T00:00:00Z",
-        "added_later": "ignored",
     })
 }
 

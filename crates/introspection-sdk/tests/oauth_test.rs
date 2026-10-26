@@ -25,7 +25,7 @@ fn token_response() -> ResponseTemplate {
         "expires_in": 3600,
         "scope": "runtimes:run",
         "dp_url": "https://dp.example.com",
-        "project": "proj_1",
+        "project_id": "proj_1",
     }))
 }
 
@@ -111,8 +111,7 @@ async fn service_account_grant_builds_the_form_and_parses_the_response() {
     assert_eq!(token.expires_in, 3600);
     assert_eq!(token.scope.as_deref(), Some("runtimes:run"));
     assert_eq!(token.dp_url.as_deref(), Some("https://dp.example.com"));
-    // Unmodelled CP fields stay reachable rather than being dropped.
-    assert_eq!(token.extra["project"], "proj_1");
+    assert_eq!(token.project_id.as_deref(), Some("proj_1"));
 
     let form = captured_form(&server).await;
     assert_eq!(get(&form, "grant_type"), Some("client_credentials"));

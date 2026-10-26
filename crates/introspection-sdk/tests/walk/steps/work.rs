@@ -57,13 +57,10 @@ pub async fn files_in(w: &mut Walk) {
       "mime_type": "text/plain",
       "name": "walk-input.txt",
       "org_id": "[uuid]",
-      "parent_id": null,
       "project_id": "[uuid]",
       "size_bytes": "[number]",
       "storage_path": "[uuid]/[uuid]/files/[uuid]/walk-input.txt",
-      "storage_version_id": null,
       "tags": [],
-      "task_id": null,
       "updated_at": "[timestamp]",
       "version": 1
     }
@@ -252,6 +249,7 @@ pub async fn task(w: &mut Walk) {
       "metadata": "[platform's]",
       "org_id": "[uuid]",
       "project_id": "[uuid]",
+      "runtime_group_id": "[uuid]",
       "runtime_id": "[uuid]",
       "started_at": "[timestamp]",
       "status": "idle",
@@ -375,6 +373,7 @@ pub async fn evidence(w: &mut Walk) {
     {
       "created_at": "[timestamp]",
       "file_type": "filesystem",
+      "generated_output_task_id": "[uuid]",
       "id": "[uuid]",
       "member_id": "[uuid]",
       "metadata": {
@@ -387,11 +386,9 @@ pub async fn evidence(w: &mut Walk) {
       "mime_type": "text/plain",
       "name": "tasks/[uuid]/outputs/greeting.txt",
       "org_id": "[uuid]",
-      "parent_id": null,
       "project_id": "[uuid]",
       "size_bytes": "[number]",
       "storage_path": "[uuid]/[uuid]/files/[uuid]/greeting.txt",
-      "storage_version_id": null,
       "tags": [],
       "task_id": "[uuid]",
       "updated_at": "[timestamp]",
@@ -428,8 +425,10 @@ pub async fn evidence(w: &mut Walk) {
       "id": "[uuid]",
       "metrics": {
         "duration_ms": "[number]",
+        "failed_llm_call_count": "[number]",
         "failed_tool_use_count": "[number]",
         "has_errors": false,
+        "llm_call_count": "[number]",
         "max_turn": "[number]",
         "span_count": "[number]",
         "tool_use_count": "[number]",
@@ -653,7 +652,6 @@ pub async fn telemetry_reads(w: &mut Walk) {
         .expect("create the access tag");
     assert_stable!(tag, @r#"
     {
-      "color": null,
       "created_at": "[timestamp]",
       "description": "the walk's tag",
       "kind": "access",
@@ -706,15 +704,13 @@ pub async fn telemetry_reads(w: &mut Walk) {
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
       "granted_member_id": "[uuid]",
-      "granted_tag": null,
       "id": "[uuid]",
       "org_id": "[uuid]",
       "project_id": "[uuid]",
       "resource_id": "[uuid]",
       "resource_type": "file",
       "updated_at": "[timestamp]",
-      "url": "[url]",
-      "visible_from": null
+      "url": "[url]"
     }
     "#);
     sa.shares()

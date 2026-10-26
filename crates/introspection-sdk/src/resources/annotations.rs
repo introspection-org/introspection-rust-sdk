@@ -17,6 +17,7 @@ pub struct AnnotationTarget {
     pub span_id: String,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnotationState {
     pub trace_id: String,
@@ -30,13 +31,25 @@ pub struct AnnotationState {
     #[serde(default)]
     pub annotator_member_ids: Vec<Uuid>,
     #[serde(default)]
+    pub commenter_member_ids: Vec<Uuid>,
+    /// The commenters who are people, not agents.
+    #[serde(default)]
+    pub human_commenter_member_ids: Vec<Uuid>,
+    #[serde(default)]
     pub has_comment: bool,
+    #[serde(default)]
+    pub has_human_comment: bool,
     #[serde(default)]
     pub comment_count: u64,
     #[serde(default)]
     pub latest_comment: Option<String>,
     #[serde(default)]
     pub latest_comment_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub latest_comment_actor_member_id: Option<Uuid>,
+    /// Who wrote the latest comment (`human`, `agent`, ...).
+    #[serde(default)]
+    pub latest_comment_actor_type: Option<String>,
     pub updated_at: String,
     pub updated_by_member_id: Uuid,
     #[serde(default)]
