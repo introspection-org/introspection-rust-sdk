@@ -10,8 +10,8 @@ use introspection_sdk::{
     ConnectorCreateParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
     ConnectorUpdateParams, CredentialCreateParams, CredentialUpdateParams, EndpointCreateParams,
     EndpointKind, EndpointListParams, EndpointUpdateParams, IntrospectionClient, Lane, Runtime,
-    RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret, VariableCreateParams,
-    VariableKind, VariableUpdateParams,
+    RuntimeCreateParams, RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret,
+    VariableCreateParams, VariableKind, VariableUpdateParams,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -332,20 +332,21 @@ pub async fn runtime(w: &mut Walk) {
     "#);
 
     // A version's identity in its group is its recipe, so the next version
-    // pins the walk's own recipe of the same commit. todo: no
-    // `Runtimes::create`.
-    let created: Runtime = creds
-        .cp_raw()
-        .post(
-            "/v1/runtimes",
-            &json!({
-                "project": project,
-                "recipe_id": set(&w.pinned_recipe, "the pinned recipe").id,
-                "name": walk::RUNTIME_SLUG,
-                "slug": walk::RUNTIME_SLUG,
-                "config_json": { "connectors": [walk::CONNECTOR_NAME] },
-            }),
-        )
+    // pins the walk's own recipe of the same commit.
+    let created = sa
+        .runtimes()
+        .create(&RuntimeCreateParams {
+            slug: Some(walk::RUNTIME_SLUG.into()),
+            config_json: Some(BTreeMap::from([(
+                "connectors".to_string(),
+                json!([walk::CONNECTOR_NAME]),
+            )])),
+            ..RuntimeCreateParams::new(
+                project,
+                set(&w.pinned_recipe, "the pinned recipe").id,
+                walk::RUNTIME_SLUG,
+            )
+        })
         .await
         .expect("create the next runtime version");
     assert_eq!(created.runtime_group_id, runtime.runtime_group_id);

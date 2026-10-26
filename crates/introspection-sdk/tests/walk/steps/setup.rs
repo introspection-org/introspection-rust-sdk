@@ -653,6 +653,26 @@ pub async fn recipe(w: &mut Walk) {
         .expect("pin the commit");
     assert_eq!(pinned.git_commit_sha, head);
     assert_ne!(pinned.id, recipe.id);
+    // Deleting a recipe a runtime serves stops `/run`, and the runtime
+    // group's removal takes the walk's recipes with it, so the delete gets a
+    // pin of its own.
+    let discard = sa
+        .recipes()
+        .create(&RecipeCreateParams {
+            repository_id: Some(repository),
+            git_ref: Some("main".into()),
+            git_commit_sha: Some(head.clone()),
+            ..RecipeCreateParams::new(project, "hello-mcp (walk discard)")
+        })
+        .await
+        .expect("pin the commit to discard");
+    // `recipes:delete` is the owner's; the service account does not hold it.
+    w.owner()
+        .recipes()
+        .delete(discard.id, Some(project.into()))
+        .await
+        .expect("delete the discarded pin");
+    expect_not_found(sa.recipes().get(discard.id).await);
     recipe_reads(w, &recipe).await;
     w.recipe = Some(recipe);
     w.pinned_recipe = Some(pinned);
