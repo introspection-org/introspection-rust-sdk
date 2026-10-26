@@ -15,7 +15,7 @@ use introspection_sdk::{RuntimeLlmMode, TaskCreate, TaskFileRef, TaskRepoRequest
 #[test]
 fn a_task_file_ref_is_nameable_from_the_crate_root() {
     let file = TaskFileRef {
-        id: "file_123".into(),
+        id: uuid::Uuid::nil(),
         name: Some("specs/senior-role.pdf".into()),
         ..Default::default()
     };

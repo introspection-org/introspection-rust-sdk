@@ -12,9 +12,9 @@ use introspection_sdk::{
     ConversationListParams, EventListParams, File, FileCreateText, FileListParams, FileUpdate,
     FileUpload, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
     MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
-    MetricsQuery, MissionListParams, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
-    TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams,
-    TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
+    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
+    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -217,7 +217,7 @@ pub async fn task(w: &mut Walk) {
             prompt: Some(w.settings.prompt()),
             agent_name: Some(w.settings.agent.clone()),
             files: Some(vec![TaskFileRef {
-                id: set(&w.input_file, "the input file").id.to_string(),
+                id: set(&w.input_file, "the input file").id,
                 ..Default::default()
             }]),
             metadata: Some(walk_metadata(&[])),
@@ -277,45 +277,124 @@ pub async fn task(w: &mut Walk) {
     w.task = Some(task);
 }
 
-/// A second turn through `/runs`, a third one cancelled; list, retitle,
-/// archive and unarchive.
-async fn more_turns(w: &Walk, id: &str) {
+/// Every frame of one attach, failing on an error the stream yields.
+async fn read_frames(
+    frames: impl futures::Stream<Item = introspection_sdk::api::ApiResult<RunFrame>>,
+) -> Vec<RunFrame> {
+    let mut out = Vec::new();
+    futures::pin_mut!(frames);
+    while let Some(frame) = frames.next().await {
+        out.push(frame.expect("a run frame"));
+    }
+    out
+}
+
+/// The numeric content cursor a frame carries, if it is a content frame.
+fn cursor_of(frame: &RunFrame) -> Option<u64> {
+    frame.frame.as_ref()?.id.as_deref()?.parse().ok()
+}
+
+/// The second turn, sent twice under one `delivery_id`, read as raw frames
+/// without the server's start hold, then reattached from its first cursor.
+async fn second_turn(w: &Walk, id: &str, prompt: &TaskPrompt) {
     let runner = set(&w.runner, "the runner");
-    let id = id.to_string();
+    // A fixed id, so replay sends the body the recording holds; the receipt
+    // is per task, and every walk makes a new task.
     let second = TaskRunCreate {
-        prompt: Some(TaskPrompt {
-            text: w.settings.second_turn(),
-            images: None,
-        }),
+        delivery_id: Some("walk-second-turn".into()),
+        prompt: Some(prompt.clone()),
         ..Default::default()
     };
     let turn = runner
         .tasks()
         .runs
-        .create(&id, &second)
+        .create(id, &second)
         .await
         .expect("a second turn");
-    turn.text().await.expect("stream the second turn");
-    settled_task(w, "task after its second turn", &id, turn_over).await;
+    // The CLI's retry of a request whose outcome it never saw: the same
+    // delivery answers with the run it already accepted.
+    let retried = runner
+        .tasks()
+        .runs
+        .create(id, &second)
+        .await
+        .expect("retry the second turn");
+    assert_eq!(retried.run.id, turn.run.id, "a retried delivery is one run");
+    let frames = read_frames(turn.stream_frames(StreamOptions {
+        wait_for_start: Some(false),
+        ..Default::default()
+    }))
+    .await;
+    assert!(
+        frames
+            .iter()
+            .all(|f| f.frame.as_ref().is_some_and(|f| f.event == "ag_ui")),
+        "every event keeps its ag_ui frame"
+    );
+    assert!(matches!(
+        frames.last().map(|f| &f.event),
+        Some(introspection_sdk::AgUiEvent::RunFinished(_))
+    ));
+    let first = frames
+        .iter()
+        .find_map(cursor_of)
+        .expect("the turn streamed content");
+    settled_task(w, "task after its second turn", id, turn_over).await;
+    // Reattach past the first content frame: the replay starts after it.
+    let replay = read_frames(turn.stream_frames(StreamOptions {
+        since: first,
+        wait_for_start: Some(false),
+        ..Default::default()
+    }))
+    .await;
+    assert!(
+        replay.iter().filter_map(cursor_of).all(|c| c > first),
+        "a reattach from a cursor replays only what follows it"
+    );
+}
+
+/// A second turn through `/runs`, sent twice under one `delivery_id` and read
+/// as raw frames, then again from a cursor; a third one cancelled; list by
+/// runtime, retitle, archive and unarchive.
+async fn more_turns(w: &Walk, id: &str) {
+    let runner = set(&w.runner, "the runner");
+    let id = id.to_string();
+    let prompt = TaskPrompt {
+        text: w.settings.second_turn(),
+        images: None,
+    };
+    second_turn(w, &id, &prompt).await;
     let third = runner
         .tasks()
         .runs
-        .create(&id, &second)
+        .create(
+            &id,
+            &TaskRunCreate {
+                prompt: Some(prompt),
+                ..Default::default()
+            },
+        )
         .await
         .expect("a third turn");
     third.cancel().await.expect("cancel the third turn");
-    settled_task(w, "task after a cancelled turn", &id, |t| {
+    let settled = settled_task(w, "task after a cancelled turn", &id, |t| {
         turn_over(t) || t.status == TaskStatus::Cancelled
     })
     .await;
 
+    // The runtime the task was stamped with, which the filter compares.
+    let runtime_id = settled.runtime_id.expect("the task names its runtime");
     let listed = runner
         .tasks()
-        .list(&TaskListParams::default())
+        .list(&TaskListParams {
+            runtime_id: Some(runtime_id),
+            ..Default::default()
+        })
         .collect_all(0)
         .await
-        .expect("list tasks");
+        .expect("list the runtime's tasks");
     assert!(listed.iter().any(|t| t.id.to_string() == id));
+    assert!(listed.iter().all(|t| t.runtime_id == Some(runtime_id)));
     let retitled = runner
         .tasks()
         .update(

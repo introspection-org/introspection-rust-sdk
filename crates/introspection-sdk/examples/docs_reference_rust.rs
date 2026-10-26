@@ -142,7 +142,7 @@ async fn files_shares(runner: &Runner) -> Result<(), Box<dyn Error>> {
         .start(&TaskCreate {
             prompt: Some("Summarize the attached notes.".into()),
             files: Some(vec![TaskFileRef {
-                id: uploaded.id.to_string(),
+                id: uploaded.id,
                 ..Default::default()
             }]),
             ..Default::default()

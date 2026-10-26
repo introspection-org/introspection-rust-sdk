@@ -61,6 +61,22 @@ pub enum IntrospectionAPIError {
     #[error("incomplete stream: {0}")]
     StreamIncomplete(String),
 
+    /// A run stream attach kept answering `429` (the run is not attachable
+    /// yet) until the stream's recovery window ran out. `phase` is the
+    /// readiness phase from the last `429` body (`queued`, `starting`, ...),
+    /// `retry_after` its `Retry-After`. Attach again later.
+    #[error("run not ready: {}", phase.as_deref().unwrap_or("not attachable"))]
+    RunNotReady {
+        phase: Option<String>,
+        retry_after: Option<std::time::Duration>,
+    },
+
+    /// A run stream attach answered `410`: the runtime holds neither the
+    /// frames after `cursor` nor a snapshot covering them, so no reattach can
+    /// complete the stream. Read the conversation transcript instead.
+    #[error("stream history unavailable from cursor {cursor}: {message}")]
+    StreamHistoryUnavailable { cursor: u64, message: String },
+
     /// The run failed or was cancelled.
     #[error("run failed: {message}")]
     RunFailed {
@@ -93,10 +109,13 @@ impl IntrospectionAPIError {
         }
     }
 
-    /// HTTP status code, if this is an `Http` variant.
+    /// HTTP status code, if this is an `Http` variant, or the status a
+    /// typed run stream error stands for (`429`, `410`).
     pub fn status(&self) -> Option<u16> {
         match self {
             Self::Http { status, .. } => Some(*status),
+            Self::RunNotReady { .. } => Some(429),
+            Self::StreamHistoryUnavailable { .. } => Some(410),
             _ => None,
         }
     }
@@ -117,6 +136,8 @@ impl IntrospectionAPIError {
         match self {
             Self::Http { code, .. } | Self::RunFailed { code, .. } => code.as_deref(),
             Self::StreamIncomplete(_) => Some("stream_incomplete"),
+            Self::RunNotReady { .. } => Some("run_not_ready"),
+            Self::StreamHistoryUnavailable { .. } => Some("stream_history_unavailable"),
             _ => None,
         }
     }
@@ -128,7 +149,7 @@ impl IntrospectionAPIError {
     /// its own retry uses the server's number rather than guessing.
     pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
-            Self::Http { retry_after, .. } => *retry_after,
+            Self::Http { retry_after, .. } | Self::RunNotReady { retry_after, .. } => *retry_after,
             _ => None,
         }
     }
