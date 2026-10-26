@@ -16,10 +16,10 @@ pub struct TextPart {
     pub r#type: String,
     /// The text content.
     pub content: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
+    /// Fields the SDK does not type. Open by design: the GenAI conventions
+    /// let providers add their own fields to messages and parts.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl TextPart {
@@ -28,7 +28,7 @@ impl TextPart {
         Self {
             r#type: "text".to_string(),
             content: content.into(),
-            extra: BTreeMap::new(),
+            other: BTreeMap::new(),
         }
     }
 }
@@ -46,10 +46,10 @@ pub struct ToolCallRequestPart {
     pub name: String,
     /// The arguments as a JSON string.
     pub arguments: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
+    /// Fields the SDK does not type. Open by design: the GenAI conventions
+    /// let providers add their own fields to messages and parts.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolCallRequestPart {
@@ -64,7 +64,7 @@ impl ToolCallRequestPart {
             id: id.into(),
             name: name.into(),
             arguments: arguments.into(),
-            extra: BTreeMap::new(),
+            other: BTreeMap::new(),
         }
     }
 }
@@ -85,10 +85,10 @@ pub struct ToolCallResponsePart {
     /// is a read-side compatibility shim only — we always write `response`.
     #[serde(alias = "result")]
     pub response: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
+    /// Fields the SDK does not type. Open by design: the GenAI conventions
+    /// let providers add their own fields to messages and parts.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl ToolCallResponsePart {
@@ -98,7 +98,7 @@ impl ToolCallResponsePart {
             r#type: "tool_call_response".to_string(),
             id: id.into(),
             response,
-            extra: BTreeMap::new(),
+            other: BTreeMap::new(),
         }
     }
 }
@@ -114,10 +114,10 @@ pub struct ThinkingPart {
     pub content: Option<String>,
     /// Encrypted reasoning signature (maps to OpenAI encrypted_content).
     pub signature: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
+    /// Fields the SDK does not type. Open by design: the GenAI conventions
+    /// let providers add their own fields to messages and parts.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl ThinkingPart {
@@ -127,7 +127,7 @@ impl ThinkingPart {
             r#type: "thinking".to_string(),
             content,
             signature,
-            extra: BTreeMap::new(),
+            other: BTreeMap::new(),
         }
     }
 }
@@ -199,10 +199,12 @@ pub struct InputMessage {
     /// The message content as an ordered list of parts.
     #[serde(default)]
     pub parts: Vec<ContentPart>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
+    /// The participant's name, when the provider records one.
+    pub name: Option<String>,
+    /// Fields the SDK does not type. Open by design: the GenAI conventions
+    /// let providers add their own fields to messages and parts.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl InputMessage {
@@ -211,7 +213,8 @@ impl InputMessage {
         Self {
             role: "user".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
-            extra: BTreeMap::new(),
+            name: None,
+            other: BTreeMap::new(),
         }
     }
 
@@ -220,7 +223,8 @@ impl InputMessage {
         Self {
             role: "system".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
-            extra: BTreeMap::new(),
+            name: None,
+            other: BTreeMap::new(),
         }
     }
 
@@ -229,7 +233,8 @@ impl InputMessage {
         Self {
             role: "assistant".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
-            extra: BTreeMap::new(),
+            name: None,
+            other: BTreeMap::new(),
         }
     }
 
@@ -238,7 +243,8 @@ impl InputMessage {
         Self {
             role: role.into(),
             parts,
-            extra: BTreeMap::new(),
+            name: None,
+            other: BTreeMap::new(),
         }
     }
 }
@@ -256,10 +262,12 @@ pub struct OutputMessage {
     pub parts: Vec<ContentPart>,
     /// Finish reason (e.g. `"stop"`, `"tool-calls"`).
     pub finish_reason: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
+    /// The participant's name, when the provider records one.
+    pub name: Option<String>,
+    /// Fields the SDK does not type. Open by design: the GenAI conventions
+    /// let providers add their own fields to messages and parts.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 impl OutputMessage {
@@ -269,7 +277,8 @@ impl OutputMessage {
             role: "assistant".to_string(),
             parts: vec![ContentPart::Text(TextPart::new(content))],
             finish_reason: Some("stop".to_string()),
-            extra: BTreeMap::new(),
+            name: None,
+            other: BTreeMap::new(),
         }
     }
 
@@ -279,7 +288,8 @@ impl OutputMessage {
             role: role.into(),
             parts,
             finish_reason: None,
-            extra: BTreeMap::new(),
+            name: None,
+            other: BTreeMap::new(),
         }
     }
 }
@@ -345,7 +355,8 @@ mod tests {
                 ContentPart::Text(TextPart::new("The answer is 42.")),
             ],
             finish_reason: Some("stop".to_string()),
-            extra: Default::default(),
+            name: None,
+            other: Default::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"thinking""#));
@@ -362,7 +373,8 @@ mod tests {
                 Some("encrypted-blob".into()),
             ))],
             finish_reason: None,
-            extra: Default::default(),
+            name: None,
+            other: Default::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"thinking""#));
@@ -468,7 +480,8 @@ mod tests {
                 "call_123",
                 Some("result data".into()),
             ))],
-            extra: Default::default(),
+            name: None,
+            other: Default::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"tool_call_response""#));

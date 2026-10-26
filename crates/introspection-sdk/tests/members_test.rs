@@ -42,7 +42,6 @@ fn member_json() -> serde_json::Value {
         "org_id": "00000000-0000-0000-0000-0000000000aa",
         "created_at": "2026-10-04T00:00:00Z",
         "updated_at": "2026-10-04T00:00:00Z",
-        "deleted_at": null,
         "email": null,
         "name": null,
         "external_user_id": "user:u_demo",

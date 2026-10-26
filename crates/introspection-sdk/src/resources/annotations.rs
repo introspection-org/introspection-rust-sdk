@@ -1,6 +1,6 @@
 //! Project-level append-only span annotations.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -54,10 +54,6 @@ pub struct AnnotationState {
     pub updated_by_member_id: Uuid,
     #[serde(default)]
     pub assignment_event_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

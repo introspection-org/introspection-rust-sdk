@@ -168,7 +168,6 @@ fn introspection_attributes_sit_beside_gen_ai_not_inside_it() {
     assert_eq!(history.hash_hit, Some(false));
     let new_messages = history.new_messages.unwrap();
     assert_eq!((new_messages.start, new_messages.end), (Some(0), Some(1)));
-    assert!(introspection.extra.is_empty());
 }
 
 #[test]
@@ -200,7 +199,6 @@ fn the_contains_summary_is_filter_values_never_messages() {
     let contains = span.attributes.introspection.unwrap().contains.unwrap();
     assert_eq!(contains.version, Some(1));
     assert_eq!(contains.values, values.map(String::from).to_vec());
-    assert!(contains.extra.is_empty());
 
     let bare = parse(bare_span());
     assert!(bare.attributes.introspection.is_none());
@@ -208,11 +206,8 @@ fn the_contains_summary_is_filter_values_never_messages() {
 
 #[test]
 fn cost_is_typed_where_the_server_emits_it() {
-    // Placement needs its own test precisely because the tree is open: had
-    // this been modelled under `conversation` — where an early draft of the
-    // design doc put it — nothing would fail. The value would land in `extra`
-    // and typed access would quietly return `None`. That is the failure mode
-    // an open tree buys you.
+    // Had this been modelled under `conversation` — where an early draft of
+    // the design doc put it — typed access would quietly return `None`.
     let span = parse(json!({
         "trace_id": "t",
         "start_time": "2026-08-04T22:14:34Z",
@@ -225,7 +220,6 @@ fn cost_is_typed_where_the_server_emits_it() {
     let introspection = span.attributes.introspection.unwrap();
     assert_eq!(introspection.cost_usd, Some(0.0098));
     assert_eq!(introspection.history.unwrap().position, Some(3));
-    assert!(introspection.extra.is_empty());
 }
 
 // ----- null is never serialized ---------------------------------------------
@@ -310,7 +304,7 @@ fn an_undeclared_gen_ai_attribute_survives() {
     }));
 
     assert_eq!(
-        span.attributes.gen_ai.unwrap().extra.get("vendor_specific"),
+        span.attributes.gen_ai.unwrap().other.get("vendor_specific"),
         Some(&json!({"nested": "kept"}))
     );
 }
@@ -324,7 +318,7 @@ fn an_entirely_unknown_attribute_family_survives() {
     }));
 
     assert_eq!(
-        span.attributes.extra.get("acme"),
+        span.attributes.other.get("acme"),
         Some(&json!({"tenant": "x"}))
     );
 }
@@ -332,18 +326,18 @@ fn an_entirely_unknown_attribute_family_survives() {
 #[test]
 fn unknown_attributes_round_trip_through_serialization() {
     // Surviving deserialization is not enough — it has to come back out, at
-    // every depth of the tree and at the top level of the span.
+    // every depth of the `gen_ai.*` family and outside the two typed families.
+    // `introspection.*` and the span's own fields are closed: the server owns
+    // them, so a key there the SDK does not model is API drift.
     let raw = json!({
         "trace_id": "t",
         "start_time": "2026-08-04T22:14:34Z",
-        "future_top_level": "kept",
         "attributes": {
             "gen_ai": {
                 "vendor_specific": "kept",
                 "usage": {"reasoning_tokens": 12},
                 "request": {"model": "m", "thinking_budget": 4096}
             },
-            "introspection": {"tenant_tier": "max"},
             "acme": {"a": 1}
         }
     });

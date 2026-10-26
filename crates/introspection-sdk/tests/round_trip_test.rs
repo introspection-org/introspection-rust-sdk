@@ -6,10 +6,17 @@
 //! with the original. Key order is ignored, and so are `null` fields: the
 //! types skip a `None` when they serialize, so a `null` the server sent comes
 //! back as an absent key. A `null` the original did not have fails the test,
-//! as does any other difference.
+//! as does any other difference, and so does a field the type does not
+//! model even when the server sent it as `null`.
 //!
 //! Numbers compare by value, so a `1` the server sent into an `f64` field may
 //! come back as `1.0`.
+//!
+//! A response type keeps no bag of unknown fields, so a field the server sends
+//! that the SDK does not model is lost on the way back and fails the test until
+//! it is modelled. Only the maps that are open by design keep keys they do not
+//! name: the `gen_ai.*` span attributes, the GenAI message and part types, and
+//! `EndpointMetadata`.
 //!
 //! A route the SDK has no response type for is listed in [`UNTYPED`] with the
 //! reason, so a new route in the recording fails the test until it is mapped.
@@ -27,9 +34,12 @@ type Check = fn(&Value) -> Outcome;
 
 /// Decodes `body` into `T`, serializes it again and compares the two.
 fn round_trip<T: DeserializeOwned + Serialize>(body: &Value) -> Outcome {
-    let typed: T = serde_json::from_value(body.clone()).map_err(|e| format!("decode: {e}"))?;
-    let back = serde_json::to_value(&typed).map_err(|e| format!("encode: {e}"))?;
     let mut diffs = Vec::new();
+    let typed: T = serde_ignored::deserialize(body.clone(), |path| {
+        diffs.push(format!("$.{path}: not modelled"))
+    })
+    .map_err(|e| format!("decode: {e}"))?;
+    let back = serde_json::to_value(&typed).map_err(|e| format!("encode: {e}"))?;
     compare("$", body, &back, &mut diffs);
     if diffs.is_empty() {
         Ok(())
@@ -444,4 +454,13 @@ fn every_recorded_response_round_trips() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+#[test]
+fn an_unmodelled_field_fails_the_round_trip() {
+    let body = serde_json::json!({"records": [], "count": 0, "unmodelled": {"a": 1}});
+
+    let err = round_trip::<Paginated<Tag>>(&body).unwrap_err();
+
+    assert!(err.contains("$.unmodelled: lost"), "{err}");
 }

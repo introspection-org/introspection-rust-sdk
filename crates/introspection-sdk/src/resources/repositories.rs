@@ -168,17 +168,14 @@ impl RepositoryContents {
     }
 }
 
-fn directory_page(body: serde_json::Value) -> ApiResult<Paginated<RepositoryEntry>> {
-    let content: RepositoryContent = serde_json::from_value(body).map_err(|e| {
-        IntrospectionAPIError::Decode(format!("failed to decode repository contents: {e}"))
-    })?;
+fn directory_page(body: serde_json::Value, route: &str) -> ApiResult<Paginated<RepositoryEntry>> {
+    let content: RepositoryContent = crate::api::http::decode_value(body, route)?;
     match content {
         RepositoryContent::Dir(dir) => Ok(Paginated {
             records: dir.records,
             count: dir.count,
             total_count: None,
             next: dir.next,
-            extra: std::collections::BTreeMap::new(),
         }),
         RepositoryContent::File(file) => Err(IntrospectionAPIError::Decode(format!(
             "{:?} is a file, not a directory; read it with RepositoryContents::get",

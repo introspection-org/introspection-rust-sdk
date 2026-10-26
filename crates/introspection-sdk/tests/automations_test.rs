@@ -340,7 +340,6 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                         ..AutomationCondition::new(AutomationConditionType::LastRunIssuesResolved)
                     },
                 ],
-                extra: Default::default(),
             }),
             enabled: Some(false),
             ..AutomationCreateParams::new("Check-in", AutomationTriggerType::Cron)

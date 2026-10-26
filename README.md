@@ -38,6 +38,27 @@ cargo add introspection-sdk
 | `otel` | `IntrospectionLogs` and `IntrospectionSpanProcessor` |
 | `arrow` | Arrow IPC decode for the telemetry reads |
 | `testing` | In-memory span exporter and test helpers (implies `otel`) |
+| `strict-schema` | Fails a response decode on any field the SDK does not model |
+
+### Catch API drift with `strict-schema`
+
+By default a response field this SDK build does not model is ignored, so a
+server that adds a field never breaks your client. With `strict-schema` on,
+the same response fails with `IntrospectionAPIError::Decode`, naming the route
+and every unmodelled field by its JSON path:
+
+```text
+/v1/tags: response fields this SDK does not model: $.records[0].color, $.cursor_v2
+```
+
+The SDK's end-to-end walk runs with `--all-features`, and so does the
+platform's SDK coverage run against a live stack, so a field the API adds
+shows up there before a release ships without it. Keys in maps that are open
+by design are never reported: the `gen_ai.*` span attributes and the
+attribute families the SDK does not type, the GenAI message and part types,
+span `resource` and `events`, and endpoint `metadata`. A field nested inside a
+variant of a tagged enum, or inside a flattened struct, is not reported
+either: `serde_ignored` cannot see past serde's buffering there.
 
 ## Run a task
 

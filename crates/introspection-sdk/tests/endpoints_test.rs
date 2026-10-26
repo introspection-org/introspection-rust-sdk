@@ -104,7 +104,7 @@ async fn list_finds_the_mcp_binding_for_a_server() {
         endpoint.metadata.connector_id,
         Some(Uuid::parse_str(CONNECTOR_ID).unwrap())
     );
-    assert_eq!(endpoint.metadata.extra["region"], "eu");
+    assert_eq!(endpoint.metadata.other["region"], "eu");
     assert_eq!(endpoint.header_names, vec!["X-Api-Key".to_string()]);
     assert!(endpoint.runtime_id.is_none() && endpoint.runtime_group_id.is_none());
 }

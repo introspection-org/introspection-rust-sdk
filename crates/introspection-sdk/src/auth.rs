@@ -55,14 +55,13 @@ pub use email_code::{
     EmailCodeAuthConfigBuilder, EMAIL_CODE_GRANT,
 };
 
-use std::collections::BTreeMap;
 use std::env;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::api::encoding::encode_form_component;
-use crate::api::error::{ApiResult, IntrospectionAPIError};
+use crate::api::error::ApiResult;
 use crate::types::defaults;
 
 const TOKEN_PATH: &str = "/v1/oauth/token";
@@ -76,7 +75,7 @@ const SUBJECT_TOKEN_TYPE_ID_TOKEN: &str = "urn:ietf:params:oauth:token-type:id_t
 /// No refresh token is issued for `client_credentials` or token exchange —
 /// re-mint (call the helper again) once it expires. The grants that do issue
 /// one (`authorization_code`, `email_code`) return it, with the `session_id`
-/// and `org_id` the refresh grant is keyed on, in [`Self::extra`];
+/// and `org_id` the refresh grant is keyed on;
 /// [`AuthSession::from_token`] reads them out.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,12 +96,39 @@ pub struct OAuthToken {
     /// Data Plane configuration.
     #[serde(default)]
     pub dp_url: Option<String>,
-    /// Any further fields the CP returned (`project`, `org_id`, …).
-    ///
-    /// Kept rather than dropped so a field the CP adds is reachable without
-    /// waiting on a release of this crate.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    /// Issued by the grants that can be refreshed (`authorization_code`,
+    /// `email_code`).
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    /// The session row id (the access token's `jti`). The refresh grant is
+    /// keyed on `refresh_token`, `session_id` and `org_id`.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub org_id: Option<String>,
+    /// The project this login is scoped to.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The encoded `intro_cp_session` cookie for the session this flow
+    /// created, for a headless client with no cookie jar of its own.
+    #[serde(default)]
+    pub cp_session: Option<String>,
+    /// The Control Plane (issuer) base URL.
+    #[serde(default)]
+    pub cp_url: Option<String>,
+    /// The Git host base URL.
+    #[serde(default)]
+    pub git_url: Option<String>,
+    /// The web app base URL.
+    #[serde(default)]
+    pub platform_url: Option<String>,
+    #[serde(default)]
+    pub member_id: Option<String>,
+    #[serde(default)]
+    pub member_name: Option<String>,
+    /// RFC 8693 actor claim on a delegated (token-exchange) token.
+    #[serde(default)]
+    pub act: Option<serde_json::Value>,
 }
 
 fn default_token_type() -> String {
@@ -244,9 +270,7 @@ pub(crate) async fn post_token_form_with(
     if !status.is_success() {
         return Err(crate::api::http::to_api_error(res, status).await);
     }
-    res.json::<OAuthToken>()
-        .await
-        .map_err(|e| IntrospectionAPIError::Decode(e.to_string()))
+    crate::api::http::decode_json(res).await
 }
 
 /// Mint a project-scoped CP access token from service-account credentials.
@@ -360,15 +384,13 @@ mod tests {
     }
 
     #[test]
-    fn unmodelled_fields_survive_the_round_trip() {
-        // The CP returns `project` / `org_id` alongside the modelled
-        // fields. Dropping them would put a field the CP already sends out
-        // of reach until this crate is released again.
+    fn the_refresh_keys_decode() {
         let token: OAuthToken = serde_json::from_str(
-            r#"{"access_token":"a","expires_in":3600,"project":"proj_1","org_id":"org_2"}"#,
+            r#"{"access_token":"a","expires_in":3600,"refresh_token":"r","session_id":"s","org_id":"org_2"}"#,
         )
         .unwrap();
-        assert_eq!(token.extra["project"], "proj_1");
-        assert_eq!(token.extra["org_id"], "org_2");
+        assert_eq!(token.refresh_token.as_deref(), Some("r"));
+        assert_eq!(token.session_id.as_deref(), Some("s"));
+        assert_eq!(token.org_id.as_deref(), Some("org_2"));
     }
 }

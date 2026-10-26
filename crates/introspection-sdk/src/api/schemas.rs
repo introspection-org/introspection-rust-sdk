@@ -6,10 +6,11 @@
 //! verbatim — no camelCase translation layer.
 //!
 //! A response type serializes back to the JSON the server sent, except for
-//! its `null` fields: a `None` is left out. Fields this SDK build does not
-//! model are kept in each type's `extra` map. Enum values added by the DP
-//! after this SDK is compiled deserialize into the `Other`/`Unknown` fallback
-//! variant so callers can still read the rest of the record.
+//! its `null` fields: a `None` is left out. A field this SDK build does not
+//! model is ignored, or reported by the `strict-schema` feature. Enum values
+//! added by the DP after this SDK is compiled deserialize into the
+//! `Other`/`Unknown` fallback variant so callers can still read the rest of
+//! the record.
 
 use serde::de::Deserializer;
 use serde::ser::Serializer;
@@ -252,10 +253,6 @@ pub struct Paginated<T> {
     pub total_count: Option<u64>,
     #[serde(default)]
     pub next: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Shared cursor-pagination query params for every paginated list
@@ -278,10 +275,6 @@ pub struct AgentInfo {
     pub sandbox_status: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -325,10 +318,6 @@ pub struct Task {
     /// `key:value` grouping tags stamped on this task.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_task_status() -> TaskStatus {
@@ -369,10 +358,6 @@ pub struct TaskRepoRequest {
     pub git_ref: Option<String>,
     #[serde(default)]
     pub depth: Option<u32>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// POST /v1/tasks body. All fields optional — the DP fills in defaults.
@@ -535,10 +520,6 @@ pub struct TaskRun {
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -546,30 +527,18 @@ pub struct TaskRun {
 pub struct TaskCreateResponse {
     pub task: Task,
     pub run: TaskRun,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskRunResponse {
     pub run: TaskRun,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskCancelResponse {
     pub id: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Typed body for the run-cancel endpoint.
@@ -620,10 +589,6 @@ pub struct ResourceShare {
     /// reads, so it carries no share id.
     #[serde(default)]
     pub url: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `POST /v1/shares` body.
@@ -744,10 +709,6 @@ pub struct File {
     /// to a version, so they carry forward when a new version is written.
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_mime() -> String {
@@ -902,10 +863,6 @@ pub struct Recipe {
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -1063,10 +1020,6 @@ pub struct Repository {
     pub head_commit_sha: Option<String>,
     #[serde(default)]
     pub is_recipe_source: bool,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/repositories`.
@@ -1152,10 +1105,6 @@ pub struct RepositoryEntry {
     #[serde(default)]
     pub size: u64,
     pub sha: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One page of a directory listing.
@@ -1170,10 +1119,6 @@ pub struct RepositoryDirectory {
     /// Opaque cursor for the next page; `None` on the last.
     #[serde(default)]
     pub next: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A file's content at one commit.
@@ -1192,10 +1137,6 @@ pub struct RepositoryFile {
     /// The file is larger than a read returns, and `content` is empty.
     #[serde(default)]
     pub truncated: bool,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `GET /v1/repositories/{id}/contents/{path}` — a directory or a file.
@@ -1233,10 +1174,6 @@ pub struct RepositoryCommitPerson {
     pub email: Option<String>,
     #[serde(default)]
     pub date: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One commit of a repository's history.
@@ -1249,10 +1186,6 @@ pub struct RepositoryCommit {
     pub message: String,
     pub author: RepositoryCommitPerson,
     pub committer: RepositoryCommitPerson,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// How a commit changed a file — mirrors the DP `RepositoryCommitFileStatus`.
@@ -1318,17 +1251,12 @@ pub struct RepositoryCommitFile {
     pub deletions: u64,
     #[serde(default)]
     pub changes: u64,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `GET /v1/repositories/{id}/commits/{sha}` — a commit with what it changed.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RepositoryCommitDetail {
-    /// Fields neither type models are kept in [`RepositoryCommit::extra`].
     #[serde(flatten)]
     pub commit: RepositoryCommit,
     #[serde(default)]
@@ -1377,10 +1305,6 @@ pub struct RepositoryMergeCommit {
     pub head_sha: String,
     #[serde(default)]
     pub parents: Vec<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- runtimes (CP) ---------------------------------------------------------
@@ -1492,10 +1416,6 @@ pub struct Runtime {
     /// `include=mcp_requirements`.
     #[serde(default)]
     pub mcp_requirements: Option<Vec<serde_json::Value>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1821,10 +1741,6 @@ pub struct ExperimentGoalGuard {
     pub min: Option<f64>,
     #[serde(default)]
     pub max: Option<f64>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_component_weight() -> f64 {
@@ -1844,10 +1760,6 @@ pub struct JudgeGoalComponent {
     pub weight: f64,
     #[serde(default)]
     pub guard: Option<ExperimentGoalGuard>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Reserved shape for future telemetry-backed reward components.
@@ -1862,10 +1774,6 @@ pub struct TelemetryGoalComponent {
     pub weight: f64,
     #[serde(default)]
     pub guard: Option<ExperimentGoalGuard>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One reward component of a composite goal, discriminated on `source`.
@@ -1892,10 +1800,6 @@ pub struct ExperimentGoal {
     pub direction: ExperimentGoalDirection,
     #[serde(default)]
     pub components: Vec<ExperimentGoalComponent>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for ExperimentGoal {
@@ -1904,7 +1808,6 @@ impl Default for ExperimentGoal {
             kind: default_goal_kind(),
             direction: ExperimentGoalDirection::default(),
             components: Vec::new(),
-            extra: BTreeMap::new(),
         }
     }
 }
@@ -1924,10 +1827,6 @@ pub struct Arm {
     pub agent_overrides: Option<BTreeMap<String, String>>,
     /// Share of traffic the arm starts with, before the bandit reweights.
     pub initial_weight: i64,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -1973,10 +1872,6 @@ pub struct Experiment {
     pub archived_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -2296,10 +2191,6 @@ pub struct Connector {
     /// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
     #[serde(default)]
     pub requires_runtime: bool,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A connection under a connector. Access/refresh tokens are **never**
@@ -2342,10 +2233,6 @@ pub struct Connection {
     pub status: ConnectionStatus,
     #[serde(default)]
     pub token_expires_at: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/connectors`.
@@ -2524,10 +2411,6 @@ pub struct PolicyEntity {
     pub attrs: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub parents: Vec<EntityUid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A Cedar entity reference, `{"type": "Company", "id": "acme"}`.
@@ -2537,10 +2420,6 @@ pub struct EntityUid {
     #[serde(rename = "type")]
     pub entity_type: String,
     pub id: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
@@ -2733,10 +2612,6 @@ pub struct ConnectorApp {
     /// knows it.
     #[serde(default)]
     pub docs_url: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `POST /v1/connectors/discover-oauth` body.
@@ -2837,10 +2712,6 @@ pub struct ConnectorOAuthDiscovery {
     /// automatic registration.
     #[serde(default)]
     pub client_registration: Option<ClientRegistrationMethod>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Response of `POST /v1/oauth/connections/authorize` — a freshly minted
@@ -2857,10 +2728,6 @@ pub struct ConnectorAuthorization {
     /// Seconds the URL stays valid.
     pub expires_in: u64,
     pub expires_at: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Deterministic, non-PII envelope for a person-authorized action.
@@ -2912,10 +2779,6 @@ pub struct ConnectionToken {
     pub expires_at: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -2924,10 +2787,6 @@ pub struct ConnectionAuthorizationPending {
     pub status: String,
     pub mission_id: Uuid,
     pub approval_url: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -3047,10 +2906,6 @@ pub struct Member {
     /// [`PolicyEntity`].
     #[serde(default)]
     pub policy_attributes: Option<BTreeMap<String, serde_json::Value>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/members`.
@@ -3302,9 +3157,10 @@ pub struct EndpointMetadata {
     pub extra_hosts: Vec<String>,
     #[serde(default)]
     pub auth_audience: Option<String>,
-    /// The metadata is open: keys this SDK predates ride along here.
+    /// Open by design: the server stores and returns metadata keys it does not
+    /// declare (`extra="allow"`), so they are kept here.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// An endpoint binding (`/v1/endpoints`): a host the project's agents reach,
@@ -3353,10 +3209,6 @@ pub struct Endpoint {
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/endpoints`.
@@ -3411,10 +3263,6 @@ pub struct Project {
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/projects`. The route lists the projects of
@@ -3558,10 +3406,6 @@ pub struct AutomationCondition {
     pub condition_type: AutomationConditionType,
     #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl AutomationCondition {
@@ -3570,7 +3414,6 @@ impl AutomationCondition {
         Self {
             condition_type,
             runtime_group_id: None,
-            extra: BTreeMap::new(),
         }
     }
 }
@@ -3594,10 +3437,6 @@ pub struct AutomationMetadata {
     pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<AutomationCondition>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A stored automation: a prompt run as an agent task, or platform work when
@@ -3659,10 +3498,6 @@ pub struct Automation {
     /// fires.
     #[serde(default)]
     pub next_trigger_at: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_true() -> bool {
@@ -3805,10 +3640,6 @@ pub struct AutomationTriggerResponse {
     pub task_id: Option<Uuid>,
     #[serde(default)]
     pub reason: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- member connections (DP) -----------------------------------------------
@@ -3830,10 +3661,6 @@ pub struct MemberConnection {
     /// `false` when the connection needs reconnecting.
     pub healthy: bool,
     pub created_at: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/connections`. A caller who is not an
@@ -3885,10 +3712,6 @@ pub struct ConnectPage {
     pub expires_in: u64,
     #[serde(default)]
     pub expires_at: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- project administration (CP) ------------------------------------------
@@ -4000,10 +3823,6 @@ pub struct ApiKey {
     pub acknowledged_at: Option<String>,
     pub key_display: String,
     pub prefix: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Response of `POST /v1/api-keys`: the key, plus its plaintext — the only
@@ -4011,7 +3830,6 @@ pub struct ApiKey {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiKeyCreated {
-    /// Fields neither type models are kept in [`ApiKey::extra`].
     #[serde(flatten)]
     pub key: ApiKey,
     #[serde(default)]
@@ -4072,10 +3890,6 @@ pub struct ApiKeyDeleteParams {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiKeyAcknowledgement {
     pub acknowledged: bool,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // applications
@@ -4127,10 +3941,6 @@ pub struct Application {
     #[serde(default)]
     pub revoked_at: Option<String>,
     pub created_by_member_id: Uuid,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/applications`.
@@ -4236,10 +4046,6 @@ pub struct ApplicationIdp {
     #[serde(default)]
     pub client_secret: Option<Secret>,
     pub is_active: bool,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Body of `POST /v1/applications/{id}/idps`.
@@ -4292,10 +4098,6 @@ pub struct ApplicationSecret {
     #[serde(default)]
     pub secret: Option<Secret>,
     pub status: ApplicationSecretStatus,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Body of `POST /v1/applications/{id}/secrets`.
@@ -4320,10 +4122,6 @@ pub struct ApplicationKey {
     pub public_key: String,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // credentials and variables
@@ -4353,10 +4151,6 @@ pub struct Credential {
     #[serde(default)]
     pub secret_set_at: Option<String>,
     pub created_by_member_id: Uuid,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/credentials` and `GET /v1/variables`.
@@ -4445,10 +4239,6 @@ pub struct Variable {
     #[serde(default)]
     pub environment: Option<Lane>,
     pub created_by_member_id: Uuid,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Body of `POST /v1/variables`.
@@ -4546,10 +4336,6 @@ pub struct Integration {
     pub data: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Body of `POST /v1/integrations`. The row is always created `pending`; the
@@ -4621,10 +4407,6 @@ pub struct Judge {
     pub definition_hash: String,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/judges`.
@@ -4683,10 +4465,6 @@ pub struct Me {
     pub impersonating_member_id: Option<Uuid>,
     #[serde(default)]
     pub impersonator_email: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- images (DP) -----------------------------------------------------------
@@ -4803,10 +4581,6 @@ pub struct Image {
     pub evicted_at: Option<String>,
     #[serde(default)]
     pub retired_at: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Image {
@@ -4868,10 +4642,6 @@ pub struct ImageProvenance {
     pub git_sha: Option<String>,
     #[serde(default)]
     pub path: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Body of `POST /v1/images`.
@@ -4994,10 +4764,6 @@ pub struct TaskCommand {
     pub started_at: Option<String>,
     #[serde(default)]
     pub finished_at: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Filters supported by `GET /v1/tasks/{id}/commands`.
@@ -5041,10 +4807,6 @@ pub struct RunnerIdentity {
     /// on the access-token claims.
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, String>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Optional segment.io-style observability payload attached to a
@@ -5150,10 +4912,6 @@ pub struct RunnerContext {
     /// Echoed from the request body when supplied — see [`RunCaller`].
     #[serde(default)]
     pub caller: Option<RunCaller>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// DP deployment the runner should talk to. CP picks per project /
@@ -5168,10 +4926,6 @@ pub struct RunnerDeployment {
     pub slug: String,
     /// Region the deployment lives in (e.g. `us-east-1`).
     pub region: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// CP `/run` response — the customer-facing shape.
@@ -5195,10 +4949,6 @@ pub struct RunnerSpec {
     /// caller that CP picked. Surfaced on `runner.context()` for
     /// telemetry + UX.
     pub runtime_context: RunnerContext,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- telemetry: conversations / events / metrics (DP) ----------------------
@@ -5207,9 +4957,7 @@ pub struct RunnerSpec {
 // [`crate::DataPlaneResources`] on the client and the runner alike. The
 // stores are append-only (`otel_traces` → `/v1/conversations`, `otel_logs` →
 // `/v1/events`); all aggregation goes through the bounded `POST /v1/metrics`
-// contract. Records carry open telemetry attributes, so the typed structs keep
-// a `#[serde(flatten)] extra` bag — unknown fields ride along verbatim rather
-// than being dropped.
+// contract.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -5425,10 +5173,6 @@ pub struct ConversationAgent {
     pub invocation_id: Option<String>,
     #[serde(default)]
     pub depth: Option<i64>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `total_input_tokens` is every input token the conversation's model calls
@@ -5441,20 +5185,12 @@ pub struct ConversationUsage {
     pub total_input_tokens: i64,
     pub output_tokens: i64,
     pub total_tokens: i64,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct ConversationCost {
     pub usd: f64,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -5473,10 +5209,6 @@ pub struct ConversationMetrics {
     #[serde(default)]
     pub failed_llm_call_count: i64,
     pub has_errors: bool,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// The runtime that served a conversation, nested as its items'
@@ -5488,10 +5220,6 @@ pub struct ConversationRuntime {
     pub id: Option<Uuid>,
     #[serde(default)]
     pub group_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -5499,10 +5227,6 @@ pub struct ConversationRuntime {
 pub struct ConversationExperiment {
     #[serde(default)]
     pub id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -5510,10 +5234,6 @@ pub struct ConversationExperiment {
 pub struct ConversationRecipe {
     #[serde(default)]
     pub git_commit_sha: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -5521,10 +5241,6 @@ pub struct ConversationRecipe {
 pub struct ConversationOwner {
     #[serde(default)]
     pub key: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -5555,10 +5271,6 @@ pub struct Conversation {
     pub owner: Option<ConversationOwner>,
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, String>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `resolution` filter on `GET /v1/conversations`.
@@ -5995,10 +5707,6 @@ pub struct TypedEvent<P> {
     /// Family detail — one of the `*Payload` types, fixed by the
     /// [`Event`] variant.
     pub payload: P,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.observation` payload — one **resolved** observation (the
@@ -6043,10 +5751,6 @@ pub struct ObservationPayload {
     pub assignment_method: Option<String>,
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.pattern` payload — one **folded** catalog row (current
@@ -6083,10 +5787,6 @@ pub struct PatternPayload {
     pub derived_from_pattern_id: Option<String>,
     #[serde(default)]
     pub run_id: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.pattern.assignment` payload — one observation→pattern
@@ -6105,10 +5805,6 @@ pub struct PatternAssignmentPayload {
     pub run_id: Option<String>,
     #[serde(default)]
     pub score: Option<f64>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.observation_clustering.run` payload — one clustering run
@@ -6135,10 +5831,6 @@ pub struct ClusteringRunPayload {
     pub replaces_run_id: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.feedback` payload — mirrors what the SDK `feedback()`
@@ -6174,10 +5866,6 @@ pub struct FeedbackPayload {
     /// Remaining `properties.*` extras.
     #[serde(default)]
     pub properties: Option<BTreeMap<String, serde_json::Value>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.annotation` payload — one member-authored mutation.
@@ -6191,10 +5879,6 @@ pub struct AnnotationPayload {
     pub comment: Option<String>,
     #[serde(default)]
     pub assignee_member_ids: Option<Vec<Uuid>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.judgement` payload — mirrors the runtime-agent judges
@@ -6215,10 +5899,6 @@ pub struct JudgementPayload {
     pub sequence_hash: Option<String>,
     #[serde(default)]
     pub experiment_arm_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.automation.triggered` payload — one automation trigger
@@ -6245,10 +5925,6 @@ pub struct AutomationTriggeredPayload {
     /// The person who triggered it by hand.
     #[serde(default)]
     pub triggered_by_member_id: Option<Uuid>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.automation.skipped` payload — one scheduled automation
@@ -6264,10 +5940,6 @@ pub struct AutomationSkippedPayload {
     #[serde(default)]
     pub task_id: Option<Uuid>,
     pub reason: AutomationSkipReason,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Whole-event envelope + typed payload per family.
@@ -6758,8 +6430,6 @@ pub struct MetricsResponse {
     pub data: Vec<MetricRow>,
     #[serde(default)]
     pub meta: Option<MetricsMeta>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl MetricsResponse {
@@ -6781,10 +6451,6 @@ pub struct MetricRow {
     pub dimensions: Vec<MetricDimensionValue>,
     #[serde(default)]
     pub metrics: Vec<MetricValue>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl MetricRow {
@@ -6811,10 +6477,6 @@ impl MetricRow {
 pub struct MetricDimensionValue {
     pub field: String,
     pub value: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One aggregated value of a [`MetricRow`]; `metric_index` points into the
@@ -6827,10 +6489,6 @@ pub struct MetricValue {
     pub measure: Option<String>,
     pub aggregation: String,
     pub value: f64,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// What a [`MetricsResponse`] answered for.
@@ -6863,8 +6521,6 @@ pub struct MetricsMeta {
     /// The `order_by` the query ran with, after the server's defaults.
     #[serde(default)]
     pub order_by: Vec<OrderTerm>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `meta.window` of a [`MetricsResponse`].
@@ -6873,10 +6529,6 @@ pub struct MetricsMeta {
 pub struct MetricsWindow {
     pub start: String,
     pub end: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -6965,7 +6617,6 @@ mod tests {
                 repo: "acme/api-service".into(),
                 git_ref: Some("main".into()),
                 depth: Some(0),
-                extra: Default::default(),
             }]),
             ..Default::default()
         })
@@ -7840,10 +7491,6 @@ pub struct TrajectoryToolCall {
     pub name: String,
     /// JSON-encoded arguments object.
     pub args: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Leading record identifying the session the trajectory came from.
@@ -7858,10 +7505,6 @@ pub struct TrajectoryMetaRecord {
     pub git_branch: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A user turn.
@@ -7871,10 +7514,6 @@ pub struct TrajectoryUserRecord {
     pub content: String,
     /// ISO-8601 timestamp.
     pub timestamp: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// Model reasoning, when the source exposed it.
@@ -7884,10 +7523,6 @@ pub struct TrajectoryReasoningRecord {
     pub content: String,
     /// ISO-8601 timestamp.
     pub timestamp: String,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// An assistant turn — prose, or tool calls, never both.
@@ -7906,10 +7541,6 @@ pub struct TrajectoryAssistantRecord {
     /// Present only on a tool-call record, and then never empty.
     #[serde(default)]
     pub tool_calls: Option<Vec<TrajectoryToolCall>>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// A tool result, linked to its call by `tool_call_id`.
@@ -7923,10 +7554,6 @@ pub struct TrajectoryToolRecord {
     /// Source-native success status; absent when the source exposes none.
     #[serde(default)]
     pub ok: Option<bool>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One record in a trajectory-v1 export, discriminated by `role`.

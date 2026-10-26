@@ -18,11 +18,14 @@
 //! Two properties carry the weight, and both are load-bearing rather than
 //! stylistic:
 //!
-//! - **The tree is open.** Every model here carries a `#[serde(flatten)]`
-//!   `extra` map, so an attribute nobody modelled still arrives and still
-//!   round-trips. The server returns the attribute tree as stored, not as an
-//!   allow-list; typing it closed would reintroduce exactly the lossiness this
-//!   representation exists to remove.
+//! - **The `gen_ai.*` tree is open.** Each `gen_ai.*` node, and the
+//!   attribute tree itself, keeps the keys it does not name in a flattened
+//!   `other` map, so an attribute nobody modelled still arrives and still
+//!   round-trips. The GenAI conventions keep adding attributes and providers
+//!   add their own; typing them closed would reintroduce exactly the lossiness
+//!   this representation exists to remove. `introspection.*` and the span's
+//!   own fields are the server's, so they are closed: a key there the SDK
+//!   does not model is API drift, which the `strict-schema` feature reports.
 //! - **Nothing serializes as `null`.** An absent value is an absent key —
 //!   every optional field is `skip_serializing_if = "Option::is_none"`, every
 //!   collection `skip_serializing_if` empty. A real `0` still serializes: a
@@ -40,8 +43,6 @@ use crate::otel::messages::{InputMessage, OutputMessage};
 pub struct NameRef {
     #[serde(default)]
     pub name: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// An `{ "id": … }` attribute node — `gen_ai.conversation`,
@@ -51,8 +52,6 @@ pub struct NameRef {
 pub struct IdRef {
     #[serde(default)]
     pub id: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- gen_ai.* --------------------------------------------------------------
@@ -67,8 +66,10 @@ pub struct GenAiAgent {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.request.*` — what was asked for.
@@ -89,8 +90,10 @@ pub struct GenAiRequest {
     pub seed: Option<i64>,
     #[serde(default)]
     pub stream: Option<bool>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.response.*` — what came back.
@@ -103,8 +106,10 @@ pub struct GenAiResponse {
     pub model: Option<String>,
     #[serde(default)]
     pub finish_reasons: Option<Vec<String>>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// A nested token count — `gen_ai.usage.cache_read.input_tokens` and
@@ -117,8 +122,10 @@ pub struct GenAiResponse {
 pub struct TokenCount {
     #[serde(default)]
     pub input_tokens: Option<i64>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.usage.*`.
@@ -137,8 +144,10 @@ pub struct GenAiUsage {
     pub cache_read: Option<TokenCount>,
     #[serde(default)]
     pub cache_creation: Option<TokenCount>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.tool.call.*`.
@@ -149,8 +158,10 @@ pub struct GenAiToolCall {
     pub id: Option<String>,
     #[serde(default)]
     pub arguments: Option<String>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.tool.*`.
@@ -171,8 +182,10 @@ pub struct GenAiTool {
     pub call: Option<GenAiToolCall>,
     #[serde(default)]
     pub definitions: Option<Vec<serde_json::Value>>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.input.messages`.
@@ -183,8 +196,10 @@ pub struct GenAiTool {
 pub struct GenAiInput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<InputMessage>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// `gen_ai.output.messages`.
@@ -193,8 +208,10 @@ pub struct GenAiInput {
 pub struct GenAiOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<OutputMessage>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// The `gen_ai.*` attribute family, nested as the convention names it.
@@ -226,8 +243,10 @@ pub struct GenAiAttributes {
     /// [`GenAiTool::definitions`].
     #[serde(default)]
     pub system_instructions: Option<Vec<serde_json::Value>>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 // ----- introspection.* -------------------------------------------------------
@@ -240,8 +259,71 @@ pub struct IntrospectionRuntime {
     pub id: Option<String>,
     #[serde(default)]
     pub group_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `byor` for a bring-your-own runtime.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// `introspection.run.*`: the task run this span belongs to.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionRun {
+    #[serde(default)]
+    pub id: Option<String>,
+    /// The run at the root of a chain of delegated runs.
+    #[serde(default)]
+    pub root_id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+/// `introspection.task.*`.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionTask {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+}
+
+/// `introspection.agent.*`: which agent in a runtime's agent tree made the
+/// call.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionAgent {
+    /// `session` for the top-level agent.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Nesting depth, `"0"` at the top. A string: it travels as baggage.
+    #[serde(default)]
+    pub depth: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub invocation_id: Option<String>,
+    #[serde(default)]
+    pub invocation_index: Option<i64>,
+}
+
+/// `introspection.proxy.*`: how the call reached the model provider.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionProxy {
+    /// `forward` for a call the egress proxy passed through.
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// `introspection.invocation.*`.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionInvocation {
+    /// `turn` for a span that wraps one turn of the agent loop.
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 /// `introspection.recipe.*`.
@@ -250,8 +332,6 @@ pub struct IntrospectionRuntime {
 pub struct IntrospectionRecipe {
     #[serde(default)]
     pub git_commit_sha: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.history.new_messages`: the slice of the full input history
@@ -263,8 +343,6 @@ pub struct IntrospectionNewMessages {
     pub start: Option<i64>,
     #[serde(default)]
     pub end: Option<i64>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.history.*`: where the conversation linker placed this model
@@ -285,8 +363,6 @@ pub struct IntrospectionHistory {
     pub hash_hit: Option<bool>,
     #[serde(default)]
     pub new_messages: Option<IntrospectionNewMessages>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// `introspection.contains.*`: what a chat span's sealed input delta and
@@ -308,8 +384,6 @@ pub struct IntrospectionContains {
     /// processor cut at its bound carries `<path>:*`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// The `introspection.*` attribute family.
@@ -330,9 +404,9 @@ pub struct IntrospectionAttributes {
     #[serde(default)]
     pub member: Option<IdRef>,
     #[serde(default)]
-    pub run: Option<IdRef>,
+    pub run: Option<IntrospectionRun>,
     #[serde(default)]
-    pub task: Option<IdRef>,
+    pub task: Option<IntrospectionTask>,
     #[serde(default)]
     pub runtime: Option<IntrospectionRuntime>,
     #[serde(default)]
@@ -351,15 +425,28 @@ pub struct IntrospectionAttributes {
     pub history: Option<IntrospectionHistory>,
     #[serde(default)]
     pub contains: Option<IntrospectionContains>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub agent: Option<IntrospectionAgent>,
+    #[serde(default)]
+    pub proxy: Option<IntrospectionProxy>,
+    #[serde(default)]
+    pub invocation: Option<IntrospectionInvocation>,
+    /// Whether the call used the customer's own provider key.
+    #[serde(default)]
+    pub byok: Option<bool>,
+    /// The component that emitted the span (`DP` for the Data Plane).
+    #[serde(default)]
+    pub client: Option<String>,
+    /// Why the agent loop ended (`completed`, …).
+    #[serde(default)]
+    pub termination_reason: Option<String>,
 }
 
 // ----- the span --------------------------------------------------------------
 
 /// The span's attribute tree.
 ///
-/// Typed for the two families whose meaning we own; open for everything else,
+/// Typed for the two families whose meaning we know; open for everything else,
 /// so a customer's own attribute survives the round trip.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -368,8 +455,10 @@ pub struct SpanAttributes {
     pub gen_ai: Option<GenAiAttributes>,
     #[serde(default)]
     pub introspection: Option<IntrospectionAttributes>,
+    /// Attributes in this namespace the SDK does not type. Open by design: the
+    /// GenAI conventions keep adding attributes, and providers add their own.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// OpenTelemetry span status.
@@ -383,8 +472,6 @@ pub struct SpanStatus {
     pub code: Option<String>,
     #[serde(default)]
     pub message: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 /// One conversation item, or one conversation summary.
@@ -420,15 +507,13 @@ pub struct GenAiSpan {
     pub events: Option<Vec<serde_json::Value>>,
     #[serde(default, skip_serializing_if = "SpanAttributes::is_empty")]
     pub attributes: SpanAttributes,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl SpanAttributes {
     /// Whether the tree carries nothing at all — used to keep an empty
     /// `attributes` out of the serialized form.
     pub fn is_empty(&self) -> bool {
-        self.gen_ai.is_none() && self.introspection.is_none() && self.extra.is_empty()
+        self.gen_ai.is_none() && self.introspection.is_none() && self.other.is_empty()
     }
 }
 
@@ -510,10 +595,51 @@ pub struct GenAiSpanList {
     pub has_more: bool,
     #[serde(default)]
     pub next: Option<String>,
-    /// Fields this SDK build does not model, kept so the record serializes
-    /// back unchanged.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    /// Where a `from_compaction` read was anchored; absent on other reads.
+    #[serde(default)]
+    pub compaction: Option<ConversationCompaction>,
+}
+
+/// Where a `from_compaction` item read was anchored.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationCompaction {
+    /// `false` when no compaction anchor resolved and the read started at the
+    /// beginning of the conversation.
+    pub applied: bool,
+    /// The response id the compaction anchor names.
+    #[serde(default)]
+    pub response_id: Option<String>,
+    /// Opaque cursor positioned at the anchor item.
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// Recorded compactions, oldest first.
+    #[serde(default)]
+    pub history: Vec<ConversationCompactionRecord>,
+}
+
+/// One recorded compaction.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ConversationCompactionRecord {
+    /// The last response recorded before the compaction applied.
+    #[serde(default)]
+    pub response_id: Option<String>,
+    /// Turn count and context size when it applied.
+    pub at_compaction: CompactionCounts,
+    /// Turns and tokens since the previous compaction.
+    pub since_compaction: CompactionCounts,
+}
+
+/// Root-agent turns and tokens, at a compaction or across the segment before
+/// it.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct CompactionCounts {
+    #[serde(default)]
+    pub turns: Option<i64>,
+    #[serde(default)]
+    pub tokens: Option<i64>,
 }
 
 impl Default for GenAiSpanList {
@@ -525,7 +651,7 @@ impl Default for GenAiSpanList {
             last_id: None,
             has_more: false,
             next: None,
-            extra: BTreeMap::new(),
+            compaction: None,
         }
     }
 }
