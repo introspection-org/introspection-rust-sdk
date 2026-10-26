@@ -377,24 +377,24 @@ async fn more_turns(w: &Walk, id: &str) {
         .await
         .expect("a third turn");
     third.cancel().await.expect("cancel the third turn");
-    settled_task(w, "task after a cancelled turn", &id, |t| {
+    let settled = settled_task(w, "task after a cancelled turn", &id, |t| {
         turn_over(t) || t.status == TaskStatus::Cancelled
     })
     .await;
 
+    // The runtime the task was stamped with, which the filter compares.
+    let runtime_id = settled.runtime_id.expect("the task names its runtime");
     let listed = runner
         .tasks()
         .list(&TaskListParams {
-            runtime_id: Some(set(&w.runtime, "the runtime").id),
+            runtime_id: Some(runtime_id),
             ..Default::default()
         })
         .collect_all(0)
         .await
         .expect("list the runtime's tasks");
     assert!(listed.iter().any(|t| t.id.to_string() == id));
-    assert!(listed
-        .iter()
-        .all(|t| t.runtime_id == Some(set(&w.runtime, "the runtime").id)));
+    assert!(listed.iter().all(|t| t.runtime_id == Some(runtime_id)));
     let retitled = runner
         .tasks()
         .update(
