@@ -100,7 +100,14 @@ pub enum AnnotationMutation {
 
 #[derive(Debug, Clone, Default)]
 pub struct AnnotationEventOptions {
+    /// The event's UUIDv7; generated when `None`. The server deduplicates on
+    /// it, so a retried create is applied once.
     pub event_id: Option<Uuid>,
+    /// A comment sent in the same event as a [`AnnotationMutation::Labels`] or
+    /// [`AnnotationMutation::ReviewerEmails`] snapshot. A comment appends, so
+    /// it may ride along with either; with [`AnnotationMutation::Comment`] it
+    /// is refused, since an event holds one comment.
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,7 +161,10 @@ impl Annotations {
         )
     }
 
-    /// Append exactly one mutation. Label and reviewer vectors are complete snapshots.
+    /// `POST /v1/annotations` — append one event: a mutation, plus
+    /// `options.comment` alongside a snapshot. Label and reviewer vectors are
+    /// complete snapshots. The event carries its id, so a `502` / `503` /
+    /// `504` is retried with the same id and applied at most once.
     pub async fn create(
         &self,
         target: AnnotationTarget,
@@ -167,6 +177,15 @@ impl Annotations {
             "event_id": options.event_id.unwrap_or_else(Uuid::now_v7),
         });
         let object = body.as_object_mut().expect("annotation body is an object");
+        if let Some(comment) = options.comment {
+            if matches!(mutation, AnnotationMutation::Comment(_)) {
+                return Err(validation(
+                    "Send one comment per event: use AnnotationMutation::Comment or options.comment, not both",
+                    "conflicting_annotation_comments",
+                ));
+            }
+            object.insert("comment".into(), serde_json::Value::String(comment));
+        }
         match mutation {
             AnnotationMutation::Labels(labels) => {
                 object.insert("labels".into(), serde_json::to_value(labels).unwrap());
@@ -186,7 +205,9 @@ impl Annotations {
                 );
             }
         }
-        self.dp_http.post_json_empty("/v1/annotations", &body).await
+        self.dp_http
+            .post_json_empty_idempotent("/v1/annotations", &body)
+            .await
     }
 
     async fn resolve_reviewer_ids(&self, emails: Vec<String>) -> ApiResult<Vec<Uuid>> {

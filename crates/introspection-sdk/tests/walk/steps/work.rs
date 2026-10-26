@@ -10,11 +10,12 @@ use introspection_sdk::{
     AnnotationTarget, ApprovalListParams, ConversationContains, ConversationExportFormat,
     ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
     ConversationListParams, EventListParams, File, FileCreateText, FileListParams, FileUpdate,
-    FileUpload, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
-    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
-    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
-    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
-    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    FileUpload, FileVersionCreateText, FileVersionListParams, IntrospectionClient,
+    IntrospectionEventName, MemberConnectionCreate, MemberConnectionListParams, MemberListParams,
+    MetricFilter, MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
+    ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams,
+    TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate,
+    TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -22,6 +23,9 @@ use uuid::Uuid;
 use crate::steps::expect_not_found;
 use crate::support::{assert_stable, settled, span_event_id, walk};
 use crate::{set, Walk};
+
+/// How long the input file lives: a day outlasts the walk.
+const FILE_TTL_SECONDS: u64 = 24 * 60 * 60;
 
 fn walk_metadata(extra: &[(&str, &str)]) -> HashMap<String, Value> {
     std::iter::once(("suite", "walk"))
@@ -40,6 +44,7 @@ pub async fn files_in(w: &mut Walk) {
             mime_type: Some("text/plain".into()),
             metadata: Some(walk_metadata(&[])),
             tags: None,
+            ttl_seconds: Some(FILE_TTL_SECONDS),
         })
         .await
         .expect("upload the input file");
@@ -79,10 +84,27 @@ pub async fn files_in(w: &mut Walk) {
                 format!("{} (v2)", walk::INPUT_FILE_TEXT).into_bytes(),
                 walk::INPUT_FILE_NAME,
             )
-            .with_content_type("text/plain"),
+            .with_content_type("text/plain")
+            .with_ttl_seconds(FILE_TTL_SECONDS),
         )
         .await
         .expect("add a version");
+    let text_version = sa
+        .files()
+        .versions
+        .create_text(
+            &id,
+            &FileVersionCreateText {
+                content: format!("{} (v3)", walk::INPUT_FILE_TEXT),
+                mime_type: Some("text/plain".into()),
+                metadata: Some(walk_metadata(&[])),
+                ttl_seconds: Some(FILE_TTL_SECONDS),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("add a text version");
+    assert_stable!(text_version, @"");
     let versions = sa
         .files()
         .versions
@@ -91,6 +113,7 @@ pub async fn files_in(w: &mut Walk) {
         .await
         .expect("list versions");
     assert!(versions.iter().any(|v| v.id == version.id));
+    assert!(versions.iter().any(|v| v.id == text_version.id));
     sa.files()
         .versions
         .get(&id, &version.id.to_string())
@@ -821,8 +844,9 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         trace_id: item.trace_id.clone(),
         span_id: item.span_id.clone().expect("a span id"),
     };
-    let event = |label: &str| AnnotationEventOptions {
+    let event = |label: &str, comment: &str| AnnotationEventOptions {
         event_id: Some(span_event_id(&target.trace_id, &target.span_id, label)),
+        comment: Some(comment.into()),
     };
     // An event id derived from the span, so the request replays; the SDK
     // would mint one.
@@ -831,7 +855,7 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         .create(
             target.clone(),
             AnnotationMutation::Labels(vec!["walk".into()]),
-            event("labels"),
+            event("labels", "labelled by the walk"),
         )
         .await
         .expect("label the span");
@@ -843,7 +867,7 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         .create(
             target.clone(),
             AnnotationMutation::ReviewerEmails(vec![]),
-            event("reviewers"),
+            event("reviewers", "reviewers cleared by the walk"),
         )
         .await
         .expect("clear the reviewers");

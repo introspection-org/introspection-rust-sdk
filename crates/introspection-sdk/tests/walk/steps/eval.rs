@@ -1,15 +1,16 @@
 //! Steps 14 to 16: a trial graded by the recipe's judge, an experiment over
 //! two versions, commands in the trial's sandbox, and an automation.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
-    AutomationCreateParams, AutomationListParams, AutomationTriggerType, AutomationUpdateParams,
-    EventListParams, ExperimentListParams, ImageListParams, IntrospectionEventName,
-    JudgeListParams, JudgeUpdateParams, PaginationParams, RunRequest, RunnerIdentity, Task,
-    TaskCommand, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCreate, TaskKind,
-    TaskStatus,
+    AutomationCreateParams, AutomationListParams, AutomationMetadata, AutomationTriggerType,
+    AutomationUpdateParams, EventListParams, ExperimentListParams, ImageListParams,
+    IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams, RunRequest,
+    RunnerIdentity, Task, TaskCommand, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus,
+    TaskCreate, TaskKind, TaskStatus,
 };
 use serde_json::{json, Value};
 
@@ -24,7 +25,11 @@ async fn judge(w: &Walk) -> introspection_sdk::Judge {
     let group = set(&w.runtime, "the runtime")
         .runtime_group_id
         .expect("a runtime group");
-    let mut images = sa.images().list(&ImageListParams::default());
+    // A filter sent through the `filters` passthrough instead of its field.
+    let mut images = sa.images().list(&ImageListParams {
+        filters: Some(HashMap::from([("status".to_string(), json!("ready"))])),
+        ..Default::default()
+    });
     let images = images
         .next_page()
         .await
@@ -528,16 +533,24 @@ pub async fn automations(w: &mut Walk) {
         .get(automation.id)
         .await
         .expect("read the automation");
-    sa.automations()
+    let described = sa
+        .automations()
         .update(
             automation.id,
             &AutomationUpdateParams {
                 description: Some("triggered once by the walk".into()),
+                // Metadata is free-form: a key the SDK does not name is kept.
+                metadata: Some(AutomationMetadata {
+                    other: [("suite".to_string(), json!("walk"))].into(),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         )
         .await
         .expect("describe the automation");
+    let suite = described.typed_metadata().map(|m| m.other["suite"].clone());
+    assert_eq!(suite, Some(json!("walk")));
     let listed = sa
         .automations()
         .list(&AutomationListParams::default())
