@@ -196,8 +196,9 @@ impl<'de> Deserialize<'de> for ContentPart {
 pub struct InputMessage {
     /// The role of the message sender (e.g. `"user"`, `"system"`, `"assistant"`, `"tool"`).
     pub role: String,
-    /// The message content as an ordered list of parts.
-    #[serde(default)]
+    /// The message content as an ordered list of parts. Empty parts are
+    /// omitted on output, as the server stores a message without parts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<ContentPart>,
     /// The participant's name, when the provider records one.
     pub name: Option<String>,
@@ -255,10 +256,11 @@ impl InputMessage {
 pub struct OutputMessage {
     /// The role of the message sender (typically `"assistant"`).
     pub role: String,
-    /// The message content as an ordered list of parts.
+    /// The message content as an ordered list of parts. Empty parts are
+    /// omitted on output, as the server stores a message without parts.
     // A turn that ends before producing content (`finish_reason: "aborted"`)
     // is stored without `parts`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<ContentPart>,
     /// Finish reason (e.g. `"stop"`, `"tool-calls"`).
     pub finish_reason: Option<String>,
@@ -470,6 +472,43 @@ mod tests {
             serde_json::from_value(serde_json::json!({"role": "assistant"})).unwrap();
 
         assert!(msg.parts.is_empty());
+    }
+
+    #[test]
+    fn test_output_message_without_parts_round_trips_without_parts() {
+        let raw = serde_json::json!({"role": "assistant", "finish_reason": "aborted"});
+
+        let msg: OutputMessage = serde_json::from_value(raw.clone()).unwrap();
+
+        assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
+    }
+
+    #[test]
+    fn test_input_message_without_parts_round_trips_without_parts() {
+        let raw = serde_json::json!({"role": "assistant"});
+
+        let msg: InputMessage = serde_json::from_value(raw.clone()).unwrap();
+
+        assert_eq!(serde_json::to_value(&msg).unwrap(), raw);
+    }
+
+    #[test]
+    fn test_messages_with_parts_round_trip_unchanged() {
+        let input = serde_json::json!({
+            "role": "user",
+            "parts": [{"type": "text", "content": "hi"}]
+        });
+        let output = serde_json::json!({
+            "role": "assistant",
+            "parts": [{"type": "text", "content": "hello"}],
+            "finish_reason": "stop"
+        });
+
+        let input_msg: InputMessage = serde_json::from_value(input.clone()).unwrap();
+        let output_msg: OutputMessage = serde_json::from_value(output.clone()).unwrap();
+
+        assert_eq!(serde_json::to_value(&input_msg).unwrap(), input);
+        assert_eq!(serde_json::to_value(&output_msg).unwrap(), output);
     }
 
     #[test]
