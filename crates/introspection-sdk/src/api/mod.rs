@@ -274,6 +274,6 @@ pub use schemas::{
     VariableCreateParams, VariableKind, VariableUpdateParams,
 };
 pub use shares::Shares;
-pub use sse::parse_sse_response;
+pub use sse::{parse_sse_response, parse_sse_response_with_limit, DEFAULT_MAX_SSE_FRAME_BYTES};
 pub use tasks::{RunHandle, TaskCommands, TaskRuns, Tasks, MAX_COMMAND_WAIT_SECONDS};
 pub use telemetry::{ConversationExportFormat, Conversations, Events, Metrics};
