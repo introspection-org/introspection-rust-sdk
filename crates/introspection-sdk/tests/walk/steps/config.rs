@@ -359,6 +359,7 @@ pub async fn runtime(w: &mut Walk) {
       "recipe_kind": "production",
       "recipe_ref": "main",
       "runtime_group_id": "[uuid]",
+      "runtime_group_type": "custom",
       "slug": "hello-mcp",
       "updated_at": "[timestamp]"
     }
