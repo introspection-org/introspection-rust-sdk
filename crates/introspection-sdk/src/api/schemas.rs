@@ -4897,20 +4897,29 @@ pub struct RunCallerPage {
 /// User-facing request type. CP infers everything else (runtime_id /
 /// experiment_id from the URL; member_id / org_id / project_id from
 /// the bearer key).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RunRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<RunnerIdentity>,
+    /// Environment whose bindings apply. A human member's session may
+    /// override its credential's environment; an agent credential stays
+    /// bound to its own.
+    pub environment: Option<Lane>,
+    /// Open the runner on this one Runtime version for the first task. The
+    /// Recipe must belong to the Runtime group the URL names; it bypasses
+    /// experiment and active-environment routing when the runner is minted.
+    /// Runtime `/run` only.
+    pub recipe_id: Option<Uuid>,
+    /// Whether every application binding must materialize. CP defaults to
+    /// `true`; `false` is for operator testing, where identity-dependent
+    /// bindings may be reported as unavailable instead.
+    pub bindings_required: Option<bool>,
     /// Optional segment.io-style observability payload — see
     /// [`RunCaller`]. Echoed on the response's `runtime_context.caller`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<RunCaller>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     /// Session lifetime override, max 24h. Default 1h on CP side.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
 }
 
@@ -6712,6 +6721,30 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn a_run_request_sends_environment_recipe_and_bindings_only_when_set() {
+        let recipe_id = Uuid::parse_str("00000000-0000-0000-0000-000000000043").unwrap();
+        let request = serde_json::to_value(RunRequest {
+            environment: Some(Lane::Staging),
+            recipe_id: Some(recipe_id),
+            bindings_required: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            request,
+            json!({
+                "environment": "staging",
+                "recipe_id": "00000000-0000-0000-0000-000000000043",
+                "bindings_required": false
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(RunRequest::default()).unwrap(),
+            json!({})
+        );
     }
 
     #[test]

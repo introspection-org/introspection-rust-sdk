@@ -9,11 +9,11 @@
 
 use introspection_sdk::api::{IntrospectionAPIError, RunRequest};
 use introspection_sdk::{
-    AdvancedOptions, ClientConfig, IntrospectionClient, Runner, RunnerIdentity,
+    AdvancedOptions, ClientConfig, IntrospectionClient, Lane, Runner, RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const RUNTIME_ID: &str = "11111111-1111-4111-8111-111111111111";
@@ -139,6 +139,7 @@ async fn run_opens_a_runner_whose_accessors_report_the_spec() {
         .unwrap();
 
     assert_eq!(runner.session_id(), "sess_1");
+    assert_eq!(runner.session_token(), "jwt-for-sess_1");
     assert_eq!(runner.expires_at(), "2026-01-01T00:00:00Z");
     assert_eq!(runner.dp_endpoint(), "https://dp.example.com");
     let deployment = runner.deployment();
@@ -149,6 +150,47 @@ async fn run_opens_a_runner_whose_accessors_report_the_spec() {
     assert_eq!(ctx.arm_label.as_deref(), Some("control"));
     assert_eq!(ctx.identity.user_id.as_deref(), Some("user_1"));
     assert!(!runner.is_closed());
+}
+
+#[tokio::test]
+async fn a_runtime_handle_with_a_project_sends_it_on_run_and_on_refresh() {
+    let cp = MockServer::start().await;
+    let recipe_id = Uuid::parse_str(RECIPE_ID).unwrap();
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/runtimes/{RUNTIME_ID}/run")))
+        .and(query_param("project", "acme web"))
+        .and(body_json(json!({
+            "environment": "production",
+            "recipe_id": RECIPE_ID,
+            "bindings_required": false,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(runner_spec(
+            "sess_1",
+            "https://dp.example.com",
+            "2026-01-01T00:00:00Z",
+        )))
+        .expect(2)
+        .mount(&cp)
+        .await;
+
+    let handle = client(&cp)
+        .runtimes()
+        .handle(Uuid::parse_str(RUNTIME_ID).unwrap())
+        .with_project("acme web");
+    assert_eq!(
+        handle.project().map(ToString::to_string).as_deref(),
+        Some("acme web")
+    );
+    let runner = handle
+        .run(RunRequest {
+            environment: Some(Lane::Production),
+            recipe_id: Some(recipe_id),
+            bindings_required: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    runner.refresh().await.unwrap();
 }
 
 #[tokio::test]
@@ -198,6 +240,7 @@ async fn refresh_re_mints_the_session_and_repoints_the_namespaces() {
     runner.refresh().await.unwrap();
 
     assert_eq!(runner.session_id(), "sess_2");
+    assert_eq!(runner.session_token(), "jwt-for-sess_2");
     assert_eq!(runner.expires_at(), "2026-06-01T00:00:00Z");
     assert_eq!(runner.dp_endpoint(), second.uri());
 

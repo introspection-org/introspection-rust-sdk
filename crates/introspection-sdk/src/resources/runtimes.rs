@@ -120,6 +120,7 @@ impl Runtimes {
         RuntimeHandle {
             http: self.http.clone(),
             runtime: StringOrUuid::from(slug),
+            project: None,
         }
     }
 }
@@ -132,6 +133,7 @@ impl Runtimes {
 pub struct RuntimeHandle {
     http: Arc<HttpClient>,
     runtime: StringOrUuid,
+    project: Option<StringOrUuid>,
 }
 
 impl RuntimeHandle {
@@ -140,7 +142,22 @@ impl RuntimeHandle {
         Self {
             http,
             runtime: StringOrUuid::from(runtime_id),
+            project: None,
         }
+    }
+
+    /// Check `run` against `project` (`?project=`, a slug or id), as
+    /// [`crate::ExperimentHandle::run`] does. CP otherwise takes the project
+    /// from the credential or, for an id, from the Runtime row; a slug
+    /// resolves in this project.
+    pub fn with_project(mut self, project: impl Into<StringOrUuid>) -> Self {
+        self.project = Some(project.into());
+        self
+    }
+
+    /// The project set by [`Self::with_project`], if any.
+    pub fn project(&self) -> Option<&StringOrUuid> {
+        self.project.as_ref()
     }
 
     /// The concrete Runtime id, or `None` for a handle built from a slug,
@@ -152,23 +169,26 @@ impl RuntimeHandle {
         }
     }
 
-    /// `POST /v1/runtimes/{id or slug}/run` — open a [`Runner`] for this
-    /// runtime.
+    /// `POST /v1/runtimes/{id or slug}/run[?project=...]` — open a
+    /// [`Runner`] for this runtime.
     pub async fn run(&self, ctx: RunRequest) -> ApiResult<Runner> {
-        let path = run_path(&self.runtime);
+        let path = run_path(&self.runtime, self.project.as_ref());
         let spec: RunnerSpec = self.http.post_json(&path, &ctx).await?;
         let source = RunnerSource::Runtime {
             cp_http: self.http.clone(),
             runtime: self.runtime.clone(),
+            project: self.project.clone(),
             ctx,
         };
         Runner::from_spec(spec, source)
     }
 }
 
-pub(crate) fn run_path(runtime: &StringOrUuid) -> String {
-    format!(
-        "/v1/runtimes/{}/run",
-        crate::api::encoding::encode(&runtime.to_string())
-    )
+pub(crate) fn run_path(runtime: &StringOrUuid, project: Option<&StringOrUuid>) -> String {
+    let mut path = format!("/v1/runtimes/{}/run", encode(&runtime.to_string()));
+    if let Some(project) = project {
+        path.push_str("?project=");
+        path.push_str(&encode(&project.to_string()));
+    }
+    path
 }
