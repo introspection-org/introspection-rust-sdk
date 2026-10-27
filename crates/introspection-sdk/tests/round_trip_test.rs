@@ -231,6 +231,7 @@ const TYPED: &[(&str, &str, Check)] = &[
     ("GET", r"^/v1/judges$", round_trip::<Paginated<Judge>>),
     ("GET|PATCH", r"^/v1/judges/[^/]+$", round_trip::<Judge>),
     ("GET", r"^/v1/members$", round_trip::<Paginated<Member>>),
+    ("POST", r"^/v1/members$", round_trip::<Member>),
     ("GET|PATCH", r"^/v1/members/[^/]+$", round_trip::<Member>),
     ("POST", r"^/v1/metrics$", round_trip::<MetricsResponse>),
     (
