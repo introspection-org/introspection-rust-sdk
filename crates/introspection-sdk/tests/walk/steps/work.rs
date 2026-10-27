@@ -7,15 +7,15 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     AccessTagCreate, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationTarget, ApprovalListParams, ConversationContains, ConversationExportFormat,
-    ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
-    ConversationListParams, EventListParams, File, FileCreateText, FileListParams, FileUpdate,
-    FileUpload, FileVersionCreateText, FileVersionListParams, IntrospectionClient,
-    IntrospectionEventName, Lane, MemberConnectionCreate, MemberConnectionListParams,
-    MemberListParams, MetricFilter, MetricSpec, MetricsQuery, MissionListParams, RunFrame,
-    RunRequest, ShareCreate, ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind,
-    TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt,
-    TaskRunCreate, TaskStatus, TaskUpdate,
+    AnnotationTarget, Annotations, ApprovalListParams, ConversationContains,
+    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
+    ConversationItemListParams, ConversationListParams, EventListParams, File, FileCreateText,
+    FileListParams, FileUpdate, FileUpload, FileVersionCreateText, FileVersionListParams,
+    IntrospectionClient, IntrospectionEventName, Lane, MemberConnectionCreate,
+    MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec, MetricsQuery,
+    MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
+    StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef,
+    TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -861,11 +861,12 @@ pub async fn telemetry_reads(w: &mut Walk) {
         .collect_all(0)
         .await
         .expect("list members");
+    let owner_id = owners.first().expect("a member").id;
     let output = set(&w.output_file, "the output file").id;
     let share = sa
         .shares()
         .create(&ShareCreate {
-            granted_member_id: Some(owners.first().expect("a member").id),
+            granted_member_id: Some(owner_id),
             ..ShareCreate::new(ShareResourceType::File, output.to_string())
         })
         .await
@@ -900,11 +901,16 @@ pub async fn telemetry_reads(w: &mut Walk) {
         .expect("list shares");
     assert!(shares.iter().any(|s| s.id == share.id));
 
-    annotations(w, &sa, &member).await;
+    annotations(w, &sa, &member, owner_id).await;
     dp_reads_empty(&sa, &member).await;
 }
 
-async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionClient) {
+async fn annotations(
+    w: &Walk,
+    sa: &IntrospectionClient,
+    member: &IntrospectionClient,
+    reviewer: Uuid,
+) {
     let conversation_id = set(&w.conversation_id, "the conversation").clone();
     // The annotation targets the conversation's first item (its span).
     let page = first_items(sa, &conversation_id, &ConversationItemListParams::default()).await;
@@ -919,15 +925,41 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
     };
     // An event id derived from the span, so the request replays; the SDK
     // would mint one.
-    member
+    let labelled = event("labels", "labelled by the walk");
+    let label_event = labelled.event_id;
+    let created = member
         .annotations()
         .create(
             target.clone(),
             AnnotationMutation::Labels(vec!["walk".into()]),
-            event("labels", "labelled by the walk"),
+            labelled,
         )
         .await
         .expect("label the span");
+    assert_eq!(Some(created.event_id), label_event);
+    // Reviewers by member id need no Control Plane lookup, so a Data Plane
+    // client alone assigns them.
+    let dp_only = Annotations::data_plane(set(&w.member, "the member token").dp_http());
+    let assigned = dp_only
+        .create(
+            target.clone(),
+            AnnotationMutation::ReviewerIds(vec![reviewer]),
+            event("reviewer-ids", "assigned by the walk"),
+        )
+        .await
+        .expect("assign a reviewer by id");
+    assert_eq!(Some(assigned.event_id), event("reviewer-ids", "").event_id);
+    assert!(
+        dp_only
+            .create(
+                target.clone(),
+                AnnotationMutation::ReviewerEmails(vec!["expert@example.com".into()]),
+                AnnotationEventOptions::default(),
+            )
+            .await
+            .is_err(),
+        "an email needs the Control Plane, refused before any request"
+    );
     // Reviewers by email resolve through the Control Plane's member list,
     // which a member's Data Plane token cannot read; the walk clears them,
     // which needs no lookup, and reaches the check made before any request.
@@ -1004,6 +1036,8 @@ async fn annotation_reads(
         .list_arrow(&params)
         .await
         .expect("events as Arrow");
+    // The schema rides the stream even when the page has no rows.
+    assert!(table.schema.is_some(), "the Arrow page carries its schema");
     assert_eq!(
         table.batches.iter().map(|b| b.num_rows()).sum::<usize>(),
         events.len()

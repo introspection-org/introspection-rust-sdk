@@ -325,6 +325,17 @@ impl HttpClient {
         Ok(())
     }
 
+    /// [`Self::post_json_empty_idempotent`] that hands back the 2xx
+    /// response, for a route whose status and headers carry the result.
+    pub(crate) async fn post_json_idempotent_response<B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> ApiResult<Response> {
+        self.send_retrying(true, || self.inner.post(self.url(path)).json(body))
+            .await
+    }
+
     /// PATCH a JSON body, decode JSON response.
     pub async fn patch_json<B: Serialize, R: serde::de::DeserializeOwned>(
         &self,

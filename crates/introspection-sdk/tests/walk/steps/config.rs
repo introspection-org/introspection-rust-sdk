@@ -409,6 +409,28 @@ pub async fn runtime(w: &mut Walk) {
         described.description.as_deref(),
         Some("the walk's own version")
     );
+    // Withdraw the version and restore it; the restore sends a null reason.
+    let yanked = sa
+        .runtimes()
+        .update(
+            runtime_v2.id,
+            None,
+            &RuntimeUpdateParams::yank(Some("the walk withdraws it".into())),
+        )
+        .await
+        .expect("yank the version");
+    assert!(yanked.yanked_at.is_some());
+    assert_eq!(
+        yanked.yanked_reason.as_deref(),
+        Some("the walk withdraws it")
+    );
+    let restored = sa
+        .runtimes()
+        .update(runtime_v2.id, None, &RuntimeUpdateParams::unyank())
+        .await
+        .expect("restore the version");
+    assert!(restored.yanked_at.is_none());
+    assert!(restored.yanked_reason.is_none());
     // The list serves the group's live version, the newest one.
     let listed = runtimes(&sa, project).await.expect("list runtimes");
     assert!(listed

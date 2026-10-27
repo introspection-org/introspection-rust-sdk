@@ -5,9 +5,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationTagCreate, AnnotationTarget, Annotations, ClientConfig, Event, EventListParams,
-    IntrospectionClient, IntrospectionEventName, TagCreate, TagKind, TagUpdate, Tags,
+    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationListParams,
+    AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations, ClientConfig, Event,
+    EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate, TagKind, TagUpdate,
+    Tags,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -390,6 +391,129 @@ async fn resolves_reviewer_email_before_single_dp_write() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn reviewer_ids_go_out_as_sent_on_a_data_plane_client() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .and(body_json(json!({
+            "trace_id": TRACE_ID, "span_id": SPAN_ID, "event_id": EVENT_ID,
+            "assignee_member_ids": [MEMBER_ID], "comment": "please review"
+        })))
+        .respond_with(
+            ResponseTemplate::new(204).insert_header("x-introspection-event-id", EVENT_ID),
+        )
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let created = Annotations::data_plane(http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::ReviewerIds(vec![Uuid::parse_str(MEMBER_ID).unwrap()]),
+            AnnotationEventOptions {
+                event_id: Some(Uuid::parse_str(EVENT_ID).unwrap()),
+                comment: Some("please review".into()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        created,
+        AnnotationCreated {
+            event_id: Uuid::parse_str(EVENT_ID).unwrap(),
+            visible: true,
+        }
+    );
+}
+
+#[tokio::test]
+async fn an_accepted_but_not_yet_visible_event_reads_back_from_the_202_body() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("x-introspection-event-id", EVENT_ID)
+                .set_body_json(json!({"event_id": EVENT_ID, "visible": false})),
+        )
+        .mount(&dp)
+        .await;
+    let created = Annotations::data_plane(http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::Comment("later".into()),
+            AnnotationEventOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.event_id, Uuid::parse_str(EVENT_ID).unwrap());
+    assert!(!created.visible);
+}
+
+#[tokio::test]
+async fn a_204_without_the_header_answers_with_the_sent_event_id() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&dp)
+        .await;
+    let created = Annotations::data_plane(http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::Labels(vec!["walk".into()]),
+            AnnotationEventOptions {
+                event_id: Some(Uuid::parse_str(EVENT_ID).unwrap()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.event_id, Uuid::parse_str(EVENT_ID).unwrap());
+    assert!(created.visible);
+}
+
+#[tokio::test]
+async fn a_data_plane_client_refuses_an_email_before_any_request() {
+    let dp = MockServer::start().await;
+    let annotations = Annotations::data_plane(http(&dp));
+    let error = annotations
+        .create(
+            target(),
+            AnnotationMutation::ReviewerEmails(vec!["expert@example.com".into()]),
+            AnnotationEventOptions::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            introspection_sdk::IntrospectionAPIError::InvalidConfig(_)
+        ),
+        "{error:?}"
+    );
+    // Clearing reviewers and id filters need no lookup.
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&dp)
+        .await;
+    annotations
+        .create(
+            target(),
+            AnnotationMutation::ReviewerEmails(vec![]),
+            AnnotationEventOptions::default(),
+        )
+        .await
+        .unwrap();
+    let filtered = AnnotationListParams {
+        assigned_to_email: Some("expert@example.com".into()),
+        ..Default::default()
+    };
+    assert!(annotations.list(&filtered).await.is_err());
+    assert_eq!(dp.received_requests().await.unwrap().len(), 1);
 }
 
 #[tokio::test]

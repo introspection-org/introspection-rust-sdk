@@ -330,6 +330,25 @@ impl Creds {
         .expect("the walk's quiet client builds")
     }
 
+    /// A bare Data Plane client on this token, the kind
+    /// `EmailCodeAuth::data_plane` hands out: no Control Plane behind it.
+    pub fn dp_http(&self) -> std::sync::Arc<HttpClient> {
+        std::sync::Arc::new(
+            HttpClient::new(HttpConfig {
+                api_url: self
+                    .dp_url
+                    .clone()
+                    .unwrap_or_else(|| self.base_api_url.clone()),
+                token: self.token.clone(),
+                additional_headers: HashMap::new(),
+                timeout: Duration::from_secs(30),
+                max_retries: 0,
+                retry_base: Duration::from_millis(500),
+            })
+            .expect("the walk's Data Plane client builds"),
+        )
+    }
+
     pub fn cp_raw(&self) -> Raw {
         Raw::new(&self.base_api_url, self, false)
     }
