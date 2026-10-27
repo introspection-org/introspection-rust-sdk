@@ -1453,6 +1453,23 @@ pub struct Runtime {
     pub image_build_metadata: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub image_build_error_message: Option<String>,
+    /// The recipe commit this version's image carries.
+    #[serde(default)]
+    pub image_revision: Option<String>,
+    /// Subject line of that commit.
+    #[serde(default)]
+    pub image_commit_subject: Option<String>,
+    /// The recipe's GitHub repository (`owner/name`).
+    #[serde(default)]
+    pub image_repository: Option<String>,
+    /// `managed` for a first-party runtime Introspection owns, otherwise
+    /// `custom`; projected from the runtime group.
+    #[serde(default)]
+    pub runtime_group_type: Option<String>,
+    /// The template the runtime group was created from, projected from the
+    /// runtime group.
+    #[serde(default)]
+    pub template_ref: Option<String>,
     /// The MCP servers the runtime needs connected; sent only for
     /// `include=mcp_requirements`.
     #[serde(default)]
