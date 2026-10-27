@@ -14,17 +14,17 @@ use introspection_sdk::api::{
     ConversationContains, ConversationExportFormat, ConversationExportParams,
     ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, Conversations, Dimension, Event, EventListParams, Events,
-    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionListParams, FileVersions,
-    Files, HttpClient, HttpConfig, IntrospectionAPIError, IntrospectionEventName, MetricFilter,
-    MetricSpec, Metrics, MetricsConfig, MetricsQuery, ResumeEntry, ShareCreate, ShareListParams,
-    ShareResourceType, ShareUpdate, Shares, SortDirection, TaskCreate, TaskKind, TaskListParams,
-    TaskPrompt, TaskRunCreate, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TrajectoryRecord,
+    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
+    FileVersionListParams, FileVersions, Files, HttpClient, HttpConfig, IntrospectionAPIError,
+    IntrospectionEventName, MetricFilter, MetricSpec, Metrics, MetricsConfig, MetricsQuery,
+    ResumeEntry, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, Shares,
+    SortDirection, TaskCreate, TaskKind, TaskListParams, TaskPrompt, TaskRunCreate, TaskRunResume,
+    TaskRuns, TaskStatus, TaskUpdate, Tasks, TrajectoryRecord,
 };
 use introspection_sdk::AgUiEvent;
 use serde_json::json;
 use uuid::Uuid;
-use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
+use wiremock::matchers::{body_json, header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const RUNTIME_ID: &str = "0190f1a2-0000-7000-8000-000000000001";
@@ -759,6 +759,33 @@ async fn files_create_text_omits_unset_tags_and_metadata() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn files_create_text_sends_ttl_seconds() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .and(body_json(json!({
+            "name": "transfer.md",
+            "content": "hello",
+            "ttl_seconds": 3600,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(file_response("transfer.md")))
+        .mount(&server)
+        .await;
+
+    files
+        .create_text(&FileCreateText {
+            name: "transfer.md".into(),
+            content: "hello".into(),
+            ttl_seconds: Some(3600),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+}
+
 /// `(field name, value)` for each text part of a multipart body; the file
 /// part (which carries a `filename`) is skipped.
 fn multipart_text_fields(request: &wiremock::Request) -> Vec<(String, String)> {
@@ -838,6 +865,27 @@ async fn files_upload_omits_unset_tags_and_metadata() {
 }
 
 #[tokio::test]
+async fn files_upload_sends_ttl_seconds_part() {
+    let server = MockServer::start().await;
+    let files = Files::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(file_response("payload.bin")))
+        .mount(&server)
+        .await;
+
+    files
+        .upload(FileUpload::from_bytes(b"hello".to_vec(), "payload.bin").with_ttl_seconds(600))
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let fields = multipart_text_fields(&requests[0]);
+    assert!(fields.contains(&("ttl_seconds".to_string(), "600".to_string())));
+}
+
+#[tokio::test]
 async fn files_update_and_delete() {
     let server = MockServer::start().await;
     let files = Files::new(build_http(&server));
@@ -912,6 +960,51 @@ async fn file_versions_list_and_get() {
     assert_eq!(page.records.len(), 1);
     let one = versions.get("abc", "v1").await.unwrap();
     assert_eq!(one.name, "v1.bin");
+}
+
+#[tokio::test]
+async fn file_versions_create_text_posts_json_to_the_versions_route() {
+    let server = MockServer::start().await;
+    let versions = FileVersions::new(build_http(&server));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/files/abc/versions"))
+        .and(header("content-type", "application/json"))
+        .and(body_json(json!({
+            "content": "second",
+            "mime_type": "text/plain",
+            "metadata": {"source": "sdk"},
+            "expected_sha256": "a".repeat(64),
+            "ttl_seconds": 60,
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(file_response("note.md")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let file = versions
+        .create_text(
+            "abc",
+            &FileVersionCreateText {
+                content: "second".into(),
+                mime_type: Some("text/plain".into()),
+                metadata: Some(HashMap::from([("source".into(), json!("sdk"))])),
+                expected_sha256: Some("a".repeat(64)),
+                ttl_seconds: Some(60),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(file.name, "note.md");
+}
+
+#[test]
+fn file_version_create_text_sends_only_the_content_by_default() {
+    let body = FileVersionCreateText {
+        content: "x".into(),
+        ..Default::default()
+    };
+    assert_eq!(serde_json::to_value(body).unwrap(), json!({"content": "x"}));
 }
 
 #[tokio::test]

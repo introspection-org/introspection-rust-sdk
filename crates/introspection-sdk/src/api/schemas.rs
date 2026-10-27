@@ -766,6 +766,35 @@ pub struct FileCreateText {
     /// [`Files::update`](crate::api::Files::update).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Expire the file this many seconds from now (1 up to the server's
+    /// maximum): it gains an `expires_at`, and a maintenance sweep deletes it
+    /// after that instant. `None`, the default, keeps it forever. When the
+    /// request adds a version to an existing file, a set value replaces that
+    /// file's expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+/// Body for [`FileVersions::create_text`](crate::api::FileVersions::create_text)
+/// (`POST /v1/files/{id}/versions` as JSON) — a new text version of an
+/// existing file. The file id travels in the path and must be the chain's
+/// newest version.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FileVersionCreateText {
+    pub content: String,
+    /// Defaults to `text/markdown` on the server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Refuse the version unless the file's current content has this SHA-256
+    /// (64 hex characters), so a concurrent writer is not overwritten.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_sha256: Option<String>,
+    /// Replace the file's expiry with this many seconds from now; see
+    /// [`FileCreateText::ttl_seconds`]. `None` keeps the current expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -3461,6 +3490,10 @@ pub struct AutomationMetadata {
     pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<AutomationCondition>,
+    /// Every other key, kept as sent: metadata is free-form, and a key this
+    /// type does not name survives a read-modify-write.
+    #[serde(flatten)]
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// A stored automation: a prompt run as an agent task, or platform work when
@@ -4634,6 +4667,13 @@ pub struct ImageListParams {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_id: Option<Uuid>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Where an image's bytes come from.

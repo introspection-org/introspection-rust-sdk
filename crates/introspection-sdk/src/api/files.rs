@@ -12,7 +12,8 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    File, FileCreateText, FileListParams, FileType, FileUpdate, FileVersionListParams,
+    File, FileCreateText, FileListParams, FileType, FileUpdate, FileVersionCreateText,
+    FileVersionListParams,
 };
 
 /// Source of bytes for an upload.
@@ -65,6 +66,9 @@ pub struct FileUpload {
     /// keeps the file's existing tags — change them with [`Files::update`].
     /// Sent as one `tags` form field per tag.
     pub tags: Option<Vec<String>>,
+    /// Expire the file this many seconds from now; see
+    /// [`FileCreateText::ttl_seconds`]. Sent as the `ttl_seconds` form field.
+    pub ttl_seconds: Option<u64>,
 }
 
 impl FileUpload {
@@ -76,6 +80,7 @@ impl FileUpload {
             content_type: None,
             metadata: None,
             tags: None,
+            ttl_seconds: None,
         }
     }
 
@@ -87,6 +92,7 @@ impl FileUpload {
             content_type: None,
             metadata: None,
             tags: None,
+            ttl_seconds: None,
         }
     }
 
@@ -116,6 +122,11 @@ impl FileUpload {
         T: Into<String>,
     {
         self.tags = Some(tags.into_iter().map(Into::into).collect());
+        self
+    }
+
+    pub fn with_ttl_seconds(mut self, ttl_seconds: u64) -> Self {
+        self.ttl_seconds = Some(ttl_seconds);
         self
     }
 }
@@ -162,6 +173,21 @@ impl FileVersions {
             crate::api::encoding::encode(file_id)
         );
         self.http.post_multipart(&path, form).await
+    }
+
+    /// `POST /v1/files/{id}/versions` (JSON) — a new text version by
+    /// content. `file_id` must be the chain's current head (its newest
+    /// version); an older id answers 409, as does a stale `expected_sha256`.
+    pub async fn create_text(
+        &self,
+        file_id: &str,
+        body: &FileVersionCreateText,
+    ) -> ApiResult<File> {
+        let path = format!(
+            "/v1/files/{}/versions",
+            crate::api::encoding::encode(file_id)
+        );
+        self.http.post_json(&path, body).await
     }
 }
 
@@ -283,6 +309,9 @@ async fn build_upload_form(upload: FileUpload) -> ApiResult<Form> {
     }
     for tag in upload.tags.into_iter().flatten() {
         form = form.text("tags", tag);
+    }
+    if let Some(ttl_seconds) = upload.ttl_seconds {
+        form = form.text("ttl_seconds", ttl_seconds.to_string());
     }
     Ok(form)
 }

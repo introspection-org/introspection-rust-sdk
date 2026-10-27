@@ -4,6 +4,8 @@
 //! `wiremock`. The end-to-end walk (`tests/walk`) pins that a deployment
 //! answers the same calls.
 
+use std::collections::HashMap;
+
 use futures::StreamExt;
 use introspection_sdk::{
     AdvancedOptions, ApiKeyCapability, ApiKeyCreateParams, ApiKeyDeleteParams, ApiKeyListParams,
@@ -495,6 +497,35 @@ async fn images_send_a_tagged_source_and_filter_the_list() {
         .await
         .expect("list");
     assert_eq!(listed.len(), 1);
+}
+
+#[tokio::test]
+async fn images_list_merges_the_filters_passthrough_onto_the_query() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/images"))
+        .and(query_param("name", "acme/db"))
+        .and(query_param("build_platform", "linux/arm64"))
+        .and(query_param("include_retired", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let listed = client(&server)
+        .images()
+        .list(&ImageListParams {
+            name: Some("acme/db".into()),
+            filters: Some(HashMap::from([
+                ("build_platform".into(), json!("linux/arm64")),
+                ("include_retired".into(), json!(true)),
+            ])),
+            ..Default::default()
+        })
+        .collect_all(1)
+        .await
+        .expect("list");
+    assert!(listed.is_empty());
 }
 
 #[tokio::test]
