@@ -7,9 +7,10 @@ use futures::StreamExt as _;
 use introspection_sdk::{
     service_account_token, ApplicationCreateParams, ApplicationListParams,
     ApplicationSecretCreateParams, ApplicationType, ApplicationUpdateParams, CommitsQuery,
-    ContentsQuery, IntrospectionClient, PaginationParams, Project, ProjectListParams, Recipe,
-    RecipeListParams, Repository, RepositoryListParams, RepositoryProvisioningStatus, Runtime,
-    ServiceAccountTokenParams,
+    ContentsQuery, HostedRepositoryCreateParams, IntrospectionClient, PaginationParams, Project,
+    ProjectListParams, Recipe, RecipeCreateParams, RecipeListParams, RecipeUpdateParams,
+    Repository, RepositoryCreateParams, RepositoryListParams, RepositoryProvisioningStatus,
+    RuntimeCreateParams, ServiceAccountTokenParams,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -399,13 +400,15 @@ pub async fn repository(w: &mut Walk) {
     let sa = w.sa();
     let quiet = w.sa_quiet();
     let project = w.project_id();
-    // todo: no `Repositories::create`; `POST /v1/repositories` is documented
-    // for the CLI only, so this is the one write the walk sends by hand.
-    let created: Repository = set(&w.sa, "the service account")
-        .cp_raw()
-        .post(
-            &format!("/v1/repositories?project={project}"),
-            &json!({ "provider": "hosted", "slug": walk::RECIPE_SLUG, "default_branch": "main" }),
+    let created = sa
+        .repositories()
+        .create(
+            project,
+            &RepositoryCreateParams::Hosted(HostedRepositoryCreateParams {
+                slug: walk::RECIPE_SLUG.into(),
+                default_branch: Some("main".into()),
+                seed_template: None,
+            }),
         )
         .await
         .expect("create the hosted repository");
@@ -463,18 +466,12 @@ pub async fn repository(w: &mut Walk) {
         .iter()
         .find(|r| r.repository_id == repository.id)
         .expect("the seed recipe");
-    // todo: no `Runtimes::create`.
-    let seed_runtime: Runtime = set(&w.sa, "the service account")
-        .cp_raw()
-        .post(
-            "/v1/runtimes",
-            &json!({
-                "project": project,
-                "recipe_id": seed.id,
-                "name": walk::RUNTIME_SLUG,
-                "slug": walk::RUNTIME_SLUG,
-            }),
-        )
+    let seed_runtime = sa
+        .runtimes()
+        .create(&RuntimeCreateParams {
+            slug: Some(walk::RUNTIME_SLUG.into()),
+            ..RuntimeCreateParams::new(project, seed.id, walk::RUNTIME_SLUG)
+        })
         .await
         .expect("create the seed runtime");
     assert_eq!(seed_runtime.slug, walk::RUNTIME_SLUG);
@@ -643,23 +640,39 @@ pub async fn recipe(w: &mut Walk) {
     "#);
 
     // A second pin of the same commit under the walk's own name: a sibling
-    // of the push's row, not the same one. todo: no `Recipes::create`.
-    let raw = set(&w.sa, "the service account").cp_raw();
-    let pinned: Recipe = raw
-        .post(
-            "/v1/recipes",
-            &json!({
-                "project": project,
-                "repository_id": repository,
-                "name": "hello-mcp (walk pin)",
-                "git_ref": "main",
-                "git_commit_sha": head,
-            }),
-        )
+    // of the push's row, not the same one.
+    let pinned = sa
+        .recipes()
+        .create(&RecipeCreateParams {
+            repository_id: Some(repository),
+            git_ref: Some("main".into()),
+            git_commit_sha: Some(head.clone()),
+            ..RecipeCreateParams::new(project, "hello-mcp (walk pin)")
+        })
         .await
         .expect("pin the commit");
     assert_eq!(pinned.git_commit_sha, head);
     assert_ne!(pinned.id, recipe.id);
+    // Deleting a recipe a runtime serves stops `/run`, and the runtime
+    // group's removal takes the walk's recipes with it, so the delete gets a
+    // pin of its own.
+    let discard = sa
+        .recipes()
+        .create(&RecipeCreateParams {
+            repository_id: Some(repository),
+            git_ref: Some("main".into()),
+            git_commit_sha: Some(head.clone()),
+            ..RecipeCreateParams::new(project, "hello-mcp (walk discard)")
+        })
+        .await
+        .expect("pin the commit to discard");
+    // `recipes:delete` is the owner's; the service account does not hold it.
+    w.owner()
+        .recipes()
+        .delete(discard.id, Some(project.into()))
+        .await
+        .expect("delete the discarded pin");
+    expect_not_found(sa.recipes().get(discard.id, Some(project.into())).await);
     recipe_reads(w, &recipe).await;
     w.recipe = Some(recipe);
     w.pinned_recipe = Some(pinned);
@@ -669,7 +682,6 @@ pub async fn recipe(w: &mut Walk) {
 async fn recipe_reads(w: &Walk, recipe: &Recipe) {
     let sa = w.sa();
     let project = w.project_id();
-    let raw = set(&w.sa, "the service account").cp_raw();
     let read = sa
         .recipes()
         .get(recipe.id, Some(project.into()))
@@ -685,11 +697,15 @@ async fn recipe_reads(w: &Walk, recipe: &Recipe) {
         seen |= item.expect("list recipes").id == recipe.id;
     }
     assert!(seen);
-    // todo: no `Recipes::update`.
-    let updated: Recipe = raw
-        .patch(
-            &format!("/v1/recipes/{}", recipe.id),
-            &json!({ "description": "The walk's recipe" }),
+    let updated = sa
+        .recipes()
+        .update(
+            recipe.id,
+            &RecipeUpdateParams {
+                description: Some("The walk's recipe".into()),
+                ..Default::default()
+            },
+            None,
         )
         .await
         .expect("describe the recipe");
