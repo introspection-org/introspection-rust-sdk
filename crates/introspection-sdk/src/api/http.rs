@@ -311,6 +311,20 @@ impl HttpClient {
         Ok(())
     }
 
+    /// POST a JSON body the server deduplicates (an event carrying its own id),
+    /// accepting an empty success response. Unlike [`Self::post_json_empty`],
+    /// a `502` / `503` / `504` is retried too, since re-sending the same body
+    /// cannot apply it twice.
+    pub async fn post_json_empty_idempotent<B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> ApiResult<()> {
+        self.send_retrying(true, || self.inner.post(self.url(path)).json(body))
+            .await?;
+        Ok(())
+    }
+
     /// PATCH a JSON body, decode JSON response.
     pub async fn patch_json<B: Serialize, R: serde::de::DeserializeOwned>(
         &self,

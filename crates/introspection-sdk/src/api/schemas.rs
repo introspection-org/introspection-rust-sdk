@@ -766,6 +766,35 @@ pub struct FileCreateText {
     /// [`Files::update`](crate::api::Files::update).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Expire the file this many seconds from now (1 up to the server's
+    /// maximum): it gains an `expires_at`, and a maintenance sweep deletes it
+    /// after that instant. `None`, the default, keeps it forever. When the
+    /// request adds a version to an existing file, a set value replaces that
+    /// file's expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+/// Body for [`FileVersions::create_text`](crate::api::FileVersions::create_text)
+/// (`POST /v1/files/{id}/versions` as JSON) — a new text version of an
+/// existing file. The file id travels in the path and must be the chain's
+/// newest version.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FileVersionCreateText {
+    pub content: String,
+    /// Defaults to `text/markdown` on the server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Refuse the version unless the file's current content has this SHA-256
+    /// (64 hex characters), so a concurrent writer is not overwritten.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_sha256: Option<String>,
+    /// Replace the file's expiry with this many seconds from now; see
+    /// [`FileCreateText::ttl_seconds`]. `None` keeps the current expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -2254,6 +2283,10 @@ pub struct ConnectorListParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Project slug or id. Needed only when the credential does not already
+    /// name one, as with a CLI session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -2436,17 +2469,20 @@ pub struct EntityUid {
 
 /// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
 /// where the caller supplies an already-minted provider token.
-#[derive(Debug, Clone, Serialize)]
+///
+/// Deserializable too, so a body can be read from a JSON document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionCreateParams {
     pub access_token: String,
     /// Defaults to `App` server-side.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_type: Option<ConnectionCreateSubjectType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scopes_granted: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<String>,
 }
 
@@ -2743,27 +2779,32 @@ pub struct ConnectorAuthorization {
 }
 
 /// Deterministic, non-PII envelope for a person-authorized action.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionMissionConstraints {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     /// Opaque or hashed resource identifier; never raw PII.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_start: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_end: Option<String>,
     /// SHA-256 of the approved artifact.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_binding: Option<String>,
 }
 
 /// `POST /v1/oauth/connections/token` options (the `connector_id` itself is
 /// the method's first argument).
-#[derive(Debug, Clone, Default, Serialize)]
+///
+/// Deserializable too, so the options can be read from a JSON document;
+/// `project` is not part of the body and is never read from one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionTokenParams {
     /// The project the connector belongs to, sent as the `project` query
     /// parameter. Leave it unset for a credential scoped to one project; a
@@ -2772,13 +2813,13 @@ pub struct ConnectionTokenParams {
     pub project: Option<StringOrUuid>,
     /// The exact connection to use. Unset, the platform resolves it from the
     /// authenticated subject.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<ConnectionBrokerSubjectType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_permissions: Option<ConnectionMissionConstraints>,
 }
 
@@ -3449,6 +3490,10 @@ pub struct AutomationMetadata {
     pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<AutomationCondition>,
+    /// Every other key, kept as sent: metadata is free-form, and a key this
+    /// type does not name survives a read-modify-write.
+    #[serde(flatten)]
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// A stored automation: a prompt run as an agent task, or platform work when
@@ -4218,8 +4263,10 @@ pub struct CredentialUpdateParams {
     pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
+    /// `Some(Some(_))` moves it to one lane and `Some(None)` sends `null`,
+    /// which makes it shared across every lane.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Lane>,
+    pub environment: Option<Option<Lane>>,
 }
 
 open_wire_enum! {
@@ -4297,8 +4344,10 @@ pub struct VariableUpdateParams {
     pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
+    /// `Some(Some(_))` moves it to one lane and `Some(None)` sends `null`,
+    /// which makes it shared across every lane.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Lane>,
+    pub environment: Option<Option<Lane>>,
 }
 
 // integrations
@@ -4618,6 +4667,13 @@ pub struct ImageListParams {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_id: Option<Uuid>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Where an image's bytes come from.
@@ -4881,20 +4937,29 @@ pub struct RunCallerPage {
 /// User-facing request type. CP infers everything else (runtime_id /
 /// experiment_id from the URL; member_id / org_id / project_id from
 /// the bearer key).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RunRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<RunnerIdentity>,
+    /// Environment whose bindings apply. A human member's session may
+    /// override its credential's environment; an agent credential stays
+    /// bound to its own.
+    pub environment: Option<Lane>,
+    /// Open the runner on this one Runtime version for the first task. The
+    /// Recipe must belong to the Runtime group the URL names; it bypasses
+    /// experiment and active-environment routing when the runner is minted.
+    /// Runtime `/run` only.
+    pub recipe_id: Option<Uuid>,
+    /// Whether every application binding must materialize. CP defaults to
+    /// `true`; `false` is for operator testing, where identity-dependent
+    /// bindings may be reported as unavailable instead.
+    pub bindings_required: Option<bool>,
     /// Optional segment.io-style observability payload — see
     /// [`RunCaller`]. Echoed on the response's `runtime_context.caller`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<RunCaller>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     /// Session lifetime override, max 24h. Default 1h on CP side.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
 }
 
@@ -6743,6 +6808,30 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn a_run_request_sends_environment_recipe_and_bindings_only_when_set() {
+        let recipe_id = Uuid::parse_str("00000000-0000-0000-0000-000000000043").unwrap();
+        let request = serde_json::to_value(RunRequest {
+            environment: Some(Lane::Staging),
+            recipe_id: Some(recipe_id),
+            bindings_required: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            request,
+            json!({
+                "environment": "staging",
+                "recipe_id": "00000000-0000-0000-0000-000000000043",
+                "bindings_required": false
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(RunRequest::default()).unwrap(),
+            json!({})
+        );
     }
 
     #[test]

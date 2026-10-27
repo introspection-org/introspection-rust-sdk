@@ -346,6 +346,7 @@ async fn averys_work(w: &Walk, avery: &Runner) -> Targets {
             mime_type: Some("text/plain".into()),
             metadata: Some([("suite".to_string(), json!("walk"))].into()),
             tags: None,
+            ttl_seconds: None,
         })
         .await
         .expect("Avery writes a file");

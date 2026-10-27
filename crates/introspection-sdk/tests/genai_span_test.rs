@@ -222,6 +222,28 @@ fn cost_is_typed_where_the_server_emits_it() {
     assert_eq!(introspection.history.unwrap().position, Some(3));
 }
 
+#[test]
+fn the_processor_stamp_and_stored_history_are_typed() {
+    let value = json!({
+        "trace_id": "t", "span_id": "s", "start_time": "2026-01-01T00:00:00Z",
+        "attributes": {"introspection": {
+            "ingest": {"host": "dp-7f", "ip": "10.0.0.4", "node": "n1", "time": 1793068862940002_i64},
+            "history": {"diverged": true, "stored": {"length": 4, "match": 2, "ahead": false}}
+        }}
+    });
+    let span = parse(value.clone());
+    let introspection = span.attributes.introspection.clone().unwrap();
+    let ingest = introspection.ingest.unwrap();
+    assert_eq!(ingest.host.as_deref(), Some("dp-7f"));
+    assert_eq!(ingest.time, Some(1793068862940002));
+    let history = introspection.history.unwrap();
+    assert_eq!(history.diverged, Some(true));
+    let stored = history.stored.unwrap();
+    assert_eq!(stored.match_, Some(2));
+    assert_eq!(stored.ahead, Some(false));
+    assert_eq!(serde_json::to_value(&span).unwrap(), value);
+}
+
 // ----- null is never serialized ---------------------------------------------
 
 #[test]

@@ -178,10 +178,14 @@ pub async fn teardown(w: &mut Walk) {
     );
     expect_not_found(
         sa.connectors()
-            .get(set(&w.connector, "the connector").id)
+            .get(set(&w.connector, "the connector").id, Some(project.into()))
             .await,
     );
-    expect_not_found(sa.recipes().get(set(&w.recipe, "the recipe").id).await);
+    expect_not_found(
+        sa.recipes()
+            .get(set(&w.recipe, "the recipe").id, Some(project.into()))
+            .await,
+    );
     let application = set(&w.application, "the application").id;
     expect_not_found(
         owner

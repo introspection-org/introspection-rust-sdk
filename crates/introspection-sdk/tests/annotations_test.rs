@@ -33,6 +33,27 @@ fn http(server: &MockServer) -> Arc<HttpClient> {
     ))
 }
 
+fn retrying_http(server: &MockServer) -> Arc<HttpClient> {
+    Arc::new(HttpClient::from_parts(
+        reqwest::Client::new(),
+        HttpConfig {
+            api_url: server.uri(),
+            token: "intro_test".into(),
+            additional_headers: HashMap::new(),
+            timeout: Duration::from_secs(5),
+            max_retries: 2,
+            retry_base: Duration::from_millis(1),
+        },
+    ))
+}
+
+fn target() -> AnnotationTarget {
+    AnnotationTarget {
+        trace_id: TRACE_ID.into(),
+        span_id: SPAN_ID.into(),
+    }
+}
+
 fn annotation() -> serde_json::Value {
     json!({
         "trace_id": TRACE_ID,
@@ -224,10 +245,113 @@ async fn appends_one_label_snapshot_with_stable_event_id() {
             AnnotationMutation::Labels(vec![]),
             AnnotationEventOptions {
                 event_id: Some(Uuid::parse_str(EVENT_ID).unwrap()),
+                ..Default::default()
             },
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn a_comment_rides_along_with_a_label_snapshot_in_one_event() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .and(body_json(json!({
+            "trace_id": TRACE_ID, "span_id": SPAN_ID, "event_id": EVENT_ID,
+            "labels": ["needs-review"], "comment": "Wrong tool picked"
+        })))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    Annotations::new(http(&dp), http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::Labels(vec!["needs-review".into()]),
+            AnnotationEventOptions {
+                event_id: Some(Uuid::parse_str(EVENT_ID).unwrap()),
+                comment: Some("Wrong tool picked".into()),
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_comment_rides_along_with_a_reviewer_snapshot_in_one_event() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .and(body_json(json!({
+            "trace_id": TRACE_ID, "span_id": SPAN_ID, "event_id": EVENT_ID,
+            "assignee_member_ids": [], "comment": "Unassigning"
+        })))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    Annotations::new(http(&dp), http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::ReviewerEmails(vec![]),
+            AnnotationEventOptions {
+                event_id: Some(Uuid::parse_str(EVENT_ID).unwrap()),
+                comment: Some("Unassigning".into()),
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn two_comments_on_one_event_are_refused_before_any_request() {
+    let dp = MockServer::start().await;
+    let error = Annotations::new(http(&dp), http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::Comment("one".into()),
+            AnnotationEventOptions {
+                comment: Some("two".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Some("conflicting_annotation_comments"));
+    assert!(dp.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_gateway_error_is_retried_with_the_same_event_id() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&dp)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&dp)
+        .await;
+    Annotations::new(retrying_http(&dp), retrying_http(&dp))
+        .create(
+            target(),
+            AnnotationMutation::Comment("Looks right".into()),
+            AnnotationEventOptions::default(),
+        )
+        .await
+        .unwrap();
+
+    let requests = dp.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    let event_ids: Vec<serde_json::Value> = requests
+        .iter()
+        .map(|request| request.body_json::<serde_json::Value>().unwrap()["event_id"].clone())
+        .collect();
+    assert_eq!(event_ids[0], event_ids[1]);
 }
 
 #[tokio::test]
@@ -261,6 +385,7 @@ async fn resolves_reviewer_email_before_single_dp_write() {
             AnnotationMutation::ReviewerEmails(vec![" expert@example.com ".into()]),
             AnnotationEventOptions {
                 event_id: Some(Uuid::parse_str(EVENT_ID).unwrap()),
+                ..Default::default()
             },
         )
         .await
