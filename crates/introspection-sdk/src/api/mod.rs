@@ -273,6 +273,13 @@ pub use schemas::{
     TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent, Variable,
     VariableCreateParams, VariableKind, VariableUpdateParams,
 };
+// The project-authoring writes, behind the `authoring` feature.
+#[cfg(feature = "authoring")]
+pub use schemas::{
+    EndpointCreateParams, EndpointUpdateParams, GithubRepositoryCreateParams,
+    HostedRepositoryCreateParams, RecipeCreateParams, RecipeRepositorySource, RecipeUpdateParams,
+    RecipeValidationUpdate, RepositoryCreateParams, RuntimeCreateParams,
+};
 pub use shares::Shares;
 pub use sse::{parse_sse_response, parse_sse_response_with_limit, DEFAULT_MAX_SSE_FRAME_BYTES};
 pub use tasks::{RunHandle, TaskCommands, TaskRuns, Tasks, MAX_COMMAND_WAIT_SECONDS};

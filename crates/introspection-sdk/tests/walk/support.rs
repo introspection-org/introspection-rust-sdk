@@ -50,6 +50,10 @@ pub mod walk {
     pub const MCP_ISSUER: &str = "https://example-server.modelcontextprotocol.io/";
     pub const MCP_ENDPOINT: &str = "https://example-server.modelcontextprotocol.io/mcp";
     pub const MCP_HOST: &str = "example-server.modelcontextprotocol.io";
+    pub const API_ENDPOINT_NAME: &str = "walk-api";
+    pub const API_ENDPOINT_HOST: &str = "walk-api.example.com";
+    /// Not a secret: a literal header value the binding stores encrypted.
+    pub const API_ENDPOINT_HEADER: &str = "walk-header-value-0001";
     pub const RECIPE_SLUG: &str = "hello-mcp";
     pub const RUNTIME_SLUG: &str = "hello-mcp";
     pub const INPUT_FILE_NAME: &str = "walk-input.txt";

@@ -41,6 +41,11 @@ testing = ["otel", "opentelemetry_sdk/testing"]
 # ignored. The end-to-end walk runs with it (CI's `--all-features`), so a field
 # the server added shows up as API drift.
 strict-schema = ["dep:serde_ignored"]
+# The project-authoring writes the CLI makes: create and delete runtimes,
+# recipes, endpoint bindings and repositories, and update recipes and
+# endpoints. Off by default: a runner reads these resources and never writes
+# them. CI's `--all-features` builds and tests it.
+authoring = []
 
 [dependencies]
 # Async runtime
@@ -161,12 +166,19 @@ name = "export_timeout_test"
 path = "tests/export_timeout_test.rs"
 required-features = ["otel"]
 
+# The writes the `authoring` feature adds.
+[[test]]
+name = "authoring_test"
+path = "tests/authoring_test.rs"
+required-features = ["authoring"]
+
 # The end-to-end walk replays a recording that includes the Arrow reads, so
-# it needs the decoder; CI runs `cargo test --all-features`.
+# it needs the decoder, and the authoring writes; CI runs
+# `cargo test --all-features`.
 [[test]]
 name = "walk"
 path = "tests/walk/main.rs"
-required-features = ["arrow"]
+required-features = ["arrow", "authoring"]
 
 # Linting configuration
 # Run: cargo clippy -- -W clippy::all -W clippy::pedantic

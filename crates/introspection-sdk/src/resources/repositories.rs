@@ -1,9 +1,9 @@
 //! `client.repositories` — repository lookup (CP), and contents and commit
 //! reads and branch merges (DP).
 //!
-//! A runner resolves the repository behind the recipe it runs, it does not
-//! register one. Linking a repository to a project is a project-authoring act
-//! and lives in the CLI.
+//! A runner resolves the repository behind the recipe it runs; creating or
+//! linking one is a project-authoring act, behind the `authoring` feature
+//! (`Repositories::create`, `Repositories::delete`).
 //!
 //! Unlike the other CP lists, `GET /v1/repositories` answers a bare JSON
 //! array rather than the cursor envelope, so [`Repositories::list`] returns a
@@ -18,6 +18,8 @@ use crate::api::encoding::encode;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
+#[cfg(feature = "authoring")]
+use crate::api::schemas::RepositoryCreateParams;
 use crate::api::schemas::{
     CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryCommit, RepositoryCommitDetail,
     RepositoryContent, RepositoryEntry, RepositoryListParams, RepositoryMergeCommit,
@@ -64,6 +66,42 @@ impl Repositories {
                 },
             )
             .await
+    }
+
+    /// `POST /v1/repositories?project=…` — create a repository the project's
+    /// data plane hosts, or link a GitHub one. Needs `repositories:write`.
+    ///
+    /// A hosted create is idempotent on its slug. Linking a GitHub URL the
+    /// project already has answers 409 `repository_already_registered`, and
+    /// an Operator session may only create hosted ones (403).
+    #[cfg(feature = "authoring")]
+    pub async fn create(
+        &self,
+        project: impl Into<StringOrUuid>,
+        params: &RepositoryCreateParams,
+    ) -> ApiResult<Repository> {
+        let path = format!(
+            "/v1/repositories?project={}",
+            encode(&project.into().to_string())
+        );
+        self.cp_http.post_json(&path, params).await
+    }
+
+    /// `DELETE /v1/repositories/{id}?project=…` — unregister the repository.
+    /// Needs `repositories:delete`. Answers 409 `repository_in_use` while a
+    /// live Runtime still deploys from it; Recipes nothing deploys any more
+    /// go with it.
+    #[cfg(feature = "authoring")]
+    pub async fn delete(
+        &self,
+        repository_id: Uuid,
+        project: impl Into<StringOrUuid>,
+    ) -> ApiResult<()> {
+        let path = format!(
+            "/v1/repositories/{repository_id}?project={}",
+            encode(&project.into().to_string())
+        );
+        self.cp_http.delete_empty(&path).await
     }
 
     /// `GET /v1/repositories/{id}/commits` on the Data Plane — the history
