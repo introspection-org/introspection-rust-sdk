@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         client_secret: Some(client_secret),
         ..ConnectorCreateParams::new("Slack (support)", "slack", ConnectorAuthMode::OauthStored)
     };
-    let connector = client.connectors().create(&params).await?;
+    let connector = client.connectors().create(&params, None).await?;
     println!(
         "connector -> {} ({}), status={}",
         connector.slug,
@@ -97,6 +97,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 expires_in: Some(3600),
                 ..Default::default()
             },
+            None,
         )
         .await?;
     // For Pipedream, select an app with

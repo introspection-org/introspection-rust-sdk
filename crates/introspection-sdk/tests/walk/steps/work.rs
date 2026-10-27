@@ -10,11 +10,12 @@ use introspection_sdk::{
     AnnotationTarget, ApprovalListParams, ConversationContains, ConversationExportFormat,
     ConversationExportParams, ConversationItemGetParams, ConversationItemListParams,
     ConversationListParams, EventListParams, File, FileCreateText, FileListParams, FileUpdate,
-    FileUpload, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
-    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
-    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
-    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
-    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    FileUpload, FileVersionCreateText, FileVersionListParams, IntrospectionClient,
+    IntrospectionEventName, Lane, MemberConnectionCreate, MemberConnectionListParams,
+    MemberListParams, MetricFilter, MetricSpec, MetricsQuery, MissionListParams, RunFrame,
+    RunRequest, ShareCreate, ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind,
+    TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt,
+    TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -22,6 +23,9 @@ use uuid::Uuid;
 use crate::steps::expect_not_found;
 use crate::support::{assert_stable, settled, span_event_id, walk};
 use crate::{set, Walk};
+
+/// How long the input file lives: a day outlasts the walk.
+const FILE_TTL_SECONDS: u64 = 24 * 60 * 60;
 
 fn walk_metadata(extra: &[(&str, &str)]) -> HashMap<String, Value> {
     std::iter::once(("suite", "walk"))
@@ -40,12 +44,14 @@ pub async fn files_in(w: &mut Walk) {
             mime_type: Some("text/plain".into()),
             metadata: Some(walk_metadata(&[])),
             tags: None,
+            ttl_seconds: Some(FILE_TTL_SECONDS),
         })
         .await
         .expect("upload the input file");
     assert_stable!(input, @r#"
     {
       "created_at": "[timestamp]",
+      "expires_at": "[timestamp]",
       "file_type": "filesystem",
       "id": "[uuid]",
       "member_id": "[uuid]",
@@ -79,10 +85,51 @@ pub async fn files_in(w: &mut Walk) {
                 format!("{} (v2)", walk::INPUT_FILE_TEXT).into_bytes(),
                 walk::INPUT_FILE_NAME,
             )
-            .with_content_type("text/plain"),
+            .with_content_type("text/plain")
+            .with_ttl_seconds(FILE_TTL_SECONDS),
         )
         .await
         .expect("add a version");
+    let text_version = sa
+        .files()
+        .versions
+        // A version extends the chain's head, which is now the second version.
+        .create_text(
+            &version.id.to_string(),
+            &FileVersionCreateText {
+                content: format!("{} (v3)", walk::INPUT_FILE_TEXT),
+                mime_type: Some("text/plain".into()),
+                metadata: Some(walk_metadata(&[])),
+                ttl_seconds: Some(FILE_TTL_SECONDS),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("add a text version");
+    assert_stable!(text_version, @r#"
+    {
+      "created_at": "[timestamp]",
+      "expires_at": "[timestamp]",
+      "file_type": "filesystem",
+      "id": "[uuid]",
+      "member_id": "[uuid]",
+      "metadata": {
+        "blob_checksum": "[digest]",
+        "original_filename": "walk-input.txt",
+        "suite": "walk"
+      },
+      "mime_type": "text/plain",
+      "name": "walk-input.txt",
+      "org_id": "[uuid]",
+      "parent_id": "[uuid]",
+      "project_id": "[uuid]",
+      "size_bytes": "[number]",
+      "storage_path": "[uuid]/[uuid]/files/[uuid]/walk-input.txt",
+      "tags": [],
+      "updated_at": "[timestamp]",
+      "version": 3
+    }
+    "#);
     let versions = sa
         .files()
         .versions
@@ -91,6 +138,7 @@ pub async fn files_in(w: &mut Walk) {
         .await
         .expect("list versions");
     assert!(versions.iter().any(|v| v.id == version.id));
+    assert!(versions.iter().any(|v| v.id == text_version.id));
     sa.files()
         .versions
         .get(&id, &version.id.to_string())
@@ -201,16 +249,28 @@ async fn settled_task(w: &Walk, label: &str, id: &str, done: impl Fn(&Task) -> b
 
 pub async fn task(w: &mut Walk) {
     let sa = w.sa();
-    let runtime = set(&w.runtime, "the runtime").id;
+    let runtime = set(&w.runtime, "the runtime");
+    // Every `/run` option the CLI sends: the project as a check, the service
+    // account's own environment, this Runtime version's Recipe, and bindings
+    // that must materialize.
+    let recipe_id = runtime.recipe_id.expect("the runtime pins a recipe");
     let runner = sa
         .runtimes()
-        .handle(runtime)
+        .handle(runtime.id)
+        .with_project(w.project_id())
         .run(RunRequest {
             agent_name: Some(w.settings.agent.clone()),
+            environment: Some(Lane::Production),
+            recipe_id: Some(recipe_id),
+            bindings_required: Some(true),
             ..Default::default()
         })
         .await
         .expect("open a runner on the runtime");
+    assert_eq!(runner.context().recipe_id, recipe_id);
+    // What a caller with its own HTTP client needs to reach the DP.
+    assert!(!runner.session_token().is_empty());
+    assert!(runner.deployment().endpoint.starts_with("http"));
     let started = runner
         .tasks()
         .start(&TaskCreate {
@@ -645,6 +705,19 @@ async fn exports(
     }
     let streamed: Value = serde_json::from_slice(&streamed).expect("the streamed export is JSON");
     assert!(streamed["data"].as_array().map_or(0, Vec::len) >= items);
+    // The representations the SDK does not model come back as the server's
+    // JSON.
+    for format in [
+        ConversationExportFormat::Replay,
+        ConversationExportFormat::Atif,
+    ] {
+        let body = sa
+            .conversations()
+            .export_json_value(conversation_id, format, &export)
+            .await
+            .unwrap_or_else(|e| panic!("the {format:?} export: {e}"));
+        assert!(body.is_object(), "the {format:?} export is a JSON object");
+    }
     let listed = sa
         .conversations()
         .list_arrow(by_group)
@@ -694,10 +767,8 @@ async fn item_pages(sa: &IntrospectionClient, conversation_id: &str) {
     );
 }
 
-pub async fn telemetry_reads(w: &mut Walk) {
-    let sa = w.sa();
-    let member = w.member();
-    let runtime = set(&w.runtime, "the runtime").id;
+/// One count through the typed query and the same count as a raw document.
+async fn metrics(sa: &IntrospectionClient, runtime: Uuid) {
     // A fixed window, so the request replays; the walk's conversation is
     // within it by construction.
     sa.metrics()
@@ -718,6 +789,27 @@ pub async fn telemetry_reads(w: &mut Walk) {
         })
         .await
         .expect("a metrics response");
+    // The same count as a document the SDK forwards unmodelled, the way the
+    // CLI's `metrics query` does; its own window keeps the two requests apart.
+    let raw = sa
+        .metrics()
+        .query_raw(&json!({
+            "view": "conversations",
+            "metrics": [{"aggregation": "count"}],
+            "filters": [{"field": "runtime_id", "operator": "eq", "value": runtime}],
+            "from_timestamp": "2026-01-01T00:00:00Z",
+            "to_timestamp": "2026-12-31T00:00:00Z",
+        }))
+        .await
+        .expect("a raw metrics response");
+    assert!(raw["data"].is_array(), "{raw}");
+}
+
+pub async fn telemetry_reads(w: &mut Walk) {
+    let sa = w.sa();
+    let member = w.member();
+    let runtime = set(&w.runtime, "the runtime").id;
+    metrics(&sa, runtime).await;
 
     // Access tags are an administrator's to write: the owner's token, not
     // the service account, which acts as the project's agent member.
@@ -821,8 +913,9 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         trace_id: item.trace_id.clone(),
         span_id: item.span_id.clone().expect("a span id"),
     };
-    let event = |label: &str| AnnotationEventOptions {
+    let event = |label: &str, comment: &str| AnnotationEventOptions {
         event_id: Some(span_event_id(&target.trace_id, &target.span_id, label)),
+        comment: Some(comment.into()),
     };
     // An event id derived from the span, so the request replays; the SDK
     // would mint one.
@@ -831,7 +924,7 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         .create(
             target.clone(),
             AnnotationMutation::Labels(vec!["walk".into()]),
-            event("labels"),
+            event("labels", "labelled by the walk"),
         )
         .await
         .expect("label the span");
@@ -843,7 +936,7 @@ async fn annotations(w: &Walk, sa: &IntrospectionClient, member: &IntrospectionC
         .create(
             target.clone(),
             AnnotationMutation::ReviewerEmails(vec![]),
-            event("reviewers"),
+            event("reviewers", "reviewers cleared by the walk"),
         )
         .await
         .expect("clear the reviewers");

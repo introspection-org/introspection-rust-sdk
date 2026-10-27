@@ -672,7 +672,7 @@ pub async fn recipe(w: &mut Walk) {
         .delete(discard.id, Some(project.into()))
         .await
         .expect("delete the discarded pin");
-    expect_not_found(sa.recipes().get(discard.id).await);
+    expect_not_found(sa.recipes().get(discard.id, Some(project.into())).await);
     recipe_reads(w, &recipe).await;
     w.recipe = Some(recipe);
     w.pinned_recipe = Some(pinned);
@@ -682,7 +682,11 @@ pub async fn recipe(w: &mut Walk) {
 async fn recipe_reads(w: &Walk, recipe: &Recipe) {
     let sa = w.sa();
     let project = w.project_id();
-    let read = sa.recipes().get(recipe.id).await.expect("read the recipe");
+    let read = sa
+        .recipes()
+        .get(recipe.id, Some(project.into()))
+        .await
+        .expect("read the recipe");
     assert_eq!(read.slug, recipe.slug);
     let mut seen = false;
     let mut listed = sa.recipes().list(&RecipeListParams {

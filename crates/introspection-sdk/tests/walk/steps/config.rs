@@ -74,13 +74,22 @@ pub async fn credential_and_variable(w: &mut Walk) {
             credential.id,
             &CredentialUpdateParams {
                 secret: Some(Secret::new(format!("{}-rotated", walk::CREDENTIAL_SECRET))),
+                // `null`: shared across every lane, as it already is.
+                environment: Some(None),
                 ..Default::default()
             },
             Some(project.into()),
         )
         .await
         .expect("rotate the credential");
+    variable(&sa, project).await;
+}
 
+async fn variable(sa: &IntrospectionClient, project: Uuid) {
+    let q = RuntimeSettingListParams {
+        project: Some(project.into()),
+        ..Default::default()
+    };
     let variable = sa
         .variables()
         .create(
@@ -116,12 +125,28 @@ pub async fn credential_and_variable(w: &mut Walk) {
         .await
         .expect("list variables");
     assert!(listed.iter().any(|v| v.id == variable.id));
+    let staged = sa
+        .variables()
+        .update(
+            variable.id,
+            &VariableUpdateParams {
+                environment: Some(Some(Lane::Staging)),
+                ..Default::default()
+            },
+            Some(project.into()),
+        )
+        .await
+        .expect("move the variable to staging");
+    assert_eq!(staged.environment, Some(Lane::Staging));
+    // `null` makes it shared across every lane again, which the runtime's
+    // production lane reads later.
     let updated = sa
         .variables()
         .update(
             variable.id,
             &VariableUpdateParams {
                 value: Some(walk::VARIABLE_VALUE.into()),
+                environment: Some(None),
                 ..Default::default()
             },
             Some(project.into()),
@@ -129,10 +154,12 @@ pub async fn credential_and_variable(w: &mut Walk) {
         .await
         .expect("update the variable");
     assert_eq!(updated.value.as_deref(), Some(walk::VARIABLE_VALUE));
+    assert_eq!(updated.environment, None);
 }
 
 pub async fn connector(w: &mut Walk) {
     let sa = w.sa();
+    let project = w.project_id();
     let discovered = sa
         .connectors()
         .discover_oauth(&ConnectorOAuthDiscoveryParams {
@@ -145,28 +172,31 @@ pub async fn connector(w: &mut Walk) {
     // register a client dynamically and record PKCE support.
     let connector = sa
         .connectors()
-        .create(&ConnectorCreateParams {
-            name: walk::CONNECTOR_NAME.into(),
-            slug: Some(walk::CONNECTOR_NAME.into()),
-            provider: walk::CONNECTOR_NAME.into(),
-            auth_mode: ConnectorAuthMode::OauthStored,
-            issuer: Some(walk::MCP_ISSUER.into()),
-            api_hosts: Some(vec![walk::MCP_HOST.into()]),
-            environment: None,
-            agent_member_id: None,
-            authorization_endpoint: None,
-            token_endpoint: None,
-            scopes: None,
-            client_id: None,
-            client_secret: None,
-            signing_secret: None,
-            metadata: None,
-            person_server_url: None,
-            application_id: None,
-            assertion_audience: None,
-            webhook_url: None,
-            policy_entities: None,
-        })
+        .create(
+            &ConnectorCreateParams {
+                name: walk::CONNECTOR_NAME.into(),
+                slug: Some(walk::CONNECTOR_NAME.into()),
+                provider: walk::CONNECTOR_NAME.into(),
+                auth_mode: ConnectorAuthMode::OauthStored,
+                issuer: Some(walk::MCP_ISSUER.into()),
+                api_hosts: Some(vec![walk::MCP_HOST.into()]),
+                environment: None,
+                agent_member_id: None,
+                authorization_endpoint: None,
+                token_endpoint: None,
+                scopes: None,
+                client_id: None,
+                client_secret: None,
+                signing_secret: None,
+                metadata: None,
+                person_server_url: None,
+                application_id: None,
+                assertion_audience: None,
+                webhook_url: None,
+                policy_entities: None,
+            },
+            Some(project.into()),
+        )
         .await
         .expect("create the connector");
     assert_stable!(connector, @r#"
@@ -210,13 +240,16 @@ pub async fn connector(w: &mut Walk) {
     "#);
     let read = sa
         .connectors()
-        .get(connector.id)
+        .get(connector.id, Some(project.into()))
         .await
         .expect("read the connector");
     assert_eq!(read.slug, walk::CONNECTOR_NAME);
     let listed = sa
         .connectors()
-        .list(&ConnectorListParams::default())
+        .list(&ConnectorListParams {
+            project: Some(project.into()),
+            ..Default::default()
+        })
         .collect_all(0)
         .await
         .expect("list connectors");
@@ -230,6 +263,7 @@ pub async fn connector(w: &mut Walk) {
                 name: Some(name.clone()),
                 ..Default::default()
             },
+            Some(project.into()),
         )
         .await
         .expect("rename the connector");
@@ -326,6 +360,7 @@ pub async fn runtime(w: &mut Walk) {
       "recipe_kind": "production",
       "recipe_ref": "main",
       "runtime_group_id": "[uuid]",
+      "runtime_group_type": "custom",
       "slug": "hello-mcp",
       "updated_at": "[timestamp]"
     }
@@ -409,6 +444,7 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
                 }),
                 ..Default::default()
             },
+            Some(project.into()),
         )
         .await
         .expect("start the grant");

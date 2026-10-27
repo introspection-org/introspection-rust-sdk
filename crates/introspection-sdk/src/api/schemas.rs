@@ -778,6 +778,35 @@ pub struct FileCreateText {
     /// [`Files::update`](crate::api::Files::update).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Expire the file this many seconds from now (1 up to the server's
+    /// maximum): it gains an `expires_at`, and a maintenance sweep deletes it
+    /// after that instant. `None`, the default, keeps it forever. When the
+    /// request adds a version to an existing file, a set value replaces that
+    /// file's expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+/// Body for [`FileVersions::create_text`](crate::api::FileVersions::create_text)
+/// (`POST /v1/files/{id}/versions` as JSON) — a new text version of an
+/// existing file. The file id travels in the path and must be the chain's
+/// newest version.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FileVersionCreateText {
+    pub content: String,
+    /// Defaults to `text/markdown` on the server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// Refuse the version unless the file's current content has this SHA-256
+    /// (64 hex characters), so a concurrent writer is not overwritten.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_sha256: Option<String>,
+    /// Replace the file's expiry with this many seconds from now; see
+    /// [`FileCreateText::ttl_seconds`]. `None` keeps the current expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1608,6 +1637,23 @@ pub struct Runtime {
     pub image_build_metadata: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub image_build_error_message: Option<String>,
+    /// The recipe commit this version's image carries.
+    #[serde(default)]
+    pub image_revision: Option<String>,
+    /// Subject line of that commit.
+    #[serde(default)]
+    pub image_commit_subject: Option<String>,
+    /// The recipe's GitHub repository (`owner/name`).
+    #[serde(default)]
+    pub image_repository: Option<String>,
+    /// `managed` for a first-party runtime Introspection owns, otherwise
+    /// `custom`; projected from the runtime group.
+    #[serde(default)]
+    pub runtime_group_type: Option<String>,
+    /// The template the runtime group was created from, projected from the
+    /// runtime group.
+    #[serde(default)]
+    pub template_ref: Option<String>,
     /// The MCP servers the runtime needs connected; sent only for
     /// `include=mcp_requirements`.
     #[serde(default)]
@@ -2480,6 +2526,10 @@ pub struct ConnectorListParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Project slug or id. Needed only when the credential does not already
+    /// name one, as with a CLI session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -2662,17 +2712,20 @@ pub struct EntityUid {
 
 /// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
 /// where the caller supplies an already-minted provider token.
-#[derive(Debug, Clone, Serialize)]
+///
+/// Deserializable too, so a body can be read from a JSON document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionCreateParams {
     pub access_token: String,
     /// Defaults to `App` server-side.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_type: Option<ConnectionCreateSubjectType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scopes_granted: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<String>,
 }
 
@@ -2969,27 +3022,32 @@ pub struct ConnectorAuthorization {
 }
 
 /// Deterministic, non-PII envelope for a person-authorized action.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionMissionConstraints {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     /// Opaque or hashed resource identifier; never raw PII.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_start: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_end: Option<String>,
     /// SHA-256 of the approved artifact.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_binding: Option<String>,
 }
 
 /// `POST /v1/oauth/connections/token` options (the `connector_id` itself is
 /// the method's first argument).
-#[derive(Debug, Clone, Default, Serialize)]
+///
+/// Deserializable too, so the options can be read from a JSON document;
+/// `project` is not part of the body and is never read from one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionTokenParams {
     /// The project the connector belongs to, sent as the `project` query
     /// parameter. Leave it unset for a credential scoped to one project; a
@@ -2998,13 +3056,13 @@ pub struct ConnectionTokenParams {
     pub project: Option<StringOrUuid>,
     /// The exact connection to use. Unset, the platform resolves it from the
     /// authenticated subject.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<ConnectionBrokerSubjectType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_permissions: Option<ConnectionMissionConstraints>,
 }
 
@@ -3779,6 +3837,10 @@ pub struct AutomationMetadata {
     pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<AutomationCondition>,
+    /// Every other key, kept as sent: metadata is free-form, and a key this
+    /// type does not name survives a read-modify-write.
+    #[serde(flatten)]
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// A stored automation: a prompt run as an agent task, or platform work when
@@ -4548,8 +4610,10 @@ pub struct CredentialUpdateParams {
     pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
+    /// `Some(Some(_))` moves it to one lane and `Some(None)` sends `null`,
+    /// which makes it shared across every lane.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Lane>,
+    pub environment: Option<Option<Lane>>,
 }
 
 open_wire_enum! {
@@ -4627,8 +4691,10 @@ pub struct VariableUpdateParams {
     pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
+    /// `Some(Some(_))` moves it to one lane and `Some(None)` sends `null`,
+    /// which makes it shared across every lane.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Lane>,
+    pub environment: Option<Option<Lane>>,
 }
 
 // integrations
@@ -4948,6 +5014,13 @@ pub struct ImageListParams {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_id: Option<Uuid>,
+    /// Escape hatch for a filter this SDK build predates: each pair is merged
+    /// verbatim onto the query string (a string, bool or number as itself, an
+    /// array as a repeated key; a null is dropped, an object is refused).
+    /// Prefer the typed field where one exists; on a collision the
+    /// passthrough wins.
+    #[serde(flatten)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Where an image's bytes come from.
@@ -5211,20 +5284,29 @@ pub struct RunCallerPage {
 /// User-facing request type. CP infers everything else (runtime_id /
 /// experiment_id from the URL; member_id / org_id / project_id from
 /// the bearer key).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RunRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<RunnerIdentity>,
+    /// Environment whose bindings apply. A human member's session may
+    /// override its credential's environment; an agent credential stays
+    /// bound to its own.
+    pub environment: Option<Lane>,
+    /// Open the runner on this one Runtime version for the first task. The
+    /// Recipe must belong to the Runtime group the URL names; it bypasses
+    /// experiment and active-environment routing when the runner is minted.
+    /// Runtime `/run` only.
+    pub recipe_id: Option<Uuid>,
+    /// Whether every application binding must materialize. CP defaults to
+    /// `true`; `false` is for operator testing, where identity-dependent
+    /// bindings may be reported as unavailable instead.
+    pub bindings_required: Option<bool>,
     /// Optional segment.io-style observability payload — see
     /// [`RunCaller`]. Echoed on the response's `runtime_context.caller`.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<RunCaller>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     /// Session lifetime override, max 24h. Default 1h on CP side.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
 }
 
@@ -6351,15 +6433,20 @@ impl Event {
 }
 
 /// Ergonomic params for `GET /v1/events`. [`Self::event_name`] is
-/// **required** (compile-enforced) — exactly one family per request, so the
-/// response is always homogeneous. Per-family filters (§4.3 of the telemetry
+/// **required** (compile-enforced); [`Self::extra_event_names`] merges more
+/// families into the same page when they share its row shape and visibility
+/// class, which the server checks (`422` otherwise). Per-family filters (§4.3 of the telemetry
 /// read design — e.g. observation `pattern_id` / `lens` /
 /// `include_superseded`, pattern `lens` / `status`) pass through
 /// [`Self::filters`] verbatim.
 #[derive(Debug, Clone)]
 pub struct EventListParams {
-    /// The one family to list — required; there is no unfiltered read.
+    /// The family to list — required; there is no unfiltered read.
     pub event_name: IntrospectionEventName,
+    /// More families read into the same page, sent as repeated `event_name`
+    /// after [`Self::event_name`]. They must share its row shape and
+    /// visibility class. Duplicates are harmless; the server drops them.
+    pub extra_event_names: Option<Vec<IntrospectionEventName>>,
     pub limit: Option<u32>,
     pub next: Option<String>,
     pub sort: Option<String>,
@@ -6386,6 +6473,24 @@ pub struct EventListParams {
     pub automation_id: Option<Uuid>,
     /// Automation triggers and skips: the task created or posted into.
     pub task_id: Option<Uuid>,
+    /// Judgements of one judge.
+    pub judge_id: Option<Uuid>,
+    /// Issue events of one issue.
+    pub issue_id: Option<Uuid>,
+    /// `introspection.track` events by exact stored event name (wire
+    /// `name`, repeatable, at most 20).
+    pub track_names: Option<Vec<String>>,
+    /// The latest event per human request (wire `request`). Requires a
+    /// descending order.
+    pub latest_requests: Option<bool>,
+    /// `introspection.track` only: the newest event per record in one
+    /// conversation (wire `latest`). Requires `conversation_id` and
+    /// [`Self::track_names`].
+    pub latest_records: Option<bool>,
+    /// One current human request; requires [`Self::latest_requests`].
+    pub request_id: Option<Uuid>,
+    /// The current request assignee; requires [`Self::latest_requests`].
+    pub assignee_id: Option<Uuid>,
     /// Escape hatch for a filter this SDK build predates: merged verbatim
     /// onto the query
     /// string. A filter outside the requested family's allow-map is a 422.
@@ -6399,6 +6504,7 @@ impl EventListParams {
     pub fn new(event_name: IntrospectionEventName) -> Self {
         Self {
             event_name,
+            extra_event_names: None,
             limit: None,
             next: None,
             sort: None,
@@ -6423,6 +6529,13 @@ impl EventListParams {
             owner_key: None,
             automation_id: None,
             task_id: None,
+            judge_id: None,
+            issue_id: None,
+            track_names: None,
+            latest_requests: None,
+            latest_records: None,
+            request_id: None,
+            assignee_id: None,
             filters: None,
         }
     }
@@ -6431,7 +6544,16 @@ impl EventListParams {
     /// [`ConversationListParams::to_wire`]).
     pub fn to_wire(&self) -> ApiResult<serde_json::Value> {
         let mut obj = serde_json::Map::new();
-        obj.insert("event_name".to_string(), self.event_name.as_str().into());
+        let extra = self.extra_event_names.as_deref().unwrap_or_default();
+        if extra.is_empty() {
+            obj.insert("event_name".to_string(), self.event_name.as_str().into());
+        } else {
+            let names = std::iter::once(&self.event_name).chain(extra);
+            obj.insert(
+                "event_name".to_string(),
+                serde_json::Value::Array(names.map(|name| name.as_str().into()).collect()),
+            );
+        }
         Window {
             limit: self.limit,
             next: self.next.as_deref(),
@@ -6466,6 +6588,13 @@ impl EventListParams {
         put_str(&mut obj, "owner_key", self.owner_key.as_ref());
         put_uuid(&mut obj, "automation_id", self.automation_id);
         put_uuid(&mut obj, "task_id", self.task_id);
+        put_uuid(&mut obj, "judge_id", self.judge_id);
+        put_uuid(&mut obj, "issue_id", self.issue_id);
+        put_list(&mut obj, "name", self.track_names.as_ref());
+        put_bool(&mut obj, "request", self.latest_requests);
+        put_bool(&mut obj, "latest", self.latest_records);
+        put_uuid(&mut obj, "request_id", self.request_id);
+        put_uuid(&mut obj, "assignee_id", self.assignee_id);
         if self
             .filters
             .as_ref()
@@ -7029,6 +7158,30 @@ mod tests {
     }
 
     #[test]
+    fn a_run_request_sends_environment_recipe_and_bindings_only_when_set() {
+        let recipe_id = Uuid::parse_str("00000000-0000-0000-0000-000000000043").unwrap();
+        let request = serde_json::to_value(RunRequest {
+            environment: Some(Lane::Staging),
+            recipe_id: Some(recipe_id),
+            bindings_required: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            request,
+            json!({
+                "environment": "staging",
+                "recipe_id": "00000000-0000-0000-0000-000000000043",
+                "bindings_required": false
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(RunRequest::default()).unwrap(),
+            json!({})
+        );
+    }
+
+    #[test]
     fn a_runtime_reads_its_yank_and_group_fields_and_a_null_recipe() {
         let runtime: Runtime = serde_json::from_value(json!({
             "id": "00000000-0000-0000-0000-000000000041",
@@ -7498,6 +7651,65 @@ mod tests {
         assert!(wire.get("event_name_prefix").is_none());
         assert!(wire.get("q").is_none());
         assert!(wire.get("q_regex").is_none());
+    }
+
+    #[test]
+    fn extra_event_names_follow_the_family_as_repeated_event_name() {
+        let wire = EventListParams {
+            extra_event_names: Some(vec![
+                IntrospectionEventName::AutomationSkipped,
+                IntrospectionEventName::Unknown("introspection.issue".into()),
+            ]),
+            ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(
+            wire["event_name"],
+            json!([
+                "introspection.automation.triggered",
+                "introspection.automation.skipped",
+                "introspection.issue"
+            ])
+        );
+    }
+
+    #[test]
+    fn no_extra_event_names_keeps_a_single_event_name() {
+        let wire = EventListParams {
+            extra_event_names: Some(Vec::new()),
+            ..EventListParams::new(IntrospectionEventName::Feedback)
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["event_name"], "introspection.feedback");
+    }
+
+    #[test]
+    fn request_and_track_filters_reach_the_wire_under_server_names() {
+        let id = Uuid::from_u128(7);
+        let wire = EventListParams {
+            judge_id: Some(id),
+            issue_id: Some(id),
+            track_names: Some(vec!["order.placed".into(), "order.paid".into()]),
+            latest_requests: Some(true),
+            latest_records: Some(false),
+            request_id: Some(id),
+            assignee_id: Some(id),
+            ..EventListParams::new(IntrospectionEventName::Unknown(
+                "introspection.track".into(),
+            ))
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["judge_id"], id.to_string());
+        assert_eq!(wire["issue_id"], id.to_string());
+        assert_eq!(wire["name"], json!(["order.placed", "order.paid"]));
+        assert_eq!(wire["request"], true);
+        assert_eq!(wire["latest"], false);
+        assert_eq!(wire["request_id"], id.to_string());
+        assert_eq!(wire["assignee_id"], id.to_string());
+        assert!(wire.get("track_names").is_none());
     }
 
     #[test]

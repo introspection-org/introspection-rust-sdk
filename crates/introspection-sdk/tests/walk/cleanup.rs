@@ -13,7 +13,7 @@ use introspection_sdk::{
 };
 use uuid::Uuid;
 
-use crate::support::{walk, Creds};
+use crate::support::walk;
 use crate::Walk;
 
 /// A `404` is what a removal may meet: the thing is already gone.
@@ -21,18 +21,6 @@ pub fn ignore_404(result: ApiResult<()>) {
     if let Err(err) = result {
         assert_eq!(err.status(), Some(404), "a removal failed: {err}");
     }
-}
-
-pub fn project_filter(
-    project: Uuid,
-) -> Option<std::collections::HashMap<String, serde_json::Value>> {
-    Some(
-        [(
-            "project".to_string(),
-            serde_json::json!(project.to_string()),
-        )]
-        .into(),
-    )
 }
 
 /// Tasks and files are listed as the project's agent member (the service
@@ -56,7 +44,7 @@ pub async fn remove_walk_resources(w: &Walk, dp: &IntrospectionClient) {
     }
     ignore_404(member.tags().delete(TagKind::Access, walk::TAG_NAME).await);
     remove_tasks_and_files(dp).await;
-    remove_control_plane(w, &owner, project).await;
+    remove_control_plane(&owner, project).await;
 }
 
 async fn remove_api_keys(owner: &IntrospectionClient, project: Uuid) {
@@ -142,9 +130,9 @@ async fn remove_tasks_and_files(dp: &IntrospectionClient) {
     }
 }
 
-async fn remove_control_plane(w: &Walk, owner: &IntrospectionClient, project: Uuid) {
+async fn remove_control_plane(owner: &IntrospectionClient, project: Uuid) {
     remove_runtimes(owner, project).await;
-    remove_connectors(&w.owner, owner, project).await;
+    remove_connectors(owner, project).await;
     remove_settings(owner, project).await;
     remove_repositories(owner, project).await;
     remove_applications(owner, project).await;
@@ -219,12 +207,11 @@ async fn remove_applications(owner: &IntrospectionClient, project: Uuid) {
     }
 }
 
-async fn remove_connectors(creds: &Creds, owner: &IntrospectionClient, project: Uuid) {
-    let raw = creds.cp_raw();
+async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
     let connectors = owner
         .connectors()
         .list(&ConnectorListParams {
-            filters: project_filter(project),
+            project: Some(project.into()),
             ..Default::default()
         })
         .collect_all(0)
@@ -249,9 +236,9 @@ async fn remove_connectors(creds: &Creds, owner: &IntrospectionClient, project: 
                 .await
                 .expect("revoke connection");
         }
-        // todo: `Connectors::delete` sends no project, which an owner's
-        // session needs outside the login's project.
-        raw.delete(&format!("/v1/connectors/{}?project={project}", c.id))
+        owner
+            .connectors()
+            .delete(c.id, Some(project.into()))
             .await
             .expect("delete connector");
     }

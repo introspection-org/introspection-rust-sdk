@@ -287,23 +287,20 @@ use introspection_sdk::{Event, EventListParams, IntrospectionEventName};
 
 let mut pages = runner.events().list(&EventListParams {
     lookback: Some("24h".into()),
+    track_names: Some(vec!["ark.feed.entry".into()]),
     ..EventListParams::new(IntrospectionEventName::Unknown("introspection.track".into()))
 })?;
 
 while let Some(page) = pages.next_page().await? {
     for event in &page.records {
         let Event::Unknown(row) = event else { continue };
-        if row["payload"]["name"] != "ark.feed.entry" {
-            continue;
-        }
         println!("{} {}", row["timestamp"], row["payload"]["properties"]["entry_id"]);
     }
 }
 ```
 
-Filtering by `name` server-side is not available yet — it arrives with a
-pending platform change. Until then, filter on `payload.name` client-side as
-above.
+`track_names` filters on the stored event name server-side (wire `name`, up to
+20 names).
 
 ## Read what happened
 

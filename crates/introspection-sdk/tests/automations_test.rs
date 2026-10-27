@@ -65,6 +65,7 @@ fn automation_json() -> serde_json::Value {
             "timezone": "Australia/Sydney",
             "repositories": [{"repo": "acme/app", "ref": "main"}],
             "conditions": [{"type": "has_new_tasks_since_last_run"}],
+            "source": {"channel": "ops"},
         },
         "last_triggered_at": null,
         "next_trigger_at": "2026-10-05T22:00:00Z",
@@ -121,6 +122,7 @@ async fn list_parses_the_read_model_and_its_typed_metadata() {
         metadata.conditions[0].condition_type,
         AutomationConditionType::HasNewTasksSinceLastRun
     );
+    assert_eq!(metadata.other["source"], json!({"channel": "ops"}));
 }
 
 #[tokio::test]
@@ -313,6 +315,8 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                     {"type": "no_live_task_for_automation"},
                     {"type": "last_run_issues_resolved", "runtime_group_id": GROUP_ID},
                 ],
+                "owner": "ops",
+                "priority": 2,
             },
             "enabled": false,
         })))
@@ -340,6 +344,12 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                         ..AutomationCondition::new(AutomationConditionType::LastRunIssuesResolved)
                     },
                 ],
+                other: [
+                    ("owner".into(), json!("ops")),
+                    ("priority".into(), json!(2)),
+                ]
+                .into_iter()
+                .collect(),
             }),
             enabled: Some(false),
             ..AutomationCreateParams::new("Check-in", AutomationTriggerType::Cron)
@@ -399,6 +409,19 @@ async fn update_metadata_sends_only_the_set_metadata_fields() {
         )
         .await
         .unwrap();
+}
+
+#[test]
+fn metadata_keeps_keys_it_does_not_name_through_a_round_trip() {
+    let stored = json!({
+        "timezone": "UTC",
+        "owner": "ops",
+        "labels": ["a", "b"],
+    });
+    let metadata: AutomationMetadata = serde_json::from_value(stored.clone()).unwrap();
+    assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
+    assert_eq!(metadata.other.len(), 2);
+    assert_eq!(serde_json::to_value(&metadata).unwrap(), stored);
 }
 
 #[test]

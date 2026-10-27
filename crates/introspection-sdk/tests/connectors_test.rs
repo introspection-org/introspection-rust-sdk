@@ -138,7 +138,7 @@ async fn create_posts_the_body_using_authenticated_project_scope() {
         ..ConnectorCreateParams::new("Slack (support)", "slack", ConnectorAuthMode::OauthStored)
     };
 
-    let created = connectors.create(&params).await.unwrap();
+    let created = connectors.create(&params, None).await.unwrap();
     assert_eq!(created.slug, "slack-support");
 }
 
@@ -166,16 +166,19 @@ async fn get_update_and_delete_address_one_connector() {
 
     let connectors = Connectors::new(build_http(&server));
 
-    let fetched = connectors.get(connector_id()).await.unwrap();
+    let fetched = connectors.get(connector_id(), None).await.unwrap();
     assert_eq!(fetched.id, connector_id());
 
     let update = ConnectorUpdateParams {
         name: Some("Slack (renamed)".to_string()),
         ..Default::default()
     };
-    connectors.update(connector_id(), &update).await.unwrap();
+    connectors
+        .update(connector_id(), &update, None)
+        .await
+        .unwrap();
 
-    connectors.delete(connector_id()).await.unwrap();
+    connectors.delete(connector_id(), None).await.unwrap();
 }
 
 #[tokio::test]
@@ -203,7 +206,10 @@ async fn authorize_merges_the_connector_id_and_returns_both_expiry_forms() {
         ..Default::default()
     };
 
-    let minted = connectors.authorize(connector_id(), &params).await.unwrap();
+    let minted = connectors
+        .authorize(connector_id(), &params, None)
+        .await
+        .unwrap();
 
     assert!(minted.authorize_url.starts_with("https://slack.com/oauth"));
     assert_eq!(minted.expires_in, 3600);
@@ -239,7 +245,10 @@ async fn authorize_carries_an_asserted_end_customer() {
         ..Default::default()
     };
 
-    connectors.authorize(connector_id(), &params).await.unwrap();
+    connectors
+        .authorize(connector_id(), &params, None)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -258,7 +267,7 @@ async fn authorize_sends_only_the_connector_when_given_nothing_else() {
 
     let connectors = Connectors::new(build_http(&server));
     let minted = connectors
-        .authorize(connector_id(), &ConnectorAuthorizeParams::default())
+        .authorize(connector_id(), &ConnectorAuthorizeParams::default(), None)
         .await
         .unwrap();
 
@@ -320,6 +329,7 @@ async fn pipedream_apps_and_progressive_scope_authorization() {
                 allow_progressive_scopes: true,
                 ..Default::default()
             },
+            None,
         )
         .await
         .unwrap();
@@ -337,7 +347,7 @@ async fn authorize_surfaces_the_missing_runtime_detail() {
 
     let connectors = Connectors::new(build_http(&server));
     let err = connectors
-        .authorize(connector_id(), &ConnectorAuthorizeParams::default())
+        .authorize(connector_id(), &ConnectorAuthorizeParams::default(), None)
         .await
         .unwrap_err();
 
@@ -365,7 +375,7 @@ async fn a_disabled_deployment_keeps_the_servers_wording() {
         .await;
 
     let connectors = Connectors::new(build_http(&server));
-    let err = connectors.get(connector_id()).await.unwrap_err();
+    let err = connectors.get(connector_id(), None).await.unwrap_err();
 
     match err {
         IntrospectionAPIError::Http {
@@ -763,7 +773,10 @@ async fn authorize_carries_an_mcp_endpoint_binding() {
         ..Default::default()
     };
 
-    connectors.authorize(connector_id(), &params).await.unwrap();
+    connectors
+        .authorize(connector_id(), &params, None)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -844,4 +857,127 @@ fn aauth_connector_params_read_from_json_and_keep_their_policy_entities() {
         typo.is_err(),
         "an unknown field in a connector file is refused"
     );
+}
+
+#[tokio::test]
+async fn connector_calls_send_the_project_selector() {
+    let server = MockServer::start().await;
+    let connector_path = format!("/v1/connectors/{CONNECTOR_ID}");
+    Mock::given(method("GET"))
+        .and(path("/v1/connectors"))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![connector_json()])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/connectors"))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(connector_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(connector_path.clone()))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(connector_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(connector_path.clone()))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(connector_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(connector_path))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/authorize"))
+        .and(query_param("project", "web"))
+        // The selector rides on the query string, never in the body.
+        .and(body_json(json!({ "connector_id": CONNECTOR_ID })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorize_url": "https://slack.com/oauth/v2/authorize?state=s",
+            "expires_in": 600,
+            "expires_at": "2026-08-08T20:10:00Z",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let connectors = Connectors::new(build_http(&server));
+    let web = || Some("web".into());
+    let listed: Vec<_> = connectors
+        .list(&ConnectorListParams {
+            project: web(),
+            ..Default::default()
+        })
+        .collect()
+        .await;
+    assert_eq!(listed.len(), 1);
+    let create = ConnectorCreateParams::new("Slack", "slack", ConnectorAuthMode::OauthStored);
+    connectors.create(&create, web()).await.unwrap();
+    connectors.get(connector_id(), web()).await.unwrap();
+    connectors
+        .update(connector_id(), &ConnectorUpdateParams::default(), web())
+        .await
+        .unwrap();
+    connectors.delete(connector_id(), web()).await.unwrap();
+    connectors
+        .authorize(connector_id(), &ConnectorAuthorizeParams::default(), web())
+        .await
+        .unwrap();
+}
+
+#[test]
+fn connection_create_and_token_params_read_from_a_json_document() {
+    let create: ConnectionCreateParams = serde_json::from_value(json!({
+        "access_token": "xoxb-1",
+        "subject_type": "user",
+        "scopes_granted": ["chat:write"],
+    }))
+    .unwrap();
+    assert_eq!(create.access_token, "xoxb-1");
+    assert_eq!(create.subject_type, Some(ConnectionCreateSubjectType::User));
+    assert_eq!(create.refresh_token, None);
+    assert_eq!(
+        serde_json::to_value(&create).unwrap(),
+        json!({
+            "access_token": "xoxb-1",
+            "subject_type": "user",
+            "scopes_granted": ["chat:write"],
+        })
+    );
+    assert!(serde_json::from_value::<ConnectionCreateParams>(json!({
+        "access_token": "xoxb-1",
+        "acess_token_typo": "x",
+    }))
+    .is_err());
+
+    let token: ConnectionTokenParams = serde_json::from_value(json!({
+        "connection_id": CONNECTION_ID,
+        "subject": "person",
+        "action": "send_email",
+        "requested_permissions": { "host": "gmail.googleapis.com" },
+    }))
+    .unwrap();
+    assert_eq!(token.connection_id, Some(connection_id()));
+    assert_eq!(token.subject, Some(ConnectionBrokerSubjectType::Person));
+    assert_eq!(
+        token.requested_permissions.unwrap().host.as_deref(),
+        Some("gmail.googleapis.com")
+    );
+    // `project` is a query parameter, not part of the document.
+    assert!(token.project.is_none());
+    assert!(serde_json::from_value::<ConnectionTokenParams>(json!({
+        "project": "web",
+    }))
+    .is_err());
 }

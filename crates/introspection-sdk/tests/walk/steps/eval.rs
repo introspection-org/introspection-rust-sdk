@@ -1,15 +1,16 @@
 //! Steps 14 to 16: a trial graded by the recipe's judge, an experiment over
 //! two versions, commands in the trial's sandbox, and an automation.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
-    AutomationCreateParams, AutomationListParams, AutomationTriggerType, AutomationUpdateParams,
-    EventListParams, ExperimentListParams, ImageListParams, IntrospectionEventName,
-    JudgeListParams, JudgeUpdateParams, PaginationParams, RunRequest, RunnerIdentity, Task,
-    TaskCommand, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCreate, TaskKind,
-    TaskStatus,
+    AutomationCreateParams, AutomationListParams, AutomationMetadata, AutomationTriggerType,
+    AutomationUpdateParams, EventListParams, ExperimentListParams, ImageListParams,
+    IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams, RunRequest,
+    RunnerIdentity, Task, TaskCommand, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus,
+    TaskCreate, TaskKind, TaskStatus,
 };
 use serde_json::{json, Value};
 
@@ -24,7 +25,11 @@ async fn judge(w: &Walk) -> introspection_sdk::Judge {
     let group = set(&w.runtime, "the runtime")
         .runtime_group_id
         .expect("a runtime group");
-    let mut images = sa.images().list(&ImageListParams::default());
+    // A filter sent through the `filters` passthrough instead of its field.
+    let mut images = sa.images().list(&ImageListParams {
+        filters: Some(HashMap::from([("status".to_string(), json!("ready"))])),
+        ..Default::default()
+    });
     let images = images
         .next_page()
         .await
@@ -451,9 +456,8 @@ pub async fn commands(w: &mut Walk) {
     // through the egress. On the scripted target that grader is the model
     // double, which returns no verdict, so a judgement is asserted only
     // where a real model grades (design doc §10).
-    // todo: no `judge_id` on `EventListParams`.
     let params = EventListParams {
-        filters: Some([("judge_id".to_string(), json!(set(&w.judge, "the judge").id))].into()),
+        judge_id: Some(set(&w.judge, "the judge").id),
         ..EventListParams::new(IntrospectionEventName::Judgement)
     };
     let judgements = sa
@@ -528,16 +532,25 @@ pub async fn automations(w: &mut Walk) {
         .get(automation.id)
         .await
         .expect("read the automation");
-    sa.automations()
+    let described = sa
+        .automations()
         .update(
             automation.id,
             &AutomationUpdateParams {
                 description: Some("triggered once by the walk".into()),
+                // A member may set only `cron_schedules` and `timezone`; an
+                // administrator's free-form keys would land in `other`.
+                metadata: Some(AutomationMetadata {
+                    timezone: Some("UTC".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         )
         .await
         .expect("describe the automation");
+    let metadata = described.typed_metadata().expect("typed metadata");
+    assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
     let listed = sa
         .automations()
         .list(&AutomationListParams::default())
@@ -545,4 +558,18 @@ pub async fn automations(w: &mut Walk) {
         .await
         .expect("list automations");
     assert!(listed.iter().any(|a| a.id == automation.id));
+    // Its triggers and skips in one page: the two families share a row shape
+    // and a visibility class, so the server merges them. The trigger's event
+    // lands asynchronously, so the page is read, not counted.
+    let params = EventListParams {
+        extra_event_names: Some(vec![IntrospectionEventName::AutomationSkipped]),
+        automation_id: Some(automation.id),
+        ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+    };
+    sa.events()
+        .list(&params)
+        .expect("an events paginator")
+        .collect_all(0)
+        .await
+        .expect("the automation's triggers and skips");
 }

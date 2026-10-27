@@ -37,6 +37,9 @@ pub enum RunnerSource {
         /// The Runtime id, or the slug `/run` resolves in the caller's
         /// project.
         runtime: StringOrUuid,
+        /// The project `/run` is checked against (`?project=`), or `None`
+        /// to let CP take it from the credential or the Runtime row.
+        project: Option<StringOrUuid>,
         ctx: RunRequest,
     },
     Experiment {
@@ -53,9 +56,10 @@ impl RunnerSource {
             Self::Runtime {
                 cp_http,
                 runtime,
+                project,
                 ctx,
             } => {
-                let path = crate::resources::runtimes::run_path(runtime);
+                let path = crate::resources::runtimes::run_path(runtime, project.as_ref());
                 cp_http.post_json(&path, ctx).await
             }
             Self::Experiment {
@@ -82,6 +86,7 @@ struct RunnerState {
     deployment: RunnerDeployment,
     context: RunnerContext,
     session_id: String,
+    session_token: String,
     expires_at: String,
     closed: bool,
 }
@@ -97,6 +102,7 @@ impl RunnerState {
             deployment: spec.deployment,
             context: spec.runtime_context,
             session_id: spec.session_id,
+            session_token: spec.session_token,
             expires_at: spec.expires_at,
             closed: false,
         })
@@ -223,6 +229,13 @@ impl Runner {
     /// Session ID assigned by CP.
     pub fn session_id(&self) -> String {
         self.read_state().session_id.clone()
+    }
+
+    /// The session-locator JWT the runner sends to the DP as
+    /// `Authorization: Bearer …`. Together with [`Self::dp_endpoint`] it is
+    /// all a caller needs to reach the DP with an HTTP client of its own.
+    pub fn session_token(&self) -> String {
+        self.read_state().session_token.clone()
     }
 
     /// Session expiry (ISO-8601 string).
