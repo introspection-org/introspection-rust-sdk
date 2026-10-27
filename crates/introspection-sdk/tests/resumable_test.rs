@@ -338,3 +338,30 @@ async fn forward_progress_resets_budget() {
     let deltas = collect_deltas(&runs, o).await.unwrap();
     assert_eq!(deltas, vec!["a", "b", "c", "d"]);
 }
+
+#[tokio::test]
+async fn an_oversized_frame_ends_the_stream_without_reattaching() {
+    let (url, seen) = spawn_mock(vec![(
+        "clean",
+        format!("{}{}", content("1", &"x".repeat(200)), FINISH),
+    )]);
+    let runs = TaskRuns::new(http_for(&url));
+
+    let err = collect_events(
+        &runs,
+        StreamOptions {
+            max_frame_bytes: 100,
+            ..opts()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            introspection_sdk::IntrospectionAPIError::SseFrameTooLarge { limit: 100 }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}

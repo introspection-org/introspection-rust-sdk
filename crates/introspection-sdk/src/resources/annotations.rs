@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::error::{ApiResult, IntrospectionAPIError};
-use crate::api::http::HttpClient;
+use crate::api::http::{decode_json, HttpClient};
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{Paginated, PaginationParams};
 
@@ -95,7 +95,21 @@ pub struct AnnotationListParams {
 pub enum AnnotationMutation {
     Labels(Vec<String>),
     Comment(String),
+    /// A reviewer snapshot by email, resolved to member ids on the Control
+    /// Plane first.
     ReviewerEmails(Vec<String>),
+    /// A reviewer snapshot by member id, sent as is: no Control Plane lookup.
+    ReviewerIds(Vec<Uuid>),
+}
+
+/// What `POST /v1/annotations` answers: the event's id, and whether the
+/// event is already readable. `visible: false` is the server's `202`: the
+/// write was accepted but did not reach the read side within its wait, so a
+/// read right after may not show it yet.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AnnotationCreated {
+    pub event_id: Uuid,
+    pub visible: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -103,8 +117,9 @@ pub struct AnnotationEventOptions {
     /// The event's UUIDv7; generated when `None`. The server deduplicates on
     /// it, so a retried create is applied once.
     pub event_id: Option<Uuid>,
-    /// A comment sent in the same event as a [`AnnotationMutation::Labels`] or
-    /// [`AnnotationMutation::ReviewerEmails`] snapshot. A comment appends, so
+    /// A comment sent in the same event as a [`AnnotationMutation::Labels`],
+    /// [`AnnotationMutation::ReviewerEmails`] or
+    /// [`AnnotationMutation::ReviewerIds`] snapshot. A comment appends, so
     /// it may ride along with either; with [`AnnotationMutation::Comment`] it
     /// is refused, since an event holds one comment.
     pub comment: Option<String>,
@@ -120,13 +135,27 @@ struct Member {
 
 #[derive(Clone)]
 pub struct Annotations {
-    cp_http: Arc<HttpClient>,
+    cp_http: Option<Arc<HttpClient>>,
     dp_http: Arc<HttpClient>,
 }
 
 impl Annotations {
     pub fn new(cp_http: Arc<HttpClient>, dp_http: Arc<HttpClient>) -> Self {
-        Self { cp_http, dp_http }
+        Self {
+            cp_http: Some(cp_http),
+            dp_http,
+        }
+    }
+
+    /// Annotations over a Data Plane client alone. Every call that names
+    /// members by id works; an email (a reviewer snapshot or a list filter)
+    /// needs the Control Plane member list and is refused with
+    /// [`IntrospectionAPIError::InvalidConfig`] before any request.
+    pub fn data_plane(dp_http: Arc<HttpClient>) -> Self {
+        Self {
+            cp_http: None,
+            dp_http,
+        }
     }
 
     /// `GET /v1/annotations` — the folded annotation-state paginator. An
@@ -170,11 +199,12 @@ impl Annotations {
         target: AnnotationTarget,
         mutation: AnnotationMutation,
         options: AnnotationEventOptions,
-    ) -> ApiResult<()> {
+    ) -> ApiResult<AnnotationCreated> {
+        let event_id = options.event_id.unwrap_or_else(Uuid::now_v7);
         let mut body = serde_json::json!({
             "trace_id": target.trace_id,
             "span_id": target.span_id,
-            "event_id": options.event_id.unwrap_or_else(Uuid::now_v7),
+            "event_id": event_id,
         });
         let object = body.as_object_mut().expect("annotation body is an object");
         if let Some(comment) = options.comment {
@@ -204,10 +234,31 @@ impl Annotations {
                     serde_json::to_value(ids).unwrap(),
                 );
             }
+            AnnotationMutation::ReviewerIds(ids) => {
+                object.insert(
+                    "assignee_member_ids".into(),
+                    serde_json::to_value(ids).unwrap(),
+                );
+            }
         }
-        self.dp_http
-            .post_json_empty_idempotent("/v1/annotations", &body)
-            .await
+        let res = self
+            .dp_http
+            .post_json_idempotent_response("/v1/annotations", &body)
+            .await?;
+        if res.status() == reqwest::StatusCode::NO_CONTENT {
+            // A 204 has no body; the id rides in a header, and is the one sent.
+            let event_id = res
+                .headers()
+                .get("x-introspection-event-id")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .unwrap_or(event_id);
+            return Ok(AnnotationCreated {
+                event_id,
+                visible: true,
+            });
+        }
+        decode_json(res).await
     }
 
     async fn resolve_reviewer_ids(&self, emails: Vec<String>) -> ApiResult<Vec<Uuid>> {
@@ -231,6 +282,13 @@ impl Annotations {
                 "too_many_annotation_reviewers",
             ));
         }
+        let Some(cp_http) = self.cp_http.as_ref() else {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "Resolving a member email needs a Control Plane client; \
+                 pass member ids, or use Annotations::new"
+                    .to_string(),
+            ));
+        };
         let mut matches: HashMap<String, Vec<Uuid>> = requested
             .iter()
             .map(|email| (email.clone(), Vec::new()))
@@ -244,8 +302,7 @@ impl Annotations {
                 #[serde(skip_serializing_if = "Option::is_none")]
                 next: Option<&'a str>,
             }
-            let page: Paginated<Member> = self
-                .cp_http
+            let page: Paginated<Member> = cp_http
                 .get_json(
                     "/v1/members",
                     &Query {

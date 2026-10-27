@@ -33,18 +33,31 @@ pub(crate) fn decode_agui_event(data: &str) -> ApiResult<Event> {
         .map_err(|e| IntrospectionAPIError::Decode(format!("failed to decode AG-UI event: {e}")))
 }
 
+/// The default bound on one SSE frame, in bytes: [`parse_sse_response`] and
+/// [`crate::api::StreamOptions::max_frame_bytes`] use it.
+pub const DEFAULT_MAX_SSE_FRAME_BYTES: usize = 8 * 1024 * 1024;
+
 /// Wrap a byte stream from a `text/event-stream` response in an async
 /// [`Stream`] of parsed events.
 ///
 /// The returned stream yields `Result<SseEvent, IntrospectionAPIError>`
 /// items. Network drops surface as `Err(IntrospectionAPIError::Transport)`;
-/// the stream then ends.
+/// the stream then ends. A frame longer than [`DEFAULT_MAX_SSE_FRAME_BYTES`]
+/// ends it with [`IntrospectionAPIError::SseFrameTooLarge`].
 pub fn parse_sse_response(response: reqwest::Response) -> impl Stream<Item = ApiResult<SseEvent>> {
-    let byte_stream = response.bytes_stream();
-    parse_sse_bytes(byte_stream)
+    parse_sse_response_with_limit(response, DEFAULT_MAX_SSE_FRAME_BYTES)
 }
 
-fn parse_sse_bytes<S>(stream: S) -> impl Stream<Item = ApiResult<SseEvent>>
+/// [`parse_sse_response`] with its own bound on one frame, in bytes.
+pub fn parse_sse_response_with_limit(
+    response: reqwest::Response,
+    max_frame_bytes: usize,
+) -> impl Stream<Item = ApiResult<SseEvent>> {
+    let byte_stream = response.bytes_stream();
+    parse_sse_bytes(byte_stream, max_frame_bytes)
+}
+
+fn parse_sse_bytes<S>(stream: S, max_frame_bytes: usize) -> impl Stream<Item = ApiResult<SseEvent>>
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>>,
 {
@@ -56,6 +69,9 @@ where
         let mut pending: Vec<u8> = Vec::new();
         let mut cur = SseEvent::empty();
         let mut has_content = false;
+        // The bytes of the lines read into `cur` so far; with the unterminated
+        // rest in `buf`, what the frame holds in memory.
+        let mut frame_bytes: usize = 0;
         let mut stream = Box::pin(stream);
 
         while let Some(chunk) = stream.next().await {
@@ -106,7 +122,13 @@ where
                         cur = SseEvent::empty();
                         has_content = false;
                     }
+                    frame_bytes = 0;
                     continue;
+                }
+                frame_bytes = frame_bytes.saturating_add(nl + 1);
+                if frame_bytes > max_frame_bytes {
+                    yield Err(IntrospectionAPIError::SseFrameTooLarge { limit: max_frame_bytes });
+                    return;
                 }
                 if line.starts_with(':') {
                     continue;
@@ -143,6 +165,10 @@ where
                     _ => {}
                 }
             }
+            if frame_bytes.saturating_add(buf.len()).saturating_add(pending.len()) > max_frame_bytes {
+                yield Err(IntrospectionAPIError::SseFrameTooLarge { limit: max_frame_bytes });
+                return;
+            }
         }
         if has_content {
             yield Ok(cur);
@@ -161,7 +187,7 @@ mod tests {
         // Build a single-chunk stream of bytes that never errors.
         let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![Ok(Bytes::from(input.to_string()))];
         let s = stream::iter(chunks);
-        let parsed = parse_sse_bytes(s);
+        let parsed = parse_sse_bytes(s, DEFAULT_MAX_SSE_FRAME_BYTES);
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
@@ -181,7 +207,7 @@ mod tests {
         let chunks: Vec<Result<Bytes, reqwest::Error>> =
             chunks.into_iter().map(|c| Ok(Bytes::from(c))).collect();
         let s = stream::iter(chunks);
-        let parsed = parse_sse_bytes(s);
+        let parsed = parse_sse_bytes(s, DEFAULT_MAX_SSE_FRAME_BYTES);
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
@@ -193,6 +219,59 @@ mod tests {
                 }
                 out
             })
+    }
+
+    fn parse_limited(chunks: Vec<Vec<u8>>, limit: usize) -> Vec<ApiResult<SseEvent>> {
+        let chunks: Vec<Result<Bytes, reqwest::Error>> =
+            chunks.into_iter().map(|c| Ok(Bytes::from(c))).collect();
+        let parsed = parse_sse_bytes(stream::iter(chunks), limit);
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                tokio::pin!(parsed);
+                let mut out = Vec::new();
+                while let Some(ev) = parsed.next().await {
+                    out.push(ev);
+                }
+                out
+            })
+    }
+
+    #[test]
+    fn an_unterminated_frame_past_the_limit_ends_the_stream() {
+        // A `data:` line that never ends, arriving chunk after chunk.
+        let mut chunks = vec![b"data: ".to_vec()];
+        chunks.extend(std::iter::repeat_n(vec![b'x'; 64], 4));
+        let out = parse_limited(chunks, 100);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(
+            out[0],
+            Err(IntrospectionAPIError::SseFrameTooLarge { limit: 100 })
+        ));
+    }
+
+    #[test]
+    fn many_terminated_lines_count_toward_one_frame() {
+        let line = format!("data: {}\n", "x".repeat(30));
+        let out = parse_limited(vec![line.repeat(4).into_bytes()], 100);
+        assert!(matches!(
+            out.last(),
+            Some(Err(IntrospectionAPIError::SseFrameTooLarge { limit: 100 }))
+        ));
+    }
+
+    #[test]
+    fn frames_under_the_limit_each_start_from_zero() {
+        let frame = format!("data: {}\n\n", "x".repeat(60));
+        let out = parse_limited(vec![frame.repeat(3).into_bytes()], 100);
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(Result::is_ok));
+    }
+
+    #[test]
+    fn the_default_limit_is_eight_mebibytes() {
+        assert_eq!(DEFAULT_MAX_SSE_FRAME_BYTES, 8 * 1024 * 1024);
     }
 
     #[test]

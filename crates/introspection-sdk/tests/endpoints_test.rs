@@ -129,3 +129,31 @@ async fn get_reads_one_binding_and_keeps_an_unknown_kind() {
     assert_eq!(endpoint.kind, EndpointKind::Other("websocket".into()));
     assert_eq!(endpoint.kind.as_str(), "websocket");
 }
+
+#[test]
+fn a_null_metadata_reads_as_empty() {
+    let mut row = endpoint_json();
+    row["metadata"] = serde_json::Value::Null;
+    let endpoint: introspection_sdk::Endpoint = serde_json::from_value(row).unwrap();
+    assert_eq!(endpoint.metadata, Default::default());
+    // Written back, it is an object, not a null.
+    assert!(serde_json::to_value(&endpoint).unwrap()["metadata"].is_object());
+
+    let mut row = endpoint_json();
+    row.as_object_mut().unwrap().remove("metadata");
+    let endpoint: introspection_sdk::Endpoint = serde_json::from_value(row).unwrap();
+    assert_eq!(endpoint.metadata, Default::default());
+}
+
+#[test]
+fn a_null_page_of_records_reads_as_empty() {
+    let page: introspection_sdk::Paginated<introspection_sdk::Endpoint> =
+        serde_json::from_value(json!({"records": null, "count": 0, "next": null})).unwrap();
+    assert!(page.records.is_empty());
+    let page: introspection_sdk::Paginated<introspection_sdk::Endpoint> =
+        serde_json::from_value(json!({"count": 0})).unwrap();
+    assert!(page.records.is_empty());
+    let page: introspection_sdk::Paginated<introspection_sdk::Endpoint> =
+        serde_json::from_value(json!({"records": [endpoint_json()], "count": 1})).unwrap();
+    assert_eq!(page.records.len(), 1);
+}

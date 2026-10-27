@@ -122,8 +122,26 @@ fn yank_and_unyank() {
     );
     assert_eq!(
         wire(&RuntimeUpdateParams::unyank()),
-        json!({"yanked": false})
+        json!({"yanked": false, "yanked_reason": null})
     );
+}
+
+#[test]
+fn yanked_reason_is_set_cleared_or_left() {
+    let clear = RuntimeUpdateParams {
+        yanked: Some(false),
+        yanked_reason: Some(None),
+        ..Default::default()
+    };
+    let left = RuntimeUpdateParams {
+        yanked: Some(false),
+        ..Default::default()
+    };
+    assert_eq!(
+        wire(&clear),
+        json!({"yanked": false, "yanked_reason": null})
+    );
+    assert_eq!(wire(&left), json!({"yanked": false}));
 }
 
 #[test]
@@ -150,7 +168,7 @@ fn every_field_has_its_wire_name() {
         config_json: Some(HashMap::from([("timeout".into(), json!(30))])),
         environment: Some(Lane::Staging),
         yanked: Some(true),
-        yanked_reason: Some("bad build".into()),
+        yanked_reason: Some(Some("bad build".into())),
         environment_ref: BTreeMap::from([(Lane::Staging, LaneRef::Ref("main".into()))]),
     };
     assert_eq!(

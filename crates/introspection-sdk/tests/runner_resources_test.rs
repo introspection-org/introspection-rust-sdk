@@ -1849,6 +1849,63 @@ async fn conversations_list_arrow_decodes_stream_and_headers() {
 
 #[cfg(feature = "arrow")]
 #[tokio::test]
+async fn a_zero_row_arrow_page_keeps_the_stream_schema() {
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::ipc::writer::StreamWriter;
+    use std::sync::Arc as StdArc;
+
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    let schema = StdArc::new(Schema::new(vec![Field::new(
+        "conversation_id",
+        DataType::Utf8,
+        false,
+    )]));
+    // What the DP sends for an empty page: the schema and no batch.
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut writer = StreamWriter::try_new(&mut buf, &schema).unwrap();
+        writer.finish().unwrap();
+    }
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/vnd.apache.arrow.stream")
+                .set_body_bytes(buf),
+        )
+        .mount(&server)
+        .await;
+
+    let page = conversations
+        .list_arrow(&ConversationListParams::default())
+        .await
+        .unwrap();
+    assert_eq!(page.num_rows(), 0);
+    assert!(page.batches.is_empty());
+    assert_eq!(page.schema.as_deref(), Some(&*schema));
+}
+
+#[cfg(feature = "arrow")]
+#[tokio::test]
+async fn an_empty_arrow_body_has_no_schema() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(Vec::<u8>::new()))
+        .mount(&server)
+        .await;
+
+    let page = conversations
+        .list_arrow(&ConversationListParams::default())
+        .await
+        .unwrap();
+    assert!(page.schema.is_none());
+}
+
+#[cfg(feature = "arrow")]
+#[tokio::test]
 async fn events_list_arrow_round_trips_struct_payload_column() {
     use arrow::array::{Array, Float64Array, StringArray, StructArray};
     use arrow::datatypes::{DataType, Field, Fields, Schema};

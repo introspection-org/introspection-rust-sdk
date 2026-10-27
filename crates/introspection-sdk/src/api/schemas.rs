@@ -255,10 +255,23 @@ impl<'de> Deserialize<'de> for FileType {
 
 // ----- pagination ------------------------------------------------------------
 
+/// Read an explicit `null` as the field's default, as a missing key is with
+/// `#[serde(default)]`.
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 /// Cursor pagination envelope shared by every DP list endpoint.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 pub struct Paginated<T> {
+    /// A `null` or missing list reads as empty.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub records: Vec<T>,
     pub count: u64,
     #[serde(default)]
@@ -1849,9 +1862,11 @@ pub struct RuntimeUpdateParams {
     /// this one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub yanked: Option<bool>,
-    /// Recorded only with `yanked: Some(true)`; ignored otherwise.
+    /// The note recorded with `yanked: Some(true)`. `Some(None)` sends
+    /// `null`, as [`Self::unyank`] does, so a restore says outright that no
+    /// reason stays recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub yanked_reason: Option<String>,
+    pub yanked_reason: Option<Option<String>>,
     /// Lane to [`LaneRef`], merged per key onto
     /// the group's map. A lane missing here is left as it is. Empty, the field
     /// is not sent.
@@ -1904,15 +1919,17 @@ impl RuntimeUpdateParams {
     pub fn yank(reason: Option<String>) -> Self {
         Self {
             yanked: Some(true),
-            yanked_reason: reason,
+            yanked_reason: reason.map(Some),
             ..Default::default()
         }
     }
 
-    /// `{"yanked": false}`: restore a withdrawn version. See [`Self::yanked`].
+    /// `{"yanked": false, "yanked_reason": null}`: restore a withdrawn
+    /// version. See [`Self::yanked`].
     pub fn unyank() -> Self {
         Self {
             yanked: Some(false),
+            yanked_reason: Some(None),
             ..Default::default()
         }
     }
@@ -3477,7 +3494,8 @@ pub struct Endpoint {
     #[serde(default)]
     pub base_url: Option<String>,
     pub kind: EndpointKind,
-    #[serde(default)]
+    /// A `null` or missing object reads as empty.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub metadata: EndpointMetadata,
     #[serde(default)]
     pub assertion_claims: Option<BTreeMap<String, String>>,

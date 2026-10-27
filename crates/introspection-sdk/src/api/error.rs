@@ -77,6 +77,12 @@ pub enum IntrospectionAPIError {
     #[error("stream history unavailable from cursor {cursor}: {message}")]
     StreamHistoryUnavailable { cursor: u64, message: String },
 
+    /// One SSE frame grew past `limit` bytes before it ended: a stream that
+    /// never terminates its frame would otherwise be buffered without bound.
+    /// Terminal; reattaching would read the same frame again.
+    #[error("SSE frame exceeds {limit} bytes")]
+    SseFrameTooLarge { limit: usize },
+
     /// The run failed or was cancelled.
     #[error("run failed: {message}")]
     RunFailed {

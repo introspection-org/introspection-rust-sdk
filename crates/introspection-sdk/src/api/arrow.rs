@@ -11,6 +11,7 @@
 
 use std::io::Cursor;
 
+use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use reqwest::header::HeaderMap;
 use reqwest::Response;
@@ -28,6 +29,10 @@ pub const ARROW_STREAM_ACCEPT: &str = "application/vnd.apache.arrow.stream";
 pub struct ArrowPage {
     /// Decoded record batches (values only — the schema rides in the stream).
     pub batches: Vec<RecordBatch>,
+    /// The stream's schema. A page with no rows has no batch to read it from,
+    /// yet the DP still opens the stream with it, so a caller can write a
+    /// schema-only `.arrows` stream. `None` only when the body was empty.
+    pub schema: Option<SchemaRef>,
     /// Opaque cursor for the next page (`X-Next-Cursor`), if any.
     pub next: Option<String>,
     /// Row count in this page (`X-Result-Count`), if present.
@@ -55,24 +60,26 @@ pub(crate) async fn decode_arrow_response(res: Response) -> ApiResult<ArrowPage>
         .unwrap_or(false);
 
     let bytes = res.bytes().await?;
-    let batches = if bytes.is_empty() {
-        Vec::new()
+    let (schema, batches) = if bytes.is_empty() {
+        (None, Vec::new())
     } else {
         let reader =
             arrow::ipc::reader::StreamReader::try_new(Cursor::new(bytes), None).map_err(|e| {
                 IntrospectionAPIError::Decode(format!("failed to open Arrow stream: {e}"))
             })?;
+        let schema = reader.schema();
         let mut batches = Vec::new();
         for batch in reader {
             batches.push(batch.map_err(|e| {
                 IntrospectionAPIError::Decode(format!("failed to decode Arrow batch: {e}"))
             })?);
         }
-        batches
+        (Some(schema), batches)
     };
 
     Ok(ArrowPage {
         batches,
+        schema,
         next,
         count,
         total_count,

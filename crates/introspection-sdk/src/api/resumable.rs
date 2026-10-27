@@ -99,7 +99,9 @@ use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::schemas::{SseEvent, TaskRun, TaskStatus};
-use crate::api::sse::{decode_agui_event, parse_sse_response, AG_UI_FRAME};
+use crate::api::sse::{
+    decode_agui_event, parse_sse_response_with_limit, AG_UI_FRAME, DEFAULT_MAX_SSE_FRAME_BYTES,
+};
 
 /// Options controlling the resilient run stream ([`stream_resumable`]).
 #[derive(Debug, Clone)]
@@ -125,6 +127,10 @@ pub struct StreamOptions {
     /// holds the attach open until the run starts. `Some(false)` asks for a
     /// `429` with the readiness phase instead, which the stream waits out.
     pub wait_for_start: Option<bool>,
+    /// The bound on one SSE frame, in bytes. A frame that grows past it ends
+    /// the stream with [`IntrospectionAPIError::SseFrameTooLarge`] rather
+    /// than being buffered without bound.
+    pub max_frame_bytes: usize,
 }
 
 impl Default for StreamOptions {
@@ -136,6 +142,7 @@ impl Default for StreamOptions {
             emit_reconnect_events: false,
             since: 0,
             wait_for_start: None,
+            max_frame_bytes: DEFAULT_MAX_SSE_FRAME_BYTES,
         }
     }
 }
@@ -242,7 +249,7 @@ pub fn stream_resumable_frames(
                     }
                 }
                 Ok(res) if res.status().is_success() => {
-                    let sse = parse_sse_response(res);
+                    let sse = parse_sse_response_with_limit(res, opts.max_frame_bytes);
                     futures::pin_mut!(sse);
                     let mut progressed = false;
                     let mut severed: Option<IntrospectionAPIError> = None;
@@ -278,6 +285,11 @@ pub fn stream_resumable_frames(
                                         return;
                                     }
                                 }
+                            }
+                            Err(e @ IntrospectionAPIError::SseFrameTooLarge { .. }) => {
+                                // Reattaching would read the same frame again.
+                                yield Err(e);
+                                return;
                             }
                             Err(e) => {
                                 severed = Some(e);
