@@ -705,6 +705,19 @@ async fn exports(
     }
     let streamed: Value = serde_json::from_slice(&streamed).expect("the streamed export is JSON");
     assert!(streamed["data"].as_array().map_or(0, Vec::len) >= items);
+    // The representations the SDK does not model come back as the server's
+    // JSON.
+    for format in [
+        ConversationExportFormat::Replay,
+        ConversationExportFormat::Atif,
+    ] {
+        let body = sa
+            .conversations()
+            .export_json_value(conversation_id, format, &export)
+            .await
+            .unwrap_or_else(|e| panic!("the {format:?} export: {e}"));
+        assert!(body.is_object(), "the {format:?} export is a JSON object");
+    }
     let listed = sa
         .conversations()
         .list_arrow(by_group)
@@ -754,10 +767,8 @@ async fn item_pages(sa: &IntrospectionClient, conversation_id: &str) {
     );
 }
 
-pub async fn telemetry_reads(w: &mut Walk) {
-    let sa = w.sa();
-    let member = w.member();
-    let runtime = set(&w.runtime, "the runtime").id;
+/// One count through the typed query and the same count as a raw document.
+async fn metrics(sa: &IntrospectionClient, runtime: Uuid) {
     // A fixed window, so the request replays; the walk's conversation is
     // within it by construction.
     sa.metrics()
@@ -778,6 +789,27 @@ pub async fn telemetry_reads(w: &mut Walk) {
         })
         .await
         .expect("a metrics response");
+    // The same count as a document the SDK forwards unmodelled, the way the
+    // CLI's `metrics query` does; its own window keeps the two requests apart.
+    let raw = sa
+        .metrics()
+        .query_raw(&json!({
+            "view": "conversations",
+            "metrics": [{"aggregation": "count"}],
+            "filters": [{"field": "runtime_id", "operator": "eq", "value": runtime}],
+            "from_timestamp": "2026-01-01T00:00:00Z",
+            "to_timestamp": "2026-12-31T00:00:00Z",
+        }))
+        .await
+        .expect("a raw metrics response");
+    assert!(raw["data"].is_array(), "{raw}");
+}
+
+pub async fn telemetry_reads(w: &mut Walk) {
+    let sa = w.sa();
+    let member = w.member();
+    let runtime = set(&w.runtime, "the runtime").id;
+    metrics(&sa, runtime).await;
 
     // Access tags are an administrator's to write: the owner's token, not
     // the service account, which acts as the project's agent member.

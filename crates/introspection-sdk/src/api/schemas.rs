@@ -1453,6 +1453,23 @@ pub struct Runtime {
     pub image_build_metadata: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub image_build_error_message: Option<String>,
+    /// The recipe commit this version's image carries.
+    #[serde(default)]
+    pub image_revision: Option<String>,
+    /// Subject line of that commit.
+    #[serde(default)]
+    pub image_commit_subject: Option<String>,
+    /// The recipe's GitHub repository (`owner/name`).
+    #[serde(default)]
+    pub image_repository: Option<String>,
+    /// `managed` for a first-party runtime Introspection owns, otherwise
+    /// `custom`; projected from the runtime group.
+    #[serde(default)]
+    pub runtime_group_type: Option<String>,
+    /// The template the runtime group was created from, projected from the
+    /// runtime group.
+    #[serde(default)]
+    pub template_ref: Option<String>,
     /// The MCP servers the runtime needs connected; sent only for
     /// `include=mcp_requirements`.
     #[serde(default)]
@@ -6086,15 +6103,20 @@ impl Event {
 }
 
 /// Ergonomic params for `GET /v1/events`. [`Self::event_name`] is
-/// **required** (compile-enforced) — exactly one family per request, so the
-/// response is always homogeneous. Per-family filters (§4.3 of the telemetry
+/// **required** (compile-enforced); [`Self::extra_event_names`] merges more
+/// families into the same page when they share its row shape and visibility
+/// class, which the server checks (`422` otherwise). Per-family filters (§4.3 of the telemetry
 /// read design — e.g. observation `pattern_id` / `lens` /
 /// `include_superseded`, pattern `lens` / `status`) pass through
 /// [`Self::filters`] verbatim.
 #[derive(Debug, Clone)]
 pub struct EventListParams {
-    /// The one family to list — required; there is no unfiltered read.
+    /// The family to list — required; there is no unfiltered read.
     pub event_name: IntrospectionEventName,
+    /// More families read into the same page, sent as repeated `event_name`
+    /// after [`Self::event_name`]. They must share its row shape and
+    /// visibility class. Duplicates are harmless; the server drops them.
+    pub extra_event_names: Option<Vec<IntrospectionEventName>>,
     pub limit: Option<u32>,
     pub next: Option<String>,
     pub sort: Option<String>,
@@ -6121,6 +6143,24 @@ pub struct EventListParams {
     pub automation_id: Option<Uuid>,
     /// Automation triggers and skips: the task created or posted into.
     pub task_id: Option<Uuid>,
+    /// Judgements of one judge.
+    pub judge_id: Option<Uuid>,
+    /// Issue events of one issue.
+    pub issue_id: Option<Uuid>,
+    /// `introspection.track` events by exact stored event name (wire
+    /// `name`, repeatable, at most 20).
+    pub track_names: Option<Vec<String>>,
+    /// The latest event per human request (wire `request`). Requires a
+    /// descending order.
+    pub latest_requests: Option<bool>,
+    /// `introspection.track` only: the newest event per record in one
+    /// conversation (wire `latest`). Requires `conversation_id` and
+    /// [`Self::track_names`].
+    pub latest_records: Option<bool>,
+    /// One current human request; requires [`Self::latest_requests`].
+    pub request_id: Option<Uuid>,
+    /// The current request assignee; requires [`Self::latest_requests`].
+    pub assignee_id: Option<Uuid>,
     /// Escape hatch for a filter this SDK build predates: merged verbatim
     /// onto the query
     /// string. A filter outside the requested family's allow-map is a 422.
@@ -6134,6 +6174,7 @@ impl EventListParams {
     pub fn new(event_name: IntrospectionEventName) -> Self {
         Self {
             event_name,
+            extra_event_names: None,
             limit: None,
             next: None,
             sort: None,
@@ -6158,6 +6199,13 @@ impl EventListParams {
             owner_key: None,
             automation_id: None,
             task_id: None,
+            judge_id: None,
+            issue_id: None,
+            track_names: None,
+            latest_requests: None,
+            latest_records: None,
+            request_id: None,
+            assignee_id: None,
             filters: None,
         }
     }
@@ -6166,7 +6214,16 @@ impl EventListParams {
     /// [`ConversationListParams::to_wire`]).
     pub fn to_wire(&self) -> ApiResult<serde_json::Value> {
         let mut obj = serde_json::Map::new();
-        obj.insert("event_name".to_string(), self.event_name.as_str().into());
+        let extra = self.extra_event_names.as_deref().unwrap_or_default();
+        if extra.is_empty() {
+            obj.insert("event_name".to_string(), self.event_name.as_str().into());
+        } else {
+            let names = std::iter::once(&self.event_name).chain(extra);
+            obj.insert(
+                "event_name".to_string(),
+                serde_json::Value::Array(names.map(|name| name.as_str().into()).collect()),
+            );
+        }
         Window {
             limit: self.limit,
             next: self.next.as_deref(),
@@ -6201,6 +6258,13 @@ impl EventListParams {
         put_str(&mut obj, "owner_key", self.owner_key.as_ref());
         put_uuid(&mut obj, "automation_id", self.automation_id);
         put_uuid(&mut obj, "task_id", self.task_id);
+        put_uuid(&mut obj, "judge_id", self.judge_id);
+        put_uuid(&mut obj, "issue_id", self.issue_id);
+        put_list(&mut obj, "name", self.track_names.as_ref());
+        put_bool(&mut obj, "request", self.latest_requests);
+        put_bool(&mut obj, "latest", self.latest_records);
+        put_uuid(&mut obj, "request_id", self.request_id);
+        put_uuid(&mut obj, "assignee_id", self.assignee_id);
         if self
             .filters
             .as_ref()
@@ -7257,6 +7321,65 @@ mod tests {
         assert!(wire.get("event_name_prefix").is_none());
         assert!(wire.get("q").is_none());
         assert!(wire.get("q_regex").is_none());
+    }
+
+    #[test]
+    fn extra_event_names_follow_the_family_as_repeated_event_name() {
+        let wire = EventListParams {
+            extra_event_names: Some(vec![
+                IntrospectionEventName::AutomationSkipped,
+                IntrospectionEventName::Unknown("introspection.issue".into()),
+            ]),
+            ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(
+            wire["event_name"],
+            json!([
+                "introspection.automation.triggered",
+                "introspection.automation.skipped",
+                "introspection.issue"
+            ])
+        );
+    }
+
+    #[test]
+    fn no_extra_event_names_keeps_a_single_event_name() {
+        let wire = EventListParams {
+            extra_event_names: Some(Vec::new()),
+            ..EventListParams::new(IntrospectionEventName::Feedback)
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["event_name"], "introspection.feedback");
+    }
+
+    #[test]
+    fn request_and_track_filters_reach_the_wire_under_server_names() {
+        let id = Uuid::from_u128(7);
+        let wire = EventListParams {
+            judge_id: Some(id),
+            issue_id: Some(id),
+            track_names: Some(vec!["order.placed".into(), "order.paid".into()]),
+            latest_requests: Some(true),
+            latest_records: Some(false),
+            request_id: Some(id),
+            assignee_id: Some(id),
+            ..EventListParams::new(IntrospectionEventName::Unknown(
+                "introspection.track".into(),
+            ))
+        }
+        .to_wire()
+        .unwrap();
+        assert_eq!(wire["judge_id"], id.to_string());
+        assert_eq!(wire["issue_id"], id.to_string());
+        assert_eq!(wire["name"], json!(["order.placed", "order.paid"]));
+        assert_eq!(wire["request"], true);
+        assert_eq!(wire["latest"], false);
+        assert_eq!(wire["request_id"], id.to_string());
+        assert_eq!(wire["assignee_id"], id.to_string());
+        assert!(wire.get("track_names").is_none());
     }
 
     #[test]
