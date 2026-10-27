@@ -91,20 +91,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .to_string();
     let connector = client
         .connectors()
-        .create(&ConnectorCreateParams {
-            slug: Some(provider.clone()),
-            environment: Some(environment.clone()),
-            issuer: Some(mcp_url.clone()),
-            api_hosts: Some(vec![api_host]),
-            client_id: discovered.client_id.clone(),
-            client_secret: discovered.client_secret.clone(),
-            scopes: Some(discovered.scopes_supported.clone()),
-            ..ConnectorCreateParams::new(
-                name.clone(),
-                provider.clone(),
-                ConnectorAuthMode::OauthStored,
-            )
-        })
+        .create(
+            &ConnectorCreateParams {
+                slug: Some(provider.clone()),
+                environment: Some(environment.clone()),
+                issuer: Some(mcp_url.clone()),
+                api_hosts: Some(vec![api_host]),
+                client_id: discovered.client_id.clone(),
+                client_secret: discovered.client_secret.clone(),
+                scopes: Some(discovered.scopes_supported.clone()),
+                ..ConnectorCreateParams::new(
+                    name.clone(),
+                    provider.clone(),
+                    ConnectorAuthMode::OauthStored,
+                )
+            },
+            None,
+        )
         .await?;
     println!("connector -> {} ({})", connector.slug, connector.id);
 
@@ -125,6 +128,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 )),
                 ..Default::default()
             },
+            None,
         )
         .await?;
 

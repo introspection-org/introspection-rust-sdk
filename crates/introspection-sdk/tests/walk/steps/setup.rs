@@ -670,7 +670,11 @@ async fn recipe_reads(w: &Walk, recipe: &Recipe) {
     let sa = w.sa();
     let project = w.project_id();
     let raw = set(&w.sa, "the service account").cp_raw();
-    let read = sa.recipes().get(recipe.id).await.expect("read the recipe");
+    let read = sa
+        .recipes()
+        .get(recipe.id, Some(project.into()))
+        .await
+        .expect("read the recipe");
     assert_eq!(read.slug, recipe.slug);
     let mut seen = false;
     let mut listed = sa.recipes().list(&RecipeListParams {

@@ -2254,6 +2254,10 @@ pub struct ConnectorListParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Project slug or id. Needed only when the credential does not already
+    /// name one, as with a CLI session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<StringOrUuid>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -2436,17 +2440,20 @@ pub struct EntityUid {
 
 /// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
 /// where the caller supplies an already-minted provider token.
-#[derive(Debug, Clone, Serialize)]
+///
+/// Deserializable too, so a body can be read from a JSON document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionCreateParams {
     pub access_token: String,
     /// Defaults to `App` server-side.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_type: Option<ConnectionCreateSubjectType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scopes_granted: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<String>,
 }
 
@@ -2743,27 +2750,32 @@ pub struct ConnectorAuthorization {
 }
 
 /// Deterministic, non-PII envelope for a person-authorized action.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionMissionConstraints {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     /// Opaque or hashed resource identifier; never raw PII.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_start: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_end: Option<String>,
     /// SHA-256 of the approved artifact.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_binding: Option<String>,
 }
 
 /// `POST /v1/oauth/connections/token` options (the `connector_id` itself is
 /// the method's first argument).
-#[derive(Debug, Clone, Default, Serialize)]
+///
+/// Deserializable too, so the options can be read from a JSON document;
+/// `project` is not part of the body and is never read from one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectionTokenParams {
     /// The project the connector belongs to, sent as the `project` query
     /// parameter. Leave it unset for a credential scoped to one project; a
@@ -2772,13 +2784,13 @@ pub struct ConnectionTokenParams {
     pub project: Option<StringOrUuid>,
     /// The exact connection to use. Unset, the platform resolves it from the
     /// authenticated subject.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<ConnectionBrokerSubjectType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_permissions: Option<ConnectionMissionConstraints>,
 }
 
@@ -4218,8 +4230,10 @@ pub struct CredentialUpdateParams {
     pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
+    /// `Some(Some(_))` moves it to one lane and `Some(None)` sends `null`,
+    /// which makes it shared across every lane.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Lane>,
+    pub environment: Option<Option<Lane>>,
 }
 
 open_wire_enum! {
@@ -4297,8 +4311,10 @@ pub struct VariableUpdateParams {
     pub runtime_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
+    /// `Some(Some(_))` moves it to one lane and `Some(None)` sends `null`,
+    /// which makes it shared across every lane.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Lane>,
+    pub environment: Option<Option<Lane>>,
 }
 
 // integrations
