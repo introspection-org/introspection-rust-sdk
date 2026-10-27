@@ -39,17 +39,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let connector = client
                 .connectors()
-                .create(&ConnectorCreateParams {
-                    slug: Some("pipedream-connect".into()),
-                    client_id: Some(client_id),
-                    client_secret: Some(client_secret),
-                    metadata: Some(metadata),
-                    ..ConnectorCreateParams::new(
-                        "Pipedream Connect",
-                        "pipedream",
-                        ConnectorAuthMode::ClientCredentials,
-                    )
-                })
+                .create(
+                    &ConnectorCreateParams {
+                        slug: Some("pipedream-connect".into()),
+                        client_id: Some(client_id),
+                        client_secret: Some(client_secret),
+                        metadata: Some(metadata),
+                        ..ConnectorCreateParams::new(
+                            "Pipedream Connect",
+                            "pipedream",
+                            ConnectorAuthMode::ClientCredentials,
+                        )
+                    },
+                    None,
+                )
                 .await?;
             println!("connector -> {} ({})", connector.slug, connector.id);
             connector.id
@@ -83,6 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     == Ok("true"),
                 ..Default::default()
             },
+            None,
         )
         .await?;
     println!(

@@ -23,18 +23,6 @@ pub fn ignore_404(result: ApiResult<()>) {
     }
 }
 
-pub fn project_filter(
-    project: Uuid,
-) -> Option<std::collections::HashMap<String, serde_json::Value>> {
-    Some(
-        [(
-            "project".to_string(),
-            serde_json::json!(project.to_string()),
-        )]
-        .into(),
-    )
-}
-
 /// Tasks and files are listed as the project's agent member (the service
 /// account) once it exists: a member's own token lists only the tasks it
 /// owns, not the runner's.
@@ -144,7 +132,7 @@ async fn remove_tasks_and_files(dp: &IntrospectionClient) {
 
 async fn remove_control_plane(w: &Walk, owner: &IntrospectionClient, project: Uuid) {
     remove_runtimes(&w.owner, owner, project).await;
-    remove_connectors(&w.owner, owner, project).await;
+    remove_connectors(owner, project).await;
     remove_settings(owner, project).await;
     remove_repositories(&w.owner, owner, project).await;
     remove_applications(owner, project).await;
@@ -228,12 +216,11 @@ async fn remove_applications(owner: &IntrospectionClient, project: Uuid) {
     }
 }
 
-async fn remove_connectors(creds: &Creds, owner: &IntrospectionClient, project: Uuid) {
-    let raw = creds.cp_raw();
+async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
     let connectors = owner
         .connectors()
         .list(&ConnectorListParams {
-            filters: project_filter(project),
+            project: Some(project.into()),
             ..Default::default()
         })
         .collect_all(0)
@@ -258,9 +245,9 @@ async fn remove_connectors(creds: &Creds, owner: &IntrospectionClient, project: 
                 .await
                 .expect("revoke connection");
         }
-        // todo: `Connectors::delete` sends no project, which an owner's
-        // session needs outside the login's project.
-        raw.delete(&format!("/v1/connectors/{}?project={project}", c.id))
+        owner
+            .connectors()
+            .delete(c.id, Some(project.into()))
             .await
             .expect("delete connector");
     }

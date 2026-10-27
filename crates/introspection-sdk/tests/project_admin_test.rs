@@ -15,7 +15,7 @@ use introspection_sdk::{
     ImageStatus, IntegrationCreateParams, IntegrationStatus, IntegrationType, IntrospectionClient,
     JudgeUpdateParams, Lane, PaginationParams, RuntimeSettingListParams, Secret,
     TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, VariableCreateParams,
-    MAX_COMMAND_WAIT_SECONDS,
+    VariableUpdateParams, MAX_COMMAND_WAIT_SECONDS,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -593,4 +593,106 @@ async fn task_commands_send_an_argv_and_cap_the_wait() {
         .await
         .expect("list");
     assert!(listed.is_empty());
+}
+
+#[tokio::test]
+async fn setting_updates_send_a_null_environment_to_share_across_lanes() {
+    let server = MockServer::start().await;
+    let variable = json!({
+        "id": ID, "org_id": ORG, "project_id": PROJECT, "created_at": NOW,
+        "updated_at": NOW, "name": "LOG_LEVEL", "kind": "value", "value": "debug",
+        "created_by_member_id": MEMBER,
+    });
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/variables/{ID}")))
+        .and(body_json(json!({ "environment": null })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(variable.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/variables/{ID}")))
+        .and(body_json(json!({ "environment": "staging" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(variable))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/credentials/{ID}")))
+        .and(body_json(json!({ "environment": null })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(credential_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    for environment in [Some(None), Some(Some(Lane::Staging))] {
+        client
+            .variables()
+            .update(
+                id(),
+                &VariableUpdateParams {
+                    environment,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .expect("variables.update");
+    }
+    client
+        .credentials()
+        .update(
+            id(),
+            &CredentialUpdateParams {
+                environment: Some(None),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .expect("credentials.update");
+    // Unset, the field is left out: the lane stays as it is.
+    assert_eq!(
+        serde_json::to_value(VariableUpdateParams::default()).unwrap(),
+        json!({})
+    );
+}
+
+#[tokio::test]
+async fn recipes_get_sends_the_project_selector() {
+    let server = MockServer::start().await;
+    let recipe = json!({
+        "id": ID, "org_id": ORG, "project_id": PROJECT, "repository_id": ID,
+        "name": "support", "slug": "support", "git_ref": "main",
+        "git_commit_sha": "deadbeef", "created_by_member_id": MEMBER,
+        "created_at": NOW, "updated_at": NOW,
+    });
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/recipes/{ID}")))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(recipe.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/recipes/{ID}")))
+        .and(query_param_is_missing("project"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(recipe))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    let read = client
+        .recipes()
+        .get(id(), Some("web".into()))
+        .await
+        .expect("recipes.get with a project");
+    assert_eq!(read.slug, "support");
+    client
+        .recipes()
+        .get(id(), None)
+        .await
+        .expect("recipes.get without a project");
 }

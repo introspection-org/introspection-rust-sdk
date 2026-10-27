@@ -363,6 +363,52 @@ pub struct IntrospectionHistory {
     pub hash_hit: Option<bool>,
     #[serde(default)]
     pub new_messages: Option<IntrospectionNewMessages>,
+    /// A stored history existed but stopped matching before the last
+    /// assistant message: stale, edited, or the previous output replayed in
+    /// another form.
+    #[serde(default)]
+    pub diverged: Option<bool>,
+    #[serde(default)]
+    pub stored: Option<IntrospectionStoredHistory>,
+}
+
+/// `introspection.history.stored.*`: how the history the processor had
+/// stored compared with the call's. Stamped where the two disagree.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionStoredHistory {
+    /// Messages the stored hashes represented when read (0 when expired or
+    /// never stored).
+    #[serde(default)]
+    pub length: Option<i64>,
+    /// How far the stored hashes matched the incoming history.
+    #[serde(default, rename = "match")]
+    pub match_: Option<i64>,
+    /// The stored hashes reached past this call's history and output: a later
+    /// call was processed first.
+    #[serde(default)]
+    pub ahead: Option<bool>,
+}
+
+/// `introspection.ingest.*`: which processor instance handled the span and
+/// when, so spans handled by different pods, or out of order, can be told
+/// apart.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct IntrospectionIngest {
+    /// Processor pod name.
+    #[serde(default)]
+    pub host: Option<String>,
+    /// Processor pod IP.
+    #[serde(default)]
+    pub ip: Option<String>,
+    /// Node the pod runs on.
+    #[serde(default)]
+    pub node: Option<String>,
+    /// When the processor handled the span's batch, microseconds since the
+    /// epoch.
+    #[serde(default)]
+    pub time: Option<i64>,
 }
 
 /// `introspection.contains.*`: what a chat span's sealed input delta and
@@ -440,6 +486,8 @@ pub struct IntrospectionAttributes {
     /// Why the agent loop ended (`completed`, …).
     #[serde(default)]
     pub termination_reason: Option<String>,
+    #[serde(default)]
+    pub ingest: Option<IntrospectionIngest>,
 }
 
 // ----- the span --------------------------------------------------------------

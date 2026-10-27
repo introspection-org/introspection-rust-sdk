@@ -15,13 +15,14 @@
 //! update, absent from every response — so they appear on the param structs
 //! and never on [`Connector`]. Omitting one on update leaves it as it is.
 //!
-//! Project scope comes from the authenticated credential; connector calls do
-//! not take a separate project selector, except the token broker, whose
-//! [`ConnectionTokenParams::project`] serves a session or org-wide token.
+//! Project scope comes from the authenticated credential. A session or an
+//! org-wide token names the project instead: the connector methods take a
+//! trailing `project` selector, [`ConnectorListParams::project`] does the
+//! same for the list, and the token broker reads
+//! [`ConnectionTokenParams::project`].
 
 use std::sync::Arc;
 
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::api::error::{ApiResult, IntrospectionAPIError};
@@ -32,9 +33,9 @@ use crate::api::schemas::{
     ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthorization,
     ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorCustomAppSearchParams,
     ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams,
+    ConnectorUpdateParams, ProjectSelector, StringOrUuid,
 };
-use crate::resources::experiments::encode_project;
+use crate::resources::with_project;
 
 /// `client.connectors.connections` — the authorized subjects under one
 /// connector (`/v1/connectors/{connector_id}/connections`).
@@ -76,13 +77,11 @@ impl Connections {
 
     /// `GET /v1/connectors/{connector_id}/connections/{connection_id}`.
     pub async fn get(&self, connector_id: Uuid, connection_id: Uuid) -> ApiResult<Connection> {
-        #[derive(Serialize)]
-        struct Q {}
         let path = format!(
             "/v1/connectors/{}/connections/{}",
             connector_id, connection_id
         );
-        self.http.get_json(&path, &Q {}).await
+        self.http.get_json(&path, &ProjectSelector::default()).await
     }
 
     /// `DELETE /v1/connectors/{connector_id}/connections/{connection_id}`.
@@ -121,13 +120,7 @@ impl Connections {
             "connector_id".to_string(),
             serde_json::Value::String(connector_id.to_string()),
         );
-        let path = match &params.project {
-            Some(project) => format!(
-                "/v1/oauth/connections/token?project={}",
-                encode_project(project)
-            ),
-            None => "/v1/oauth/connections/token".to_string(),
-        };
+        let path = with_project("/v1/oauth/connections/token", params.project.as_ref());
         self.http.post_json(&path, &body).await
     }
 }
@@ -165,16 +158,26 @@ impl Connectors {
     /// registers an OAuth client on its own; pass the `client_id` /
     /// `client_secret` from [`Self::discover_oauth`] when you already ran
     /// discovery, so a second client is not registered.
-    pub async fn create(&self, params: &ConnectorCreateParams) -> ApiResult<Connector> {
-        self.http.post_json("/v1/connectors", params).await
+    pub async fn create(
+        &self,
+        params: &ConnectorCreateParams,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<Connector> {
+        self.http
+            .post_json(&with_project("/v1/connectors", project.as_ref()), params)
+            .await
     }
 
     /// `GET /v1/connectors/{id}`.
-    pub async fn get(&self, connector_id: Uuid) -> ApiResult<Connector> {
-        #[derive(Serialize)]
-        struct Q {}
+    pub async fn get(
+        &self,
+        connector_id: Uuid,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<Connector> {
         let path = format!("/v1/connectors/{}", connector_id);
-        self.http.get_json(&path, &Q {}).await
+        self.http
+            .get_json(&path, &ProjectSelector::new(project))
+            .await
     }
 
     /// `GET /v1/connectors/{id}/apps` — search the provider application
@@ -241,16 +244,17 @@ impl Connectors {
         &self,
         connector_id: Uuid,
         params: &ConnectorUpdateParams,
+        project: Option<StringOrUuid>,
     ) -> ApiResult<Connector> {
-        let path = format!("/v1/connectors/{}", connector_id);
+        let path = with_project(&format!("/v1/connectors/{connector_id}"), project.as_ref());
         self.http.patch_json(&path, params).await
     }
 
     /// `DELETE /v1/connectors/{id}` — soft delete.
     ///
     /// The server revokes the connector's connections as it goes.
-    pub async fn delete(&self, connector_id: Uuid) -> ApiResult<()> {
-        let path = format!("/v1/connectors/{}", connector_id);
+    pub async fn delete(&self, connector_id: Uuid, project: Option<StringOrUuid>) -> ApiResult<()> {
+        let path = with_project(&format!("/v1/connectors/{connector_id}"), project.as_ref());
         self.http.delete_empty(&path).await
     }
 
@@ -282,6 +286,7 @@ impl Connectors {
         &self,
         connector_id: Uuid,
         params: &ConnectorAuthorizeParams,
+        project: Option<StringOrUuid>,
     ) -> ApiResult<ConnectorAuthorization> {
         // The route takes `connector_id` in the body; the SDK takes it as an
         // argument, so merge it into the serialized params.
@@ -299,8 +304,7 @@ impl Connectors {
             "connector_id".to_string(),
             serde_json::Value::String(connector_id.to_string()),
         );
-        self.http
-            .post_json("/v1/oauth/connections/authorize", &body)
-            .await
+        let path = with_project("/v1/oauth/connections/authorize", project.as_ref());
+        self.http.post_json(&path, &body).await
     }
 }

@@ -38,6 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 expires_in: Some(3600),
                 ..Default::default()
             },
+            None,
         )
         .await?
         .authorize_url;
