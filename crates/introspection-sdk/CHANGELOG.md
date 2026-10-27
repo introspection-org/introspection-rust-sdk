@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.34.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.33.1...v0.34.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* Annotations::create returns AnnotationCreated instead of (), AnnotationMutation has a new variant, ArrowPage has a new field, and RuntimeUpdateParams.yanked_reason is Option<Option<String>>. StreamOptions gains `max_frame_bytes` (one SSE frame is capped at 8 MiB by default) and IntrospectionAPIError gains `SseFrameTooLarge`, so a struct literal that names every StreamOptions field, or an exhaustive match on the error, needs the new member.
+* `ConversationExportFormat` has two new variants and is now `#[non_exhaustive]`, so an exhaustive `match` on it needs a wildcard arm. `EventListParams` has new public fields, so a struct literal without `..EventListParams::new(family)` no longer compiles. `Runtime` gains the public fields `image_revision`, `image_commit_subject`, `image_repository`, `runtime_group_type` and `template_ref`, so a struct literal that names every field needs them.
+* FileCreateText, FileUpload, AutomationMetadata, AnnotationEventOptions and ImageListParams gain public fields, so a struct literal that names every field needs the new one (or `..Default::default()`).
+* Connectors::get/create/update/delete/authorize and Recipes::get take a new trailing `project` argument (pass `None` for the old behaviour). ConnectorListParams has a new public `project` field. VariableUpdateParams::environment and CredentialUpdateParams::environment are `Option<Option<Lane>>`; wrap an existing value in `Some(...)`. The span attribute types gain public fields for `introspection.ingest` and `introspection.history.{diverged,stored}`, so a struct literal that names every field needs the new ones.
+* RunRequest sends environment, recipe_id and bindings_required; RuntimeHandle::with_project; Runner::session_token ([#170](https://github.com/introspection-org/introspection-rust-sdk/issues/170))
+* TaskFileRef.id is a Uuid; a 410 on a run stream ends it with StreamHistoryUnavailable instead of StreamIncomplete, and a 429 that outlives the recovery window with RunNotReady instead of Timeout. New public fields on TaskRunCreate, TaskListParams and StreamOptions, and new IntrospectionAPIError variants.
+* response types leave out `None` fields when they serialize, and their map-valued fields are `BTreeMap` instead of `HashMap`. `Experiment::created_by_member_id`, `Arm::id` and `Arm::initial_weight` are required. `Runtime::is_active` and `Runtime::allow_hot_swap` are removed: the server sends neither, so they were always `false`. `IntrospectionAttributes::run` and `task` are now `IntrospectionRun` and `IntrospectionTask` instead of `IdRef`. Open maps on the GenAI attribute and message types are named `other`.
+
+### Features
+
+* authoring writes for runtimes, recipes, endpoints and repositories behind an `authoring` feature ([#176](https://github.com/introspection-org/introspection-rust-sdk/issues/176)) ([bbc9e2b](https://github.com/introspection-org/introspection-rust-sdk/commit/bbc9e2b7910c4402f4b042a981615b6422276c28))
+* file TTLs, JSON text file versions, free-form automation metadata, annotation comments with a snapshot, image list filters ([#174](https://github.com/introspection-org/introspection-rust-sdk/issues/174)) ([7fe2f03](https://github.com/introspection-org/introspection-rust-sdk/commit/7fe2f0396ff9a9acd1c65778cbf9404fd8e6d89d))
+* project selectors on connectors and Recipes::get, null environment on setting updates, the ingest stamp and stored-history match on spans ([#171](https://github.com/introspection-org/introspection-rust-sdk/issues/171)) ([2197ebe](https://github.com/introspection-org/introspection-rust-sdk/commit/2197ebe5e399e4ca8fad1d873f9a07f43f41375a))
+* raw metrics query, replay and ATIF exports, merged event families, and the runtime's image and group fields ([#175](https://github.com/introspection-org/introspection-rust-sdk/issues/175)) ([a0875db](https://github.com/introspection-org/introspection-rust-sdk/commit/a0875db8ef18a11ae28183799836c128ab1cbdac))
+* response types serialize back to the server JSON, with a strict-schema feature ([#163](https://github.com/introspection-org/introspection-rust-sdk/issues/163)) ([554c901](https://github.com/introspection-org/introspection-rust-sdk/commit/554c9014fc7635ad33e7f5280b91826946362bdf))
+* RunRequest sends environment, recipe_id and bindings_required; RuntimeHandle::with_project; Runner::session_token ([#170](https://github.com/introspection-org/introspection-rust-sdk/issues/170)) ([c0b6e36](https://github.com/introspection-org/introspection-rust-sdk/commit/c0b6e36bde84e758b089856afcde30953d1df0c3))
+* SDK gaps from the CLI 0.34 conversion: Arrow schema, annotation reviewer ids and created event, null yank reason, SSE frame cap, null-tolerant reads ([#177](https://github.com/introspection-org/introspection-rust-sdk/issues/177)) ([bf833b2](https://github.com/introspection-org/introspection-rust-sdk/commit/bf833b23875bf8f0ae4b96d52f88f6ea050ff44b))
+* task run delivery ids, runtime list filter, stream cursors and raw frames ([#172](https://github.com/introspection-org/introspection-rust-sdk/issues/172)) ([4ba844b](https://github.com/introspection-org/introspection-rust-sdk/commit/4ba844bfb136438d99de8354143b5b5dc05bd1c7))
+
+
+### Bug Fixes
+
+* decode a GenAI message that has no parts ([#161](https://github.com/introspection-org/introspection-rust-sdk/issues/161)) ([bec67f5](https://github.com/introspection-org/introspection-rust-sdk/commit/bec67f5a654268e9312d1dd2ecd831e4a3d0533e))
+* serialize a message without parts back without parts ([#173](https://github.com/introspection-org/introspection-rust-sdk/issues/173)) ([acfcaa5](https://github.com/introspection-org/introspection-rust-sdk/commit/acfcaa5afb6db1f1f6c2b5d3d1efec4863e1e118))
+
 ## [0.33.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.33.0...v0.33.1) (2026-10-24)
 
 
