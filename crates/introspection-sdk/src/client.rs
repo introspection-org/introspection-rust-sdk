@@ -28,7 +28,8 @@ use crate::dev_target;
 use crate::resources::{
     Aauth, Annotations, ApiKeys, Applications, Automations, Connectors, Credentials, Endpoints,
     ExperimentHandle, Experiments, Images, Integrations, Judges, MemberConnections, Members, Oidc,
-    Projects, Recipes, Repositories, RuntimeHandle, Runtimes, Tags, Variables,
+    Organizations, Projects, Recipes, Repositories, RuntimeHandle, Runtimes, Tags, Tokens,
+    Variables,
 };
 use crate::types::{self, ClientConfig};
 
@@ -84,6 +85,8 @@ pub struct IntrospectionClient {
     integrations: Integrations,
     judges: Judges,
     projects: Projects,
+    organizations: Organizations,
+    tokens: Tokens,
     oidc: Oidc,
     dp_http: Arc<HttpClient>,
 }
@@ -166,6 +169,8 @@ impl IntrospectionClient {
             integrations: Integrations::new(cp_http.clone()),
             judges: Judges::new(cp_http.clone()),
             projects: Projects::new(cp_http.clone()),
+            organizations: Organizations::new(cp_http.clone()),
+            tokens: Tokens::new(cp_http.clone()),
             oidc: Oidc::new(cp_http.clone()),
             annotations: Annotations::new(cp_http, dp_http.clone()),
             tags: Tags::new(dp_http.clone()),
@@ -254,9 +259,19 @@ impl IntrospectionClient {
         &self.judges
     }
 
-    /// `GET /v1/projects` — the org's projects, read-only.
+    /// `/v1/projects` — the org's projects.
     pub fn projects(&self) -> &Projects {
         &self.projects
+    }
+
+    /// `GET /v1/organizations/me` — the credential's organization.
+    pub fn organizations(&self) -> &Organizations {
+        &self.organizations
+    }
+
+    /// `POST /v1/tokens` — mint a Data Plane token for a project.
+    pub fn tokens(&self) -> &Tokens {
+        &self.tokens
     }
 
     /// `GET /v1/oidc/me` — who this client's credential is.

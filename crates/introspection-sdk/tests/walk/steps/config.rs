@@ -6,18 +6,19 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
-    ConnectionListParams, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
-    ConnectorCreateParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams, CredentialCreateParams, CredentialUpdateParams, EndpointCreateParams,
-    EndpointKind, EndpointListParams, EndpointUpdateParams, IntrospectionClient, Lane, Runtime,
+    ConnectionListParams, ConnectionTokenParams, ConnectionTokenResult, ConnectorAuthMode,
+    ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorListParams, ConnectorOAuthDiscoveryParams, ConnectorUpdateParams,
+    CredentialCreateParams, CredentialUpdateParams, EndpointCreateParams, EndpointKind,
+    EndpointListParams, EndpointUpdateParams, IntrospectionClient, Lane, Runtime,
     RuntimeCreateParams, RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret,
     VariableCreateParams, VariableKind, VariableUpdateParams,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::proxy::Exchange;
-use crate::support::{assert_stable, settled_raw, walk};
+use crate::support::{assert_stable, settled, walk};
 use crate::{set, Walk};
 
 pub async fn credential_and_variable(w: &mut Walk) {
@@ -286,13 +287,10 @@ async fn runtimes(
         .await
 }
 
-/// The bake's end, from a raw record. todo: `Runtime` has no
-/// `image_build_status` (nor `image_build_metadata`, `recipe_kind`,
-/// `recipe_ref` or `mcp_requirements`), so the SDK cannot say when a
-/// runtime is ready.
-fn baked(runtime: &Value) -> bool {
+/// The bake's end.
+fn baked(runtime: &Runtime) -> bool {
     matches!(
-        runtime["image_build_status"].as_str(),
+        runtime.image_build_status.as_deref(),
         Some("ready" | "failed")
     )
 }
@@ -305,21 +303,16 @@ pub async fn runtime(w: &mut Walk) {
     let bake = Duration::from_secs(30 * 60);
     // The push versioned the group at the recipe's commit; that version is
     // the runtime the walk runs on, and the API creates the next one.
-    let quiet = creds.cp_raw_quiet();
-    let list_path = format!(
-        "/v1/runtimes?project={project}&runtime={}",
-        walk::RUNTIME_SLUG
-    );
-    let versioned = settled_raw(
+    let quiet = creds.quiet();
+    let versioned = settled(
         w.mode,
         "push-versioned runtime bake",
         bake,
         || runtimes(&sa, project),
-        || quiet.get::<Value>(&list_path),
-        |page: &Value| {
-            page["records"]
-                .as_array()
-                .and_then(|rows| rows.iter().find(|r| r["recipe_id"] == json!(recipe)))
+        || runtimes(&quiet, project),
+        |rows: &Vec<Runtime>| {
+            rows.iter()
+                .find(|r| r.recipe_id == Some(recipe))
                 .is_some_and(baked)
         },
     )
@@ -385,13 +378,12 @@ pub async fn runtime(w: &mut Walk) {
         .await
         .expect("create the next runtime version");
     assert_eq!(created.runtime_group_id, runtime.runtime_group_id);
-    let one_path = format!("/v1/runtimes/{}", created.id);
-    let runtime_v2 = settled_raw(
+    let runtime_v2 = settled(
         w.mode,
         "runtime bake",
         bake,
         || sa.runtimes().get(created.id, None),
-        || quiet.get::<Value>(&one_path),
+        || quiet.runtimes().get(created.id, None),
         baked,
     )
     .await;
@@ -507,18 +499,15 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
     assert!(seen);
 
     endpoint(&sa, project).await;
-    // todo: `ConnectionTokenParams` has no `runtime`, so the runtime-scoped
-    // token read the JS SDK sends cannot be expressed; it goes by hand.
-    let token: Value = set(&w.sa, "the service account")
-        .cp_raw()
-        .post(
-            "/v1/oauth/connections/token",
-            &json!({ "connector_id": connector, "runtime": group }),
-        )
+    let token = sa
+        .connectors()
+        .connections
+        .get_token(connector, &ConnectionTokenParams::default())
         .await
         .expect("read the connection's token");
-    let token: introspection_sdk::ConnectionToken =
-        serde_json::from_value(token).expect("a connection token");
+    let ConnectionTokenResult::Token(token) = token else {
+        panic!("an app connection's token, not a pending authorization");
+    };
     assert_stable!(token, @r#"
     {
       "expires_at": "[timestamp]",
@@ -527,15 +516,15 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
       "token_type": "bearer"
     }
     "#);
-    // todo: no `include=mcp_requirements` on `Runtimes::get`, and no
-    // `mcp_requirements` on `Runtime`.
     let runtime = set(&w.runtime, "the runtime").id;
-    let requirements: Value = set(&w.sa, "the service account")
-        .cp_raw()
-        .get(&format!("/v1/runtimes/{runtime}?include=mcp_requirements"))
+    let requirements = sa
+        .runtimes()
+        .get_with_mcp_requirements(runtime, None)
         .await
-        .expect("read the runtime's MCP requirements");
-    assert_stable!(requirements["mcp_requirements"], @"[]");
+        .expect("read the runtime's MCP requirements")
+        .mcp_requirements
+        .expect("the requirements asked for");
+    assert_stable!(requirements, @"[]");
 }
 
 async fn endpoint(sa: &IntrospectionClient, project: Uuid) {

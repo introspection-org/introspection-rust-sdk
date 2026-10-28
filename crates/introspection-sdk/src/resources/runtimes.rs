@@ -47,6 +47,28 @@ impl Runtimes {
         self.http.get_json(&path, &Q { project }).await
     }
 
+    /// [`Self::get`] with the runtime's `mcp_requirements`
+    /// (`include=mcp_requirements`): every MCP server its recipe declares,
+    /// resolved for each environment it serves.
+    pub async fn get_with_mcp_requirements(
+        &self,
+        runtime_id: Uuid,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<Runtime> {
+        #[derive(Serialize)]
+        struct Q {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            project: Option<StringOrUuid>,
+            include: &'static str,
+        }
+        let path = format!("/v1/runtimes/{}", runtime_id);
+        let query = Q {
+            project,
+            include: "mcp_requirements",
+        };
+        self.http.get_json(&path, &query).await
+    }
+
     /// `PATCH /v1/runtimes/{id}` — steer the group's lanes, yank or restore
     /// this version, or edit its settings. Needs `runtimes:write`.
     ///

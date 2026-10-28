@@ -4,8 +4,8 @@
 use introspection_sdk::{
     ApiKeyCapability, ApiKeyCreateParams, ApiKeyListParams, ApiKeyUpdateParams,
     BusinessMemberCreate, Lane, MemberCreateParams, MemberListParams, MemberUpdateParams,
+    Organization,
 };
-use serde_json::Value;
 
 use crate::cleanup::remove_walk_resources;
 use crate::steps::expect_not_found;
@@ -13,7 +13,7 @@ use crate::support::{assert_stable, walk};
 use crate::{set, Walk};
 
 /// The owner's reads: members, an invite, the organisation and the session.
-async fn members(w: &Walk) -> Value {
+async fn members(w: &Walk) -> Organization {
     let owner = w.owner();
     let members = owner
         .members()
@@ -23,17 +23,12 @@ async fn members(w: &Walk) -> Value {
         .expect("list members");
     let first = members.first().expect("a member");
     owner.members().get(first.id).await.expect("read a member");
-    // todo: no SDK method reads the organisation.
-    let org: Value = w
-        .owner
-        .cp_raw()
-        .get("/v1/organizations/me")
+    let org = owner
+        .organizations()
+        .me()
         .await
         .expect("read the organisation");
-    let slug = org["slug"]
-        .as_str()
-        .expect("the organisation's slug")
-        .to_string();
+    let slug = org.slug.clone().expect("the organisation's slug");
     // An invite outlives the project, so a repeat run finds the one the last
     // run sent; and the address names this organisation, or a second
     // organisation's walk answers 409.
@@ -147,7 +142,6 @@ pub async fn members_and_keys(w: &mut Walk) {
       "external_org_id": "[id]",
       "hosted_git": true,
       "id": "[uuid]",
-      "image_url": null,
       "name": "[login's]",
       "slug": "[login's]"
     }
@@ -194,9 +188,9 @@ pub async fn teardown(w: &mut Walk) {
             .await,
     );
     // The walk's project goes with it; the login's is untouched.
-    w.owner
-        .cp_raw()
-        .delete(&format!("/v1/projects/{project}"))
+    owner
+        .projects()
+        .delete(project)
         .await
         .expect("delete the walk's project");
     expect_not_found(owner.projects().get(project).await);

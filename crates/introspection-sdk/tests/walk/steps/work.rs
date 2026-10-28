@@ -7,15 +7,15 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     AccessTagCreate, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationTarget, Annotations, ApprovalListParams, ConversationContains,
-    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
-    ConversationItemListParams, ConversationListParams, EventListParams, File, FileCreateText,
-    FileListParams, FileUpdate, FileUpload, FileVersionCreateText, FileVersionListParams,
-    IntrospectionClient, IntrospectionEventName, Lane, MemberConnectionCreate,
-    MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec, MetricsQuery,
-    MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
-    StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef,
-    TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    AnnotationNavigationParams, AnnotationTarget, Annotations, ApprovalListParams,
+    ConversationContains, ConversationExportFormat, ConversationExportParams,
+    ConversationItemGetParams, ConversationItemListParams, ConversationListParams, EventListParams,
+    File, FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
+    FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
+    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
+    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
+    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
+    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -165,19 +165,13 @@ async fn file_filters(sa: &IntrospectionClient, input: &File) {
     let stage = updated.metadata.as_ref().and_then(|m| m.get("stage"));
     assert_eq!(stage, Some(&json!("attached")));
     // A file with versions is listed only with `include_versions`.
-    let include_versions = || {
-        Some(HashMap::from([(
-            "include_versions".to_string(),
-            json!(true),
-        )]))
-    };
     let found = |files: Vec<File>| files.iter().any(|f| f.id == input.id);
     let by_metadata = FileListParams {
         metadata: Some(HashMap::from([
             ("suite".to_string(), "walk".to_string()),
             ("stage".to_string(), "attached".to_string()),
         ])),
-        filters: include_versions(),
+        include_versions: Some(true),
         ..Default::default()
     };
     let listed = sa
@@ -199,7 +193,7 @@ async fn file_filters(sa: &IntrospectionClient, input: &File) {
         .expect("tag the file");
     let by_tag = FileListParams {
         tag: Some("suite:walk".into()),
-        filters: include_versions(),
+        include_versions: Some(true),
         ..Default::default()
     };
     let listed = sa
@@ -209,11 +203,9 @@ async fn file_filters(sa: &IntrospectionClient, input: &File) {
         .await
         .expect("list by tag");
     assert!(found(listed), "the tag filter finds the file");
-    // todo: no `name_contains` on `FileListParams`.
-    let mut by_name = include_versions().expect("filters");
-    by_name.insert("name_contains".into(), json!("WALK-INPUT"));
     let by_name = FileListParams {
-        filters: Some(by_name),
+        include_versions: Some(true),
+        name_contains: Some("WALK-INPUT".into()),
         ..Default::default()
     };
     let listed = sa
@@ -488,7 +480,7 @@ pub async fn evidence(w: &mut Walk) {
     let task = set(&w.task, "the task").id;
     let conversation_id = set(&w.conversation_id, "the conversation").clone();
     let by_task = FileListParams {
-        filters: Some(HashMap::from([("task_id".to_string(), json!(task))])),
+        task_id: Some(task),
         ..Default::default()
     };
     let outputs = settled(
@@ -594,9 +586,9 @@ pub async fn evidence(w: &mut Walk) {
       }
     }
     "#);
-    // todo: `ConversationMetrics` has no `llm_call_count` or
-    // `failed_llm_call_count`, which the JS walk bounds.
     assert!(conversation.metrics.tool_use_count > 0);
+    assert!(conversation.metrics.llm_call_count > 0);
+    assert!(conversation.metrics.failed_llm_call_count <= conversation.metrics.llm_call_count);
     assert!(conversation.metrics.trace_count >= 2);
     assert!(conversation.usage.total_tokens > 0);
     conversation_reads(&sa, &conversation_id, w).await;
@@ -1042,19 +1034,11 @@ async fn annotation_reads(
         table.batches.iter().map(|b| b.num_rows()).sum::<usize>(),
         events.len()
     );
-    // todo: no SDK method for the annotation facets or navigation reads.
-    let raw = set(&w.member, "the member token").dp_raw();
-    let _: Value = raw
-        .get(&format!(
-            "/v1/annotations/facets?conversation_id={conversation_id}"
-        ))
-        .await
-        .expect("annotation facets");
-    let _: Value = raw
-        .get(&format!(
-            "/v1/annotations/navigation?trace_id={}&span_id={}",
-            target.trace_id, target.span_id
-        ))
+    let member = w.member();
+    let annotations = member.annotations();
+    annotations.facets().await.expect("annotation facets");
+    annotations
+        .navigation(target, &AnnotationNavigationParams::default())
         .await
         .expect("annotation navigation");
 }

@@ -91,6 +91,50 @@ pub struct AnnotationListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// One filter bucket of `GET /v1/annotations/facets`: how many annotated
+/// spans currently carry `value` along `dimension` (`annotator`,
+/// `assignee`, `label` or `status`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AnnotationFacet {
+    pub dimension: String,
+    pub value: String,
+    pub count: u64,
+}
+
+/// What `GET /v1/annotations/navigation` answers: the annotation at the
+/// target with its neighbours in the filtered review order.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AnnotationNavigation {
+    #[serde(default)]
+    pub previous: Option<AnnotationState>,
+    #[serde(default)]
+    pub current: Option<AnnotationState>,
+    #[serde(default)]
+    pub next: Option<AnnotationState>,
+    /// The target's 1-based place in the filtered order; `None` when the
+    /// filters exclude it.
+    #[serde(default)]
+    pub current_position: Option<u64>,
+    #[serde(default)]
+    pub total_count: u64,
+}
+
+/// The review order `GET /v1/annotations/navigation` walks: the same filters
+/// as [`AnnotationListParams`], by member id.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AnnotationNavigationParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotated_by_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// `backlog`, `assigned` or `reviewed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum AnnotationMutation {
     Labels(Vec<String>),
@@ -259,6 +303,36 @@ impl Annotations {
             });
         }
         decode_json(res).await
+    }
+
+    /// `GET /v1/annotations/facets` — the current annotator, assignee,
+    /// label and status counts a review screen offers as filters.
+    pub async fn facets(&self) -> ApiResult<Vec<AnnotationFacet>> {
+        self.dp_http.get_json("/v1/annotations/facets", &()).await
+    }
+
+    /// `GET /v1/annotations/navigation` — the annotation on `target` with the
+    /// previous and next one in the review order `params` filters.
+    pub async fn navigation(
+        &self,
+        target: &AnnotationTarget,
+        params: &AnnotationNavigationParams,
+    ) -> ApiResult<AnnotationNavigation> {
+        #[derive(Serialize)]
+        struct Q<'a> {
+            trace_id: &'a str,
+            span_id: &'a str,
+            #[serde(flatten)]
+            params: &'a AnnotationNavigationParams,
+        }
+        let query = Q {
+            trace_id: &target.trace_id,
+            span_id: &target.span_id,
+            params,
+        };
+        self.dp_http
+            .get_json("/v1/annotations/navigation", &query)
+            .await
     }
 
     async fn resolve_reviewer_ids(&self, emails: Vec<String>) -> ApiResult<Vec<Uuid>> {

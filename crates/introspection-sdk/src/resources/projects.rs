@@ -1,13 +1,11 @@
-//! `client.projects` (CP) — read the org's projects, and under each the
-//! runtime peerings it offers or is granted ([`ProjectPeerings`]).
+//! `client.projects` (CP) — the org's projects, and under each the runtime
+//! peerings it offers or is granted ([`ProjectPeerings`]).
 //!
-//! Read-only. Creating, renaming or deleting a project is project
-//! administration and lives in the CLI; reading one is what a tool needs to
-//! turn a project id into the slug its dashboard URLs use. Writing a peering
-//! needs `projects:write` held by a person, which no API key has, so it stays
-//! in the web app.
-//!
-//! The project and peering calls need `projects:read`.
+//! Reading one is what a tool needs to turn a project id into the slug its
+//! dashboard URLs use; the project and peering reads need `projects:read`.
+//! Creating, updating and deleting a project need `projects:write`, which only
+//! an owner's or admin's member session or access token carries: no API key,
+//! Application or CLI login has it. Peerings are written in the web app.
 
 use std::sync::Arc;
 
@@ -19,7 +17,8 @@ use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Project, ProjectListParams, RuntimePeering, RuntimePeeringListParams, StringOrUuid,
+    Project, ProjectCreateParams, ProjectListParams, ProjectUpdateParams, RuntimePeering,
+    RuntimePeeringListParams, StringOrUuid,
 };
 
 /// `client.projects` namespace. Holds a CP-bound HTTP client.
@@ -52,6 +51,29 @@ impl Projects {
         struct Q {}
         let path = format!("/v1/projects/{}", encode(&project.into().to_string()));
         self.http.get_json(&path, &Q {}).await
+    }
+
+    /// `POST /v1/projects` — create a project on a deployment. A slug or
+    /// name already taken answers 409, and the org's project limit 403.
+    pub async fn create(&self, params: &ProjectCreateParams) -> ApiResult<Project> {
+        self.http.post_json("/v1/projects", params).await
+    }
+
+    /// `PATCH /v1/projects/{project}`, by slug or id — only the fields set on
+    /// `params` change.
+    pub async fn update(
+        &self,
+        project: impl Into<StringOrUuid>,
+        params: &ProjectUpdateParams,
+    ) -> ApiResult<Project> {
+        let path = format!("/v1/projects/{}", encode(&project.into().to_string()));
+        self.http.patch_json(&path, params).await
+    }
+
+    /// `DELETE /v1/projects/{project}`, by slug or id, with everything in it.
+    pub async fn delete(&self, project: impl Into<StringOrUuid>) -> ApiResult<()> {
+        let path = format!("/v1/projects/{}", encode(&project.into().to_string()));
+        self.http.delete_empty(&path).await
     }
 }
 

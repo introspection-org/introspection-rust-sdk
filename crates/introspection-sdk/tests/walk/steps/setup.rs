@@ -6,13 +6,14 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     service_account_token, ApplicationCreateParams, ApplicationListParams,
-    ApplicationSecretCreateParams, ApplicationType, ApplicationUpdateParams, CommitsQuery,
-    ContentsQuery, HostedRepositoryCreateParams, IntrospectionClient, PaginationParams, Project,
-    ProjectListParams, Recipe, RecipeCreateParams, RecipeListParams, RecipeUpdateParams,
-    Repository, RepositoryCreateParams, RepositoryListParams, RepositoryProvisioningStatus,
-    RuntimeCreateParams, ServiceAccountTokenParams,
+    ApplicationSecretCreateParams, ApplicationType, ApplicationUpdateParams, BranchesQuery,
+    CommitsQuery, ContentsQuery, HostedRepositoryCreateParams, IntrospectionClient,
+    PaginationParams, ProjectCreateParams, ProjectListParams, ProjectUpdateParams, Recipe,
+    RecipeCreateParams, RecipeListParams, RecipeUpdateParams, Repository, RepositoryCreateParams,
+    RepositoryListParams, RepositoryProvisioningStatus, RuntimeCreateParams,
+    ServiceAccountTokenParams, TokenCreateParams,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::steps::expect_not_found;
@@ -92,10 +93,8 @@ pub async fn clean_slate(w: &mut Walk) {
     // A run that crashed before its teardown left its project behind; one
     // still running is younger than the cutoff. Measured from this run's own
     // slug, so replay decides as the recording did.
-    // todo: no `Projects::create` / `delete`.
     let now =
         walk_project_born(&w.settings.project_slug).expect("the walk's own slug carries its time");
-    let raw = w.owner.cp_raw();
     let projects = owner
         .projects()
         .list(&ProjectListParams::default())
@@ -105,20 +104,19 @@ pub async fn clean_slate(w: &mut Walk) {
     for stale in projects {
         let born = stale.slug.as_deref().and_then(walk_project_born);
         if born.is_some_and(|born| now.saturating_sub(born) > walk::STALE_AFTER_SECONDS) {
-            raw.delete(&format!("/v1/projects/{}", stale.id))
+            owner
+                .projects()
+                .delete(stale.id)
                 .await
                 .expect("delete a crashed run's project");
         }
     }
-    let project: Project = raw
-        .post(
-            "/v1/projects",
-            &json!({
-                "name": walk::PROJECT_NAME,
-                "slug": w.settings.project_slug,
-                "deployment_id": login_project.deployment_id,
-            }),
-        )
+    let project = owner
+        .projects()
+        .create(&ProjectCreateParams {
+            slug: Some(w.settings.project_slug.clone()),
+            ..ProjectCreateParams::new(walk::PROJECT_NAME, login_project.deployment_id)
+        })
         .await
         .expect("create the walk's project");
     if w.mode == Mode::Record {
@@ -134,21 +132,19 @@ pub async fn clean_slate(w: &mut Walk) {
     w.login_project = Some(login_project);
     // The owner's Data Plane token for the project: it carries `git:push`,
     // which no service account can, and the member-only Data Plane writes.
-    // todo: no SDK method mints it.
-    let minted: Value = w
-        .owner
-        .cp_raw()
-        .post(
-            "/v1/tokens",
-            &json!({ "project": project.id, "expires_hours": 24 }),
-        )
+    let minted = owner
+        .tokens()
+        .create(&TokenCreateParams {
+            expires_hours: Some(24),
+            ..TokenCreateParams::new(project.id)
+        })
         .await
         .expect("mint the owner's Data Plane token");
-    assert_eq!(minted["project_id"], json!(project.id));
+    assert_eq!(minted.project_id, project.id);
     w.member = Some(Creds {
         base_api_url: w.settings.base_api_url.clone(),
         dp_url: w.settings.dp_url.clone(),
-        token: minted["access_token"].as_str().expect("a token").into(),
+        token: minted.access_token,
         cp_session: None,
     });
     w.original_description = project.description.clone();
@@ -183,12 +179,18 @@ pub async fn project(w: &mut Walk) {
         .expect("list projects");
     assert!(listed.iter().any(|p| p.id == project.id));
 
-    // todo: no `Projects::update` / `create` / `delete` (projects:write is
-    // in no SDK credential's scope), so the owner's writes go by hand.
-    let raw = w.owner.cp_raw();
-    let path = format!("/v1/projects/{}", project.id);
-    let body = json!({ "description": "The SDK end-to-end walk ran here" });
-    let updated: Project = raw.patch(&path, &body).await.expect("update the project");
+    // projects:write is in no SDK credential's scope but the owner's.
+    let updated = owner
+        .projects()
+        .update(
+            project.id,
+            &ProjectUpdateParams {
+                description: Some("The SDK end-to-end walk ran here".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update the project");
     assert_eq!(
         updated.description.as_deref(),
         Some("The SDK end-to-end walk ran here")
@@ -196,22 +198,30 @@ pub async fn project(w: &mut Walk) {
     // A PATCH with only nulls is "no fields to update", so a project that
     // had no description gets an empty one back.
     let original = w.original_description.clone().unwrap_or_default();
-    let restored: Project = raw
-        .patch(&path, &json!({ "description": original }))
+    let restored = owner
+        .projects()
+        .update(
+            project.id,
+            &ProjectUpdateParams {
+                description: Some(original.clone()),
+                ..Default::default()
+            },
+        )
         .await
         .expect("restore the description");
     assert_eq!(restored.description.unwrap_or_default(), original);
 
     // A sibling is created and deleted while the walk's project is in use.
-    let sibling: Project = raw
-        .post(
-            "/v1/projects",
-            &json!({
-                "name": format!("{} (walk)", project.name),
-                "slug": format!("{}{}", project.slug.clone().unwrap_or_default(), walk::SIBLING_SUFFIX),
-                "deployment_id": project.deployment_id,
-            }),
-        )
+    let sibling = owner
+        .projects()
+        .create(&ProjectCreateParams {
+            slug: Some(format!(
+                "{}{}",
+                project.slug.clone().unwrap_or_default(),
+                walk::SIBLING_SUFFIX
+            )),
+            ..ProjectCreateParams::new(format!("{} (walk)", project.name), project.deployment_id)
+        })
         .await
         .expect("create a sibling project");
     assert_eq!(sibling.deployment_id, project.deployment_id);
@@ -225,7 +235,9 @@ pub async fn project(w: &mut Walk) {
       "slug": "[per run]"
     }
     "#);
-    raw.delete(&format!("/v1/projects/{}", sibling.id))
+    owner
+        .projects()
+        .delete(sibling.id)
         .await
         .expect("delete the sibling");
     expect_not_found(owner.projects().get(sibling.id).await);
@@ -544,15 +556,15 @@ async fn repository_reads(w: &Walk) -> String {
         .await
         .expect("read the commit");
     assert_eq!(detail.commit.sha, head);
-    // todo: no `Repositories::branches`.
-    let branches: Value = set(&w.sa, "the service account")
-        .dp_raw()
-        .get(&format!("/v1/repositories/{repository}/branches"))
+    let branches = sa
+        .repositories()
+        .branches(repository, &BranchesQuery::default())
+        .expect("a branches paginator")
+        .next_page()
         .await
-        .expect("list branches");
-    assert!(branches["records"]
-        .as_array()
-        .is_some_and(|b| b.iter().any(|b| b["name"] == "main")));
+        .expect("list branches")
+        .expect("a page");
+    assert!(branches.records.iter().any(|b| b.name == "main"));
     let at_head = ContentsQuery {
         r#ref: Some(head.clone()),
         ..Default::default()
