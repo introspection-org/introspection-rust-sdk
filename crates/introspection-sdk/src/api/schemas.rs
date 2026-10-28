@@ -3694,6 +3694,59 @@ pub struct ProjectListParams {
     pub pagination: PaginationParams,
 }
 
+/// A runtime peering: a source project offering one of its runtime groups'
+/// configuration to other projects, as `GET /v1/projects/{project}/peerings`
+/// and `GET /v1/projects/{project}/peerings/{peering_id}` return it.
+///
+/// Read-only here. Creating, changing or removing a peering needs
+/// `runtime_peerings:write`, which no API key holds; it is done from the web
+/// app.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RuntimePeering {
+    pub id: Uuid,
+    /// The source project's org.
+    pub org_id: Uuid,
+    /// The source project, which offers the runtime group.
+    pub project_id: Uuid,
+    /// The runtime group whose configuration is offered.
+    pub runtime_group_id: Uuid,
+    /// The org admitted, when the grant names one.
+    #[serde(default)]
+    pub granted_org_id: Option<Uuid>,
+    /// The project admitted, when the grant names one.
+    #[serde(default)]
+    pub granted_project_id: Option<Uuid>,
+    /// The deployment admitted, when the grant names one.
+    #[serde(default)]
+    pub granted_deployment_id: Option<Uuid>,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub created_by_member_id: Option<Uuid>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub deleted_at: Option<String>,
+}
+
+/// Filters supported by `GET /v1/projects/{project}/peerings`.
+///
+/// By default the list is the peerings the project offers. Set `granted` to
+/// list the peerings other projects grant to it instead; the server answers
+/// 422 when `runtime` is set with it.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RuntimePeeringListParams {
+    /// Only the peerings of this runtime group, by slug or id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<StringOrUuid>,
+    /// `true` lists the peerings other projects grant to this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted: Option<bool>,
+    #[serde(flatten)]
+    pub pagination: PaginationParams,
+}
+
 // ----- automations (DP) ------------------------------------------------------
 
 /// A string-backed wire enum with an `Other(String)` fallback, so a value the

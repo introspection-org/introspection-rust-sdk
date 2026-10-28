@@ -172,16 +172,16 @@ pub use api::{
     RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider,
     RepositoryProvisioningStatus, ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary,
     RunCallerPage, RunFrame, RunHandle, RunRequest, RunnerContext, RunnerDeployment,
-    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode,
-    RuntimeSettingListParams, RuntimeUpdateParams, Secret, ShareCreate, ShareListParams,
-    ShareResourceType, ShareUpdate, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent,
-    StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCommand,
-    TaskCommandKind, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCommands,
-    TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
-    TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns,
-    TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount, Trajectory,
-    TypedEvent, UploadSource, Variable, VariableCreateParams, VariableKind, VariableUpdateParams,
-    MAX_COMMAND_WAIT_SECONDS,
+    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, RuntimePeering,
+    RuntimePeeringListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret, ShareCreate,
+    ShareListParams, ShareResourceType, ShareUpdate, Shares, SortDirection, SpanAttributes,
+    SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse,
+    TaskCommand, TaskCommandKind, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus,
+    TaskCommands, TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams,
+    TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
+    TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension,
+    TokenCount, Trajectory, TypedEvent, UploadSource, Variable, VariableCreateParams, VariableKind,
+    VariableUpdateParams, MAX_COMMAND_WAIT_SECONDS,
 };
 // jscpd:ignore-end
 #[cfg(feature = "arrow")]
@@ -218,8 +218,8 @@ pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
     Applications, Approvals, Automations, Connections, Connectors, Credentials, Endpoints,
     ExperimentHandle, Experiments, Images, Integrations, Judges, MemberConnections, Members,
-    Missions, Oidc, Projects, Recipes, Repositories, RepositoryContents, RuntimeHandle, Runtimes,
-    Tags, Variables,
+    Missions, Oidc, ProjectPeerings, Projects, Recipes, Repositories, RepositoryContents,
+    RuntimeHandle, Runtimes, Tags, Variables,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
