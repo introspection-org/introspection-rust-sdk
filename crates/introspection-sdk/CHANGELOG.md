@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.35.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.34.0...v0.35.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* FileListParams has new public fields include_versions, name_contains and task_id.
+
+### Features
+
+* read runtime peerings ([#179](https://github.com/introspection-org/introspection-rust-sdk/issues/179)) ([7d8ad2c](https://github.com/introspection-org/introspection-rust-sdk/commit/7d8ad2c07a02d024df7d5fb16db7b1cfe9794d53))
+* typed project writes, token mint, file list filters, organisation read, repository branches, annotation facets and navigation, and runtime MCP requirements; the walk makes no raw calls ([d2bf202](https://github.com/introspection-org/introspection-rust-sdk/commit/d2bf2020dbd2cf46ceca94edea67bd6e8c088f40))
+
 ## [0.34.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.33.1...v0.34.0) (2026-10-27)
 
 
