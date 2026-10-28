@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use futures::FutureExt as _;
@@ -17,7 +17,6 @@ use introspection_sdk::api::http::{HttpClient, HttpConfig};
 use introspection_sdk::api::ApiResult;
 use introspection_sdk::{AdvancedOptions, ClientConfig, IntrospectionClient};
 use regex::Regex;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -296,8 +295,8 @@ fn credentials_file() -> serde_json::Map<String, Value> {
 // ----- clients --------------------------------------------------------------
 
 /// A credential and the planes it talks to, from which the walk builds the
-/// SDK client, its quiet twin (the polls a recording never sees) and the
-/// low-level HTTP client a route without a method is called through.
+/// SDK client and its quiet twin (the polls a recording never sees). There
+/// is no raw HTTP client: a route the SDK has no method for gets one first.
 #[derive(Debug, Clone)]
 pub struct Creds {
     pub base_api_url: String,
@@ -351,87 +350,6 @@ impl Creds {
             })
             .expect("the walk's Data Plane client builds"),
         )
-    }
-
-    // The walk calls every route through an SDK method today; these stay for
-    // the next route the SDK has no method for.
-    #[allow(dead_code)]
-    pub fn cp_raw(&self) -> Raw {
-        Raw::new(&self.base_api_url, self)
-    }
-
-    #[allow(dead_code)]
-    pub fn dp_raw(&self) -> Raw {
-        Raw::new(self.dp_url.as_deref().unwrap_or(&self.base_api_url), self)
-    }
-}
-
-static RAW_CALLS: LazyLock<Mutex<Vec<(String, String)>>> = LazyLock::new(Mutex::default);
-
-/// A documented route the SDK has no method for, called through the SDK's
-/// own [`HttpClient`] so it is recorded, matched and counted like every
-/// other (design doc §3), and listed in the report as an SDK gap.
-#[allow(dead_code)]
-pub struct Raw {
-    http: HttpClient,
-}
-
-#[allow(dead_code)]
-impl Raw {
-    fn new(api_url: &str, creds: &Creds) -> Self {
-        let mut additional_headers = HashMap::new();
-        if let Some(session) = &creds.cp_session {
-            additional_headers.insert("Cookie".to_string(), format!("intro_cp_session={session}"));
-        }
-        let http = HttpClient::new(HttpConfig {
-            api_url: api_url.to_string(),
-            token: creds.token.clone(),
-            additional_headers,
-            timeout: Duration::from_secs(30),
-            max_retries: 0,
-            retry_base: Duration::from_millis(500),
-        })
-        .expect("the walk's raw client builds");
-        Self { http }
-    }
-
-    fn note(&self, method: &str, path: &str) {
-        // The route, not the call: ids and hashes become placeholders.
-        let route = path.split('?').next().unwrap_or(path);
-        let route = UUID_ANYWHERE.replace_all(route, "{id}");
-        let route = SHA_ANYWHERE.replace_all(&route, "{sha}").into_owned();
-        RAW_CALLS
-            .lock()
-            .expect("raw call log")
-            .push((method.to_string(), route));
-    }
-
-    pub async fn get<R: DeserializeOwned>(&self, path: &str) -> ApiResult<R> {
-        self.note("GET", path);
-        self.http.get_json(path, &()).await
-    }
-
-    pub async fn post<B: Serialize, R: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> ApiResult<R> {
-        self.note("POST", path);
-        self.http.post_json(path, body).await
-    }
-
-    pub async fn patch<B: Serialize, R: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> ApiResult<R> {
-        self.note("PATCH", path);
-        self.http.patch_json(path, body).await
-    }
-
-    pub async fn delete(&self, path: &str) -> ApiResult<()> {
-        self.note("DELETE", path);
-        self.http.delete_empty(path).await
     }
 }
 
@@ -672,18 +590,14 @@ pub fn report(steps: &Steps, replayer: Option<&Replayer>) -> Value {
         ),
         None => (0, 0, Vec::new()),
     };
-    let mut raw: Vec<(String, String)> = RAW_CALLS.lock().expect("raw call log").clone();
-    raw.sort();
-    raw.dedup();
     json!({
         "sdk": "rust",
         "steps": steps.results,
         "entries": { "total": total, "consumed": consumed },
         "unconsumed": unconsumed,
-        "raw_calls": raw
-            .into_iter()
-            .map(|(method, path)| json!({ "method": method, "path": path }))
-            .collect::<Vec<_>>(),
+        // The walk has no raw HTTP client, so every route goes through an
+        // SDK method; the field stays for the cross-SDK report shape.
+        "raw_calls": [],
     })
 }
 
