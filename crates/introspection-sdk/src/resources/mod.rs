@@ -39,8 +39,8 @@
 //!   session (`projects:write` is in no API key, Application or CLI login
 //!   scope), so it stays in the dashboard and the API. Its
 //!   [`ProjectPeerings`] read the runtime peerings a project offers or is
-//!   granted; writing one is web-app only (`runtime_peerings:write` is in no
-//!   API key).
+//!   granted; writing one is web-app only (`projects:write` is in no API
+//!   key).
 //! - [`ApiKeys`] — `/v1/api-keys`: list, create, update, delete (or rotate
 //!   with a grace period) and acknowledge.
 //! - [`Applications`] — `/v1/applications` CRUD with each Application's

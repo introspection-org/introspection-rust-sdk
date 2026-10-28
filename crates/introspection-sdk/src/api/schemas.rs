@@ -3699,8 +3699,8 @@ pub struct ProjectListParams {
 /// and `GET /v1/projects/{project}/peerings/{peering_id}` return it.
 ///
 /// Read-only here. Creating, changing or removing a peering needs
-/// `runtime_peerings:write`, which no API key holds; it is done from the web
-/// app.
+/// `projects:write` held by a person, which no API key has; it is done from
+/// the web app.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuntimePeering {

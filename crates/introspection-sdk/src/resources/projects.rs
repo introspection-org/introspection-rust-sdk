@@ -4,11 +4,10 @@
 //! Read-only. Creating, renaming or deleting a project is project
 //! administration and lives in the CLI; reading one is what a tool needs to
 //! turn a project id into the slug its dashboard URLs use. Writing a peering
-//! needs `runtime_peerings:write`, which no API key holds, so it stays in the
-//! web app.
+//! needs `projects:write` held by a person, which no API key has, so it stays
+//! in the web app.
 //!
-//! The project calls need `projects:read`; the peering calls need
-//! `runtime_peerings:read`.
+//! The project and peering calls need `projects:read`.
 
 use std::sync::Arc;
 
