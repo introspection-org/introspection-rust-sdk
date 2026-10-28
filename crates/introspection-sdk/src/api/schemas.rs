@@ -1504,6 +1504,44 @@ pub struct RepositoryCommitDetail {
     pub patch: String,
 }
 
+/// One branch of a repository, from `GET /v1/repositories/{id}/branches`.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryBranch {
+    pub name: String,
+    /// The branch's head commit.
+    pub sha: String,
+    /// When the head commit was committed; only for
+    /// [`RepositoryBranchSort::Recent`].
+    #[serde(default)]
+    pub committed_at: Option<String>,
+}
+
+/// The order of [`BranchesQuery`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryBranchSort {
+    /// By name, page by page.
+    #[default]
+    Name,
+    /// One name-sorted page of up to `limit` branches, newest commit first,
+    /// with `committed_at`, and never a next page.
+    Recent,
+}
+
+/// Query for a repository's branches.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BranchesQuery {
+    /// Only branches whose name contains this, ignoring case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<RepositoryBranchSort>,
+    /// Page size (server default and max 100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
 /// Query for a repository's commit history.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CommitsQuery {
@@ -1667,10 +1705,55 @@ pub struct Runtime {
     /// runtime group.
     #[serde(default)]
     pub template_ref: Option<String>,
-    /// The MCP servers the runtime needs connected; sent only for
-    /// `include=mcp_requirements`.
+    /// Every MCP server the runtime's recipe declares, resolved for each
+    /// environment the runtime serves; sent only by
+    /// [`crate::Runtimes::get_with_mcp_requirements`].
     #[serde(default)]
-    pub mcp_requirements: Option<Vec<serde_json::Value>>,
+    pub mcp_requirements: Option<Vec<RuntimeMcpRequirement>>,
+}
+
+/// One MCP server a runtime's recipe declares, resolved for one environment
+/// against the project's connectors, connections and MCP endpoint bindings.
+/// Identifiers, statuses and a URL only, never a token.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RuntimeMcpRequirement {
+    /// The connector slug backing the server, when one does.
+    #[serde(default)]
+    pub slug: Option<String>,
+    pub environment: String,
+    /// `ready`, or what is still missing (a connector, a connection, an
+    /// endpoint binding, ...).
+    pub state: String,
+    #[serde(default)]
+    pub connector_id: Option<Uuid>,
+    #[serde(default)]
+    pub connector_provider: Option<String>,
+    /// Every connector that could satisfy the slug; more than one with no
+    /// environment match makes the requirement ambiguous.
+    #[serde(default)]
+    pub candidate_connector_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub connection_id: Option<Uuid>,
+    #[serde(default)]
+    pub connection_status: Option<String>,
+    /// The recipe's MCP server declaration this resolves.
+    pub mcp_server_id: String,
+    #[serde(default)]
+    pub mcp_required: Option<bool>,
+    #[serde(default)]
+    pub endpoint_id: Option<Uuid>,
+    /// The bound endpoint's URL when ready, else the best known URL for the
+    /// binding the connect flow would create.
+    #[serde(default)]
+    pub mcp_server_url: Option<String>,
+    /// Where `mcp_server_url` came from (`endpoint`, `catalog`, `connector`
+    /// or `template`).
+    #[serde(default)]
+    pub mcp_server_url_source: Option<String>,
+    /// Why the requirement is not ready, in words.
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -3745,6 +3828,128 @@ pub struct RuntimePeeringListParams {
     pub granted: Option<bool>,
     #[serde(flatten)]
     pub pagination: PaginationParams,
+}
+
+/// `POST /v1/projects` body. Needs `projects:write`, which only an owner's or
+/// admin's member session or access token carries.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectCreateParams {
+    pub name: String,
+    /// The Data Plane deployment the project lives on.
+    pub deployment_id: Uuid,
+    /// Derived from `name` when `None`.
+    pub slug: Option<String>,
+    pub description: Option<String>,
+    pub display_id_prefixes: Option<DisplayIdPrefixes>,
+    pub settings: Option<BTreeMap<String, serde_json::Value>>,
+    /// Seed the Ark runtime. `None`: an organization's first project takes
+    /// it and later ones do not.
+    pub include_ark: Option<bool>,
+}
+
+impl ProjectCreateParams {
+    pub fn new(name: impl Into<String>, deployment_id: Uuid) -> Self {
+        Self {
+            name: name.into(),
+            deployment_id,
+            slug: None,
+            description: None,
+            display_id_prefixes: None,
+            settings: None,
+            include_ark: None,
+        }
+    }
+}
+
+/// `PATCH /v1/projects/{project}` body. Only the fields set are sent; a
+/// request that sets none answers 400.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProjectUpdateParams {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub display_id_prefixes: Option<DisplayIdPrefixes>,
+    pub settings: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+/// The prefixes of a project's display ids (`I-1`, `R-1`, ...), each at
+/// most five characters. The server fills a prefix left out with its
+/// default.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DisplayIdPrefixes {
+    pub issue: Option<String>,
+    pub report: Option<String>,
+    pub observation: Option<String>,
+    pub task: Option<String>,
+}
+
+/// `GET /v1/organizations/me` — the organization the credential belongs to.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Organization {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// The identity provider's id for the organization.
+    #[serde(default)]
+    pub external_org_id: Option<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    /// Whether new hosted repositories are allowed.
+    #[serde(default = "default_true")]
+    pub hosted_git: bool,
+}
+
+/// `POST /v1/tokens` body: a Data Plane token for one project, minted from
+/// a member session or access token (`tokens:write`).
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenCreateParams {
+    /// The project, by slug or id.
+    pub project: StringOrUuid,
+    /// Lifetime in hours, 1 to 720.
+    pub expires_hours: Option<u32>,
+    /// Lifetime in minutes, 1 to 60, for a short-lived token.
+    pub expires_minutes: Option<u32>,
+    /// Also mint a refresh token for the OAuth `/token` endpoint.
+    pub include_refresh_token: Option<bool>,
+    /// The environment lane the token belongs to; `production` when `None`.
+    /// Only a human session may name a lane other than its own credential's.
+    pub environment: Option<String>,
+}
+
+impl TokenCreateParams {
+    pub fn new(project: impl Into<StringOrUuid>) -> Self {
+        Self {
+            project: project.into(),
+            expires_hours: None,
+            expires_minutes: None,
+            include_refresh_token: None,
+            environment: None,
+        }
+    }
+}
+
+/// What `POST /v1/tokens` answers: a Data Plane JWT for one project.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DataPlaneToken {
+    pub access_token: String,
+    #[serde(default = "default_bearer")]
+    pub token_type: String,
+    pub expires_at: String,
+    pub project_id: Uuid,
+    pub org_id: Uuid,
+    /// Present only when `include_refresh_token` was set.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+}
+
+fn default_bearer() -> String {
+    "bearer".to_string()
 }
 
 // ----- automations (DP) ------------------------------------------------------

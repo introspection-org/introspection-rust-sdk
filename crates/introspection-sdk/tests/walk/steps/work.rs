@@ -7,15 +7,15 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     AccessTagCreate, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationTarget, Annotations, ApprovalListParams, ConversationContains,
-    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
-    ConversationItemListParams, ConversationListParams, EventListParams, File, FileCreateText,
-    FileListParams, FileUpdate, FileUpload, FileVersionCreateText, FileVersionListParams,
-    IntrospectionClient, IntrospectionEventName, Lane, MemberConnectionCreate,
-    MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec, MetricsQuery,
-    MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
-    StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate, TaskFileRef,
-    TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    AnnotationNavigationParams, AnnotationTarget, Annotations, ApprovalListParams,
+    ConversationContains, ConversationExportFormat, ConversationExportParams,
+    ConversationItemGetParams, ConversationItemListParams, ConversationListParams, EventListParams,
+    File, FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
+    FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
+    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
+    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
+    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
+    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -594,9 +594,9 @@ pub async fn evidence(w: &mut Walk) {
       }
     }
     "#);
-    // todo: `ConversationMetrics` has no `llm_call_count` or
-    // `failed_llm_call_count`, which the JS walk bounds.
     assert!(conversation.metrics.tool_use_count > 0);
+    assert!(conversation.metrics.llm_call_count > 0);
+    assert!(conversation.metrics.failed_llm_call_count <= conversation.metrics.llm_call_count);
     assert!(conversation.metrics.trace_count >= 2);
     assert!(conversation.usage.total_tokens > 0);
     conversation_reads(&sa, &conversation_id, w).await;
@@ -1042,19 +1042,11 @@ async fn annotation_reads(
         table.batches.iter().map(|b| b.num_rows()).sum::<usize>(),
         events.len()
     );
-    // todo: no SDK method for the annotation facets or navigation reads.
-    let raw = set(&w.member, "the member token").dp_raw();
-    let _: Value = raw
-        .get(&format!(
-            "/v1/annotations/facets?conversation_id={conversation_id}"
-        ))
-        .await
-        .expect("annotation facets");
-    let _: Value = raw
-        .get(&format!(
-            "/v1/annotations/navigation?trace_id={}&span_id={}",
-            target.trace_id, target.span_id
-        ))
+    let member = w.member();
+    let annotations = member.annotations();
+    annotations.facets().await.expect("annotation facets");
+    annotations
+        .navigation(target, &AnnotationNavigationParams::default())
         .await
         .expect("annotation navigation");
 }

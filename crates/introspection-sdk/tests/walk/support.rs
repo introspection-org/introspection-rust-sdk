@@ -353,30 +353,16 @@ impl Creds {
         )
     }
 
+    // The walk calls every route through an SDK method today; these stay for
+    // the next route the SDK has no method for.
+    #[allow(dead_code)]
     pub fn cp_raw(&self) -> Raw {
-        Raw::new(&self.base_api_url, self, false)
+        Raw::new(&self.base_api_url, self)
     }
 
+    #[allow(dead_code)]
     pub fn dp_raw(&self) -> Raw {
-        Raw::new(
-            self.dp_url.as_deref().unwrap_or(&self.base_api_url),
-            self,
-            false,
-        )
-    }
-
-    /// The raw Control Plane client on the quiet path: polls for a field the
-    /// SDK's types do not carry.
-    pub fn cp_raw_quiet(&self) -> Raw {
-        Raw::new(&self.base_api_url, self, true)
-    }
-
-    pub fn dp_raw_quiet(&self) -> Raw {
-        Raw::new(
-            self.dp_url.as_deref().unwrap_or(&self.base_api_url),
-            self,
-            true,
-        )
+        Raw::new(self.dp_url.as_deref().unwrap_or(&self.base_api_url), self)
     }
 }
 
@@ -385,17 +371,15 @@ static RAW_CALLS: LazyLock<Mutex<Vec<(String, String)>>> = LazyLock::new(Mutex::
 /// A documented route the SDK has no method for, called through the SDK's
 /// own [`HttpClient`] so it is recorded, matched and counted like every
 /// other (design doc §3), and listed in the report as an SDK gap.
+#[allow(dead_code)]
 pub struct Raw {
     http: HttpClient,
-    quiet: bool,
 }
 
+#[allow(dead_code)]
 impl Raw {
-    fn new(api_url: &str, creds: &Creds, quiet: bool) -> Self {
+    fn new(api_url: &str, creds: &Creds) -> Self {
         let mut additional_headers = HashMap::new();
-        if quiet {
-            additional_headers.insert(QUIET_HEADER.to_string(), "1".to_string());
-        }
         if let Some(session) = &creds.cp_session {
             additional_headers.insert("Cookie".to_string(), format!("intro_cp_session={session}"));
         }
@@ -408,13 +392,10 @@ impl Raw {
             retry_base: Duration::from_millis(500),
         })
         .expect("the walk's raw client builds");
-        Self { http, quiet }
+        Self { http }
     }
 
     fn note(&self, method: &str, path: &str) {
-        if self.quiet {
-            return;
-        }
         // The route, not the call: ids and hashes become placeholders.
         let route = path.split('?').next().unwrap_or(path);
         let route = UUID_ANYWHERE.replace_all(route, "{id}");
@@ -498,30 +479,6 @@ where
         "{label}: the recorded read is not in its terminal state"
     );
     value
-}
-
-/// [`settled`] for a resource whose terminal state is a field the SDK's
-/// type does not carry: the quiet poll reads the raw JSON, and the recorded
-/// read goes through the SDK as usual.
-pub async fn settled_raw<T, R, RF, P, PF, D>(
-    mode: Mode,
-    label: &str,
-    timeout: Duration,
-    read: R,
-    poll: P,
-    done: D,
-) -> T
-where
-    R: Fn() -> RF,
-    RF: Future<Output = ApiResult<T>>,
-    P: Fn() -> PF,
-    PF: Future<Output = ApiResult<Value>>,
-    D: Fn(&Value) -> bool,
-{
-    if mode != Mode::Replay {
-        settled(mode, label, timeout, &poll, &poll, &done).await;
-    }
-    read().await.unwrap_or_else(|e| panic!("{label}: {e}"))
 }
 
 // ----- normalisation ----------------------------------------------------------

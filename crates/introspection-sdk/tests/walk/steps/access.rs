@@ -13,11 +13,11 @@ use introspection_sdk::{
     RunRequest, Runner, RunnerIdentity, ServiceAccountTokenParams, ShareCreate, ShareResourceType,
     Task, TaskCreate, TaskListParams, TaskStatus,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::steps::work::list_files;
-use crate::support::{settled, settled_raw, walk, Creds};
+use crate::support::{settled, walk, Creds};
 use crate::{set, Walk};
 
 /// What one person can open: the conversation, the task, Avery's file and
@@ -324,18 +324,16 @@ async fn averys_work(w: &Walk, avery: &Runner) -> Targets {
         .into_iter()
         .find(|f| f.name.ends_with(walk::OUTPUT_FILE_NAME))
         .expect("Avery's output file");
-    // todo: `ConversationMetrics` has no `llm_call_count`, which says when
-    // the conversation has landed; the quiet poll reads it raw.
-    let quiet_raw = set(&w.member, "the member token").dp_raw_quiet();
+    // `llm_call_count` says when the conversation has landed.
     let conversations = member.conversations();
-    let path = format!("/v1/conversations/{id}");
-    let _: Conversation = settled_raw(
+    let quiet_conversations = owner_quiet.conversations();
+    let _: Conversation = settled(
         w.mode,
         "Avery's conversation",
         Duration::from_secs(120),
         || conversations.get(&id),
-        || quiet_raw.get::<Value>(&path),
-        |c: &Value| c["metrics"]["llm_call_count"].as_i64().unwrap_or_default() > 0,
+        || quiet_conversations.get(&id),
+        |c: &Conversation| c.metrics.llm_call_count > 0,
     )
     .await;
     let file = avery

@@ -34,13 +34,13 @@
 //! Project administration, each on an org credential (a member session or
 //! access token; a project API key carries none of these scopes):
 //!
-//! - [`Projects`] — `GET /v1/projects` lookup, by slug or id. Creating,
-//!   renaming or deleting a project needs an owner or admin's dashboard
-//!   session (`projects:write` is in no API key, Application or CLI login
-//!   scope), so it stays in the dashboard and the API. Its
+//! - [`Projects`] — `/v1/projects`: list, read by slug or id, create,
+//!   update and delete. The writes need `projects:write`, which only an
+//!   owner's or admin's member session or access token carries. Its
 //!   [`ProjectPeerings`] read the runtime peerings a project offers or is
-//!   granted; writing one is web-app only (`projects:write` is in no API
-//!   key).
+//!   granted; writing one is web-app only.
+//! - [`Organizations`] — `GET /v1/organizations/me`, the credential's org.
+//! - [`Tokens`] — `POST /v1/tokens`, a Data Plane token for one project.
 //! - [`ApiKeys`] — `/v1/api-keys`: list, create, update, delete (or rotate
 //!   with a grace period) and acknowledge.
 //! - [`Applications`] — `/v1/applications` CRUD with each Application's
@@ -82,11 +82,13 @@ pub mod integrations;
 pub mod judges;
 pub mod members;
 pub mod oidc;
+pub mod organizations;
 pub mod projects;
 pub mod recipes;
 pub mod repositories;
 pub mod runtimes;
 pub mod tags;
+pub mod tokens;
 pub mod variables;
 
 pub use aauth::{Aauth, Approvals, Missions};
@@ -104,11 +106,13 @@ pub use integrations::Integrations;
 pub use judges::Judges;
 pub use members::Members;
 pub use oidc::Oidc;
+pub use organizations::Organizations;
 pub use projects::{ProjectPeerings, Projects};
 pub use recipes::Recipes;
 pub use repositories::{Repositories, RepositoryContents};
 pub use runtimes::{RuntimeHandle, Runtimes};
 pub use tags::Tags;
+pub use tokens::Tokens;
 pub use variables::Variables;
 
 /// `path` with `?project=` appended when a project is named.

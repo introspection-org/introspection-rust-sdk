@@ -21,9 +21,9 @@ use crate::api::paginator::Paginator;
 #[cfg(feature = "authoring")]
 use crate::api::schemas::RepositoryCreateParams;
 use crate::api::schemas::{
-    CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryCommit, RepositoryCommitDetail,
-    RepositoryContent, RepositoryEntry, RepositoryListParams, RepositoryMergeCommit,
-    RepositoryMergeCreate, StringOrUuid,
+    BranchesQuery, CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryBranch,
+    RepositoryCommit, RepositoryCommitDetail, RepositoryContent, RepositoryEntry,
+    RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, StringOrUuid,
 };
 
 #[derive(Serialize)]
@@ -102,6 +102,18 @@ impl Repositories {
             encode(&project.into().to_string())
         );
         self.cp_http.delete_empty(&path).await
+    }
+
+    /// `GET /v1/repositories/{id}/branches` on the Data Plane — the
+    /// repository's branches in `query.sort` order, following the `next`
+    /// cursor.
+    pub fn branches(
+        &self,
+        repository_id: Uuid,
+        query: &BranchesQuery,
+    ) -> ApiResult<Paginator<RepositoryBranch>> {
+        let path = format!("/v1/repositories/{repository_id}/branches");
+        Paginator::with_cursor_param(self.dp_http.clone(), path, query, "cursor")
     }
 
     /// `GET /v1/repositories/{id}/commits` on the Data Plane — the history
