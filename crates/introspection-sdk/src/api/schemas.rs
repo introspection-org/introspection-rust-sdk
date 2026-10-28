@@ -830,12 +830,23 @@ pub struct FileListParams {
     pub next: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_total: Option<bool>,
+    /// Include superseded file versions. Unset, the server lists only the
+    /// latest version of each file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_versions: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Case-insensitive substring of the file name; `%`, `_` and `\` match
+    /// literally.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_contains: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_type: Option<FileType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_path: Option<String>,
+    /// Filter by the task that wrote the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
     /// Filter by one tag. ANDed with the ownership predicate, so it only
     /// ever narrows.
     #[serde(skip_serializing_if = "Option::is_none")]

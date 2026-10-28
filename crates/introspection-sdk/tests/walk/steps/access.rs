@@ -304,7 +304,7 @@ async fn averys_work(w: &Walk, avery: &Runner) -> Targets {
         Some(&conversation_metadata.clone().into_iter().collect())
     );
     let by_task = FileListParams {
-        filters: Some([("task_id".to_string(), json!(task.id))].into()),
+        task_id: Some(task.id),
         ..Default::default()
     };
     let outputs = settled(

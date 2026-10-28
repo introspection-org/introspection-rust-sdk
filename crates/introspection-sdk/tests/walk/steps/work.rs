@@ -165,19 +165,13 @@ async fn file_filters(sa: &IntrospectionClient, input: &File) {
     let stage = updated.metadata.as_ref().and_then(|m| m.get("stage"));
     assert_eq!(stage, Some(&json!("attached")));
     // A file with versions is listed only with `include_versions`.
-    let include_versions = || {
-        Some(HashMap::from([(
-            "include_versions".to_string(),
-            json!(true),
-        )]))
-    };
     let found = |files: Vec<File>| files.iter().any(|f| f.id == input.id);
     let by_metadata = FileListParams {
         metadata: Some(HashMap::from([
             ("suite".to_string(), "walk".to_string()),
             ("stage".to_string(), "attached".to_string()),
         ])),
-        filters: include_versions(),
+        include_versions: Some(true),
         ..Default::default()
     };
     let listed = sa
@@ -199,7 +193,7 @@ async fn file_filters(sa: &IntrospectionClient, input: &File) {
         .expect("tag the file");
     let by_tag = FileListParams {
         tag: Some("suite:walk".into()),
-        filters: include_versions(),
+        include_versions: Some(true),
         ..Default::default()
     };
     let listed = sa
@@ -209,11 +203,9 @@ async fn file_filters(sa: &IntrospectionClient, input: &File) {
         .await
         .expect("list by tag");
     assert!(found(listed), "the tag filter finds the file");
-    // todo: no `name_contains` on `FileListParams`.
-    let mut by_name = include_versions().expect("filters");
-    by_name.insert("name_contains".into(), json!("WALK-INPUT"));
     let by_name = FileListParams {
-        filters: Some(by_name),
+        include_versions: Some(true),
+        name_contains: Some("WALK-INPUT".into()),
         ..Default::default()
     };
     let listed = sa
@@ -488,7 +480,7 @@ pub async fn evidence(w: &mut Walk) {
     let task = set(&w.task, "the task").id;
     let conversation_id = set(&w.conversation_id, "the conversation").clone();
     let by_task = FileListParams {
-        filters: Some(HashMap::from([("task_id".to_string(), json!(task))])),
+        task_id: Some(task),
         ..Default::default()
     };
     let outputs = settled(
