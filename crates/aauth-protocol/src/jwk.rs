@@ -177,12 +177,9 @@ impl Jwk {
                 if x.len() != 32 || y.len() != 32 {
                     return false;
                 }
-                let point = p256::EncodedPoint::from_affine_coordinates(
-                    x.as_slice().into(),
-                    y.as_slice().into(),
-                    false,
-                );
-                let Ok(key) = p256::ecdsa::VerifyingKey::from_encoded_point(&point) else {
+                // The uncompressed SEC1 point: 0x04, then x and y.
+                let point = [&[0x04][..], &x, &y].concat();
+                let Ok(key) = p256::ecdsa::VerifyingKey::from_sec1_bytes(&point) else {
                     return false;
                 };
                 let Ok(signature) = p256::ecdsa::Signature::from_slice(signature) else {
@@ -272,6 +269,27 @@ mod tests {
         assert!(matches!(jwk.algorithm(), Err(KeyProblem::Invalid(_))));
         jwk.alg = Some("Ed448".into());
         assert!(matches!(jwk.algorithm(), Err(KeyProblem::Unsupported(_))));
+    }
+
+    #[test]
+    fn an_es256_signature_verifies_against_its_jwk_and_nothing_else() {
+        use p256::ecdsa::signature::Signer;
+
+        let key = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let point = key.verifying_key().to_sec1_point(false);
+        let (x, y) = point.as_bytes()[1..].split_at(32);
+        let jwk = Jwk {
+            kty: "EC".into(),
+            crv: Some("P-256".into()),
+            x: Some(URL_SAFE_NO_PAD.encode(x)),
+            y: Some(URL_SAFE_NO_PAD.encode(y)),
+            alg: Some("ES256".into()),
+            ..Default::default()
+        };
+        let signature: p256::ecdsa::Signature = key.sign(b"message");
+
+        assert!(jwk.verify(Algorithm::Es256, b"message", &signature.to_bytes()));
+        assert!(!jwk.verify(Algorithm::Es256, b"tampered", &signature.to_bytes()));
     }
 
     #[test]
