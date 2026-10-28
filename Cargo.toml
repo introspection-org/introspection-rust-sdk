@@ -16,7 +16,7 @@ aauth-protocol = { path = "crates/aauth-protocol", version = "0.2.0", default-fe
 async-trait = "0.1"
 base64 = "0.23"
 bytes = "1"
-ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem"] }
+ed25519-dalek = { version = "3.0", features = ["pkcs8", "pem"] }
 getrandom = "0.4"
 hmac = "0.13"
 http = "1"
