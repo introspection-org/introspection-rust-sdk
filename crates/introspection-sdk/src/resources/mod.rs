@@ -37,7 +37,10 @@
 //! - [`Projects`] — `GET /v1/projects` lookup, by slug or id. Creating,
 //!   renaming or deleting a project needs an owner or admin's dashboard
 //!   session (`projects:write` is in no API key, Application or CLI login
-//!   scope), so it stays in the dashboard and the API.
+//!   scope), so it stays in the dashboard and the API. Its
+//!   [`ProjectPeerings`] read the runtime peerings a project offers or is
+//!   granted; writing one is web-app only (`projects:write` is in no API
+//!   key).
 //! - [`ApiKeys`] — `/v1/api-keys`: list, create, update, delete (or rotate
 //!   with a grace period) and acknowledge.
 //! - [`Applications`] — `/v1/applications` CRUD with each Application's
@@ -101,7 +104,7 @@ pub use integrations::Integrations;
 pub use judges::Judges;
 pub use members::Members;
 pub use oidc::Oidc;
-pub use projects::Projects;
+pub use projects::{ProjectPeerings, Projects};
 pub use recipes::Recipes;
 pub use repositories::{Repositories, RepositoryContents};
 pub use runtimes::{RuntimeHandle, Runtimes};
