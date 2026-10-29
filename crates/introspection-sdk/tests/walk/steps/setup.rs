@@ -643,7 +643,6 @@ pub async fn recipe(w: &mut Walk) {
       "validation": {
         "checked_at": "[timestamp]",
         "diagnostics": [],
-        "error_message": null,
         "status": "valid",
         "validator_name": "introspection-recipe-check",
         "validator_version": "0.12.0"
