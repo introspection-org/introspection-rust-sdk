@@ -74,7 +74,9 @@ impl Remotes {
     /// second one installs its choice as the process default first.
     #[cfg(feature = "remotes")]
     pub async fn connect(&self) -> Result<RemoteSocket, RemoteConnectError> {
-        let url = self.connect_url().map_err(RemoteConnectError::Config)?;
+        let url = self
+            .connect_url()
+            .map_err(|err| RemoteConnectError::InvalidUrl(err.to_string()))?;
         connect_remote(&url, &self.http.config().token).await
     }
 }
@@ -92,10 +94,10 @@ pub type RemoteSocket =
 #[non_exhaustive]
 pub enum RemoteConnectError {
     /// The client's Data Plane URL has no WebSocket form.
-    #[error(transparent)]
-    Config(IntrospectionAPIError),
-    /// The connection or the upgrade failed. Boxed: the WebSocket error
-    /// holds a whole HTTP response.
+    #[error("invalid configuration: {0}")]
+    InvalidUrl(String),
+    /// The connection or the upgrade failed. Boxed, which keeps the error
+    /// small: the WebSocket error can hold a whole HTTP response.
     #[error("remote connection failed: {0}")]
     WebSocket(Box<tokio_tungstenite::tungstenite::Error>),
 }
