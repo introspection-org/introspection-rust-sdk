@@ -146,7 +146,7 @@ async fn run_opens_a_runner_whose_accessors_report_the_spec() {
     assert_eq!(deployment.slug, "gcp01");
     assert_eq!(deployment.region, "us-east-1");
     let ctx = runner.context();
-    assert_eq!(ctx.runtime_id, runtime_id);
+    assert_eq!(ctx.runtime_id, Some(runtime_id));
     assert_eq!(ctx.arm_label.as_deref(), Some("control"));
     assert_eq!(ctx.identity.user_id.as_deref(), Some("user_1"));
     assert!(!runner.is_closed());
@@ -353,7 +353,7 @@ async fn a_slug_opens_and_refreshes_a_runner_without_listing() {
     );
     assert_eq!(
         runner.context().runtime_id,
-        Uuid::parse_str(RUNTIME_ID).unwrap()
+        Some(Uuid::parse_str(RUNTIME_ID).unwrap())
     );
 
     runner.refresh().await.unwrap();

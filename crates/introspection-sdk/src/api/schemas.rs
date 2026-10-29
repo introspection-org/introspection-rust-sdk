@@ -5602,12 +5602,14 @@ pub struct RunRequest {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RunnerContext {
-    pub runtime_id: Uuid,
+    #[serde(default)]
+    pub runtime_id: Option<Uuid>,
     #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     #[serde(default)]
     pub experiment_id: Option<Uuid>,
-    pub recipe_id: Uuid,
+    #[serde(default)]
+    pub recipe_id: Option<Uuid>,
     #[serde(default)]
     pub recipe_repository_id: Option<Uuid>,
     #[serde(default)]
@@ -7434,7 +7436,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(
-            context.runtime_id.to_string(),
+            context.runtime_id.unwrap().to_string(),
             "00000000-0000-0000-0000-000000000041"
         );
         assert_eq!(
@@ -7442,6 +7444,22 @@ mod tests {
             "00000000-0000-0000-0000-000000000042"
         );
         assert_eq!(context.agent_name.as_deref(), Some("support-agent"));
+    }
+
+    #[test]
+    fn a_runner_context_decodes_without_runtime_and_recipe_ids() {
+        let context: RunnerContext = serde_json::from_value(json!({
+            "runtime_group_id": "00000000-0000-0000-0000-000000000042",
+            "identity": {}
+        }))
+        .unwrap();
+        assert!(context.runtime_id.is_none());
+        assert!(context.recipe_id.is_none());
+        assert!(context.experiment_id.is_none());
+
+        let empty: RunnerContext = serde_json::from_value(json!({})).unwrap();
+        assert!(empty.runtime_id.is_none() && empty.recipe_id.is_none());
+        assert!(empty.identity.user_id.is_none());
     }
 
     #[test]
