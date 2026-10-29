@@ -933,13 +933,151 @@ pub struct Recipe {
     /// The recipe's Cedar policies (`schema`, `policies`, `routes`).
     #[serde(default)]
     pub policies: Option<serde_json::Value>,
-    /// Result of the recipe check (`status`, `validator_name`,
-    /// `validator_version`, `checked_at`, `error_message`, `diagnostics`).
+    /// Result of the recipe check.
     #[serde(default)]
-    pub validation: Option<BTreeMap<String, serde_json::Value>>,
+    pub validation: Option<RecipeValidation>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Where a Recipe's check stands. `pending` and `failed` may be retried
+/// (`RecipeUpdateParams::retry_validation`, with `authoring`); `valid` and `invalid` are the
+/// checker's verdict. `Other` captures a status the CP adds later so the rest
+/// of the record still reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RecipeValidationStatus {
+    #[default]
+    Pending,
+    Valid,
+    Invalid,
+    /// The check could not run; `error_message` says why.
+    Failed,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RecipeValidationStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::Valid => "valid",
+            Self::Invalid => "invalid",
+            Self::Failed => "failed",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for RecipeValidationStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "pending" => Self::Pending,
+            "valid" => Self::Valid,
+            "invalid" => Self::Invalid,
+            "failed" => Self::Failed,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RecipeValidationStatus {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RecipeValidationStatus {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// Whether a diagnostic fails the check (`error`) or only reports a finding
+/// (`warning`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RecipeValidationSeverity {
+    #[default]
+    Error,
+    Warning,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl RecipeValidationSeverity {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for RecipeValidationSeverity {
+    fn from(s: &str) -> Self {
+        match s {
+            "error" => Self::Error,
+            "warning" => Self::Warning,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for RecipeValidationSeverity {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RecipeValidationSeverity {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
+/// One-based source location of a diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RecipeValidationSpan {
+    pub line: u32,
+    pub column: u32,
+}
+
+/// One finding of the Recipe check on the committed content.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RecipeValidationDiagnostic {
+    pub code: String,
+    #[serde(default)]
+    pub severity: RecipeValidationSeverity,
+    /// The file the diagnostic is about.
+    pub path: String,
+    #[serde(default)]
+    pub span: Option<RecipeValidationSpan>,
+    pub message: String,
+    #[serde(default)]
+    pub help: Option<String>,
+}
+
+/// Result of the Recipe check. `diagnostics` carry the checker's per-file
+/// findings; `error_message` says why a `failed` check could not run.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RecipeValidation {
+    #[serde(default)]
+    pub status: RecipeValidationStatus,
+    #[serde(default)]
+    pub validator_name: Option<String>,
+    #[serde(default)]
+    pub validator_version: Option<String>,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub diagnostics: Vec<RecipeValidationDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -1020,15 +1158,15 @@ impl RecipeCreateParams {
 #[cfg(feature = "authoring")]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RecipeValidationUpdate {
-    /// Only `pending` is accepted.
-    pub status: String,
+    /// Only [`RecipeValidationStatus::Pending`] is accepted.
+    pub status: RecipeValidationStatus,
 }
 
 #[cfg(feature = "authoring")]
 impl RecipeValidationUpdate {
     pub fn pending() -> Self {
         Self {
-            status: "pending".into(),
+            status: RecipeValidationStatus::Pending,
         }
     }
 }
