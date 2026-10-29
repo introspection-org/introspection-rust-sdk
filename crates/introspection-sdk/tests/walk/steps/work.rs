@@ -259,7 +259,7 @@ pub async fn task(w: &mut Walk) {
         })
         .await
         .expect("open a runner on the runtime");
-    assert_eq!(runner.context().recipe_id, recipe_id);
+    assert_eq!(runner.context().recipe_id, Some(recipe_id));
     // What a caller with its own HTTP client needs to reach the DP.
     assert!(!runner.session_token().is_empty());
     assert!(runner.deployment().endpoint.starts_with("http"));
