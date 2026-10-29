@@ -637,7 +637,7 @@ pub async fn recipe(w: &mut Walk) {
       "org_id": "[uuid]",
       "project_id": "[uuid]",
       "repository_id": "[uuid]",
-      "slug": "hello-mcp-production-main-543b8db50a83",
+      "slug": "hello-mcp-production-main-c77869250658",
       "sub_path": ".",
       "updated_at": "[timestamp]",
       "validation": {

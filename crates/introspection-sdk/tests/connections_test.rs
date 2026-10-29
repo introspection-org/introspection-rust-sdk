@@ -131,7 +131,7 @@ async fn list_parses_connections_and_sends_its_filters() {
 
     let connection = found[0].as_ref().unwrap();
     assert_eq!(connection.id, id(CONNECTION_ID));
-    assert_eq!(connection.member_id, id(MEMBER_ID));
+    assert_eq!(connection.member_id, Some(id(MEMBER_ID)));
     assert_eq!(connection.app, "gmail");
     assert_eq!(connection.account_name.as_deref(), Some("ada@example.com"));
     assert!(connection.healthy);
