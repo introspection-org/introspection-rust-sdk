@@ -11,8 +11,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use crate::api::http::ResponseBody;
 use futures::Stream;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::api::error::{ApiResult, IntrospectionAPIError};
@@ -89,7 +89,7 @@ pub struct Paginator<T> {
 
 impl<T> Paginator<T>
 where
-    T: DeserializeOwned + Send + 'static,
+    T: ResponseBody + Send + 'static,
 {
     pub(crate) fn new<P: Serialize>(
         http: Arc<HttpClient>,
@@ -209,7 +209,7 @@ where
 
 impl<T> Stream for Paginator<T>
 where
-    T: DeserializeOwned + Send + Unpin + 'static,
+    T: ResponseBody + Send + Unpin + 'static,
 {
     type Item = ApiResult<T>;
 

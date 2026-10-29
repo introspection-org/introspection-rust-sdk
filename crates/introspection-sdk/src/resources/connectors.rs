@@ -187,7 +187,7 @@ impl Connectors {
         connector_id: Uuid,
         params: &ConnectorAppListParams,
     ) -> ApiResult<Vec<ConnectorApp>> {
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, serde::Serialize)]
         struct Response {
             data: Vec<ConnectorApp>,
         }
@@ -207,7 +207,7 @@ impl Connectors {
         &self,
         params: &ConnectorCustomAppSearchParams,
     ) -> ApiResult<Vec<ConnectorApp>> {
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, serde::Serialize)]
         struct Response {
             data: Vec<ConnectorApp>,
         }
