@@ -124,6 +124,11 @@ const TYPED: &[(&str, &str, Check)] = &[
     ),
     (
         "GET",
+        r"^/v1/connections$",
+        round_trip::<Paginated<MemberConnection>>,
+    ),
+    (
+        "GET",
         r"^/v1/connectors$",
         round_trip::<Paginated<Connector>>,
     ),

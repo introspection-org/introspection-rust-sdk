@@ -1061,16 +1061,37 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
         .await
         .expect("approvals");
     assert!(approvals.is_empty());
-    // `/v1/connections` is the apps a member connects through an app
-    // (Pipedream) connector, which needs that provider's credentials; with
-    // none on the project every route answers 404.
+    // `/v1/connections` lists the project's connection rows: the project's own
+    // grant on the walk's connector (step 8), and no member's. Connecting an
+    // app (Pipedream) needs that provider's credentials; with none on the
+    // project, an app connect and an unknown id answer 404.
     let connections = member.connections();
-    expect_not_found(
-        connections
-            .list(&MemberConnectionListParams::default())
-            .collect_all(0)
-            .await,
-    );
+    let listed = connections
+        .list(&MemberConnectionListParams::default())
+        .collect_all(0)
+        .await
+        .expect("list connections");
+    assert_stable!(listed, @r#"
+    [
+      {
+        "app": "hello-mcp",
+        "connector": {
+          "id": "[uuid]",
+          "provider": "hello-mcp",
+          "slug": "hello-mcp"
+        },
+        "created_at": "[timestamp]",
+        "created_by_member_id": "[uuid]",
+        "healthy": true,
+        "id": "[uuid]",
+        "last_verified_at": "[timestamp]",
+        "owner": "project",
+        "status": "active",
+        "subject_type": "app",
+        "updated_at": "[timestamp]"
+      }
+    ]
+    "#);
     let id: Uuid = "019a1000-0000-7000-8000-0000000000c1"
         .parse()
         .expect("a uuid");
