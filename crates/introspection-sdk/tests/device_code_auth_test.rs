@@ -200,3 +200,56 @@ async fn logout_reports_a_server_error() {
     let err = oidc_logout(Some(&cp.uri()), "cookie").await.unwrap_err();
     assert_eq!(err.status(), Some(500));
 }
+
+#[tokio::test]
+async fn refresh_posts_the_keys_the_login_returned() {
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/token"))
+        .and(body_string(
+            "grant_type=refresh_token&refresh_token=rt&client_id=cli&session_id=s&org_id=o",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "at2",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "session_id": "s",
+            "org_id": "o",
+        })))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    let token = auth(&cp).refresh("rt", "s", "o").await.unwrap();
+    assert_eq!(token.access_token, "at2");
+    assert_eq!(token.refresh_token, None, "not rotated: keep the old one");
+
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/token"))
+        .respond_with(oauth_error("invalid_grant"))
+        .mount(&cp)
+        .await;
+    let err = auth(&cp).refresh("rt", "s", "o").await.unwrap_err();
+    assert_eq!(err.code(), Some("invalid_grant"));
+}
+
+#[tokio::test]
+async fn development_credential_exchanges_the_login_access_token() {
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/token"))
+        .and(body_string(
+            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=cli\
+             &subject_token=login&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"access_token": "dev", "token_type": "Bearer", "expires_in": 300})),
+        )
+        .expect(1)
+        .mount(&cp)
+        .await;
+    let credential = auth(&cp).development_credential("login").await.unwrap();
+    assert_eq!(credential.access_token, "dev");
+    assert_eq!(credential.expires_in, 300);
+}

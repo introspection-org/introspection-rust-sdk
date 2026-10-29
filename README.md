@@ -708,6 +708,10 @@ oidc_logout(None, token.cp_session.as_deref().unwrap_or_default()).await?;
 - `wait_for_token` honours the server's `interval` (bounded to 1–60 s), backs
   off on `slow_down`, retries a dropped connection, and gives up when the code
   expires. `poll_token` is one poll, for a caller that runs its own loop.
+- `auth.refresh(refresh_token, session_id, org_id)` renews the login with the
+  three values it returned; keep the old refresh token when the answer omits it.
+- `auth.development_credential(access_token)` trades the login for the
+  short-lived bearer `introspection dev` attaches with.
 - `oidc_logout` does not follow the identity provider redirect: the first
   response has already revoked the session.
 

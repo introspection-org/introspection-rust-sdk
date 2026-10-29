@@ -76,10 +76,12 @@ async fn members(w: &Walk) -> Organization {
 
 /// What `introspection login`, `logout` and `dev` reach through the SDK,
 /// short of a person approving in a browser: a device code, one poll that
-/// finds it still pending, a sign-out of a cookie that names no session (the
-/// owner's own would end the walk's session), and the remote connection's
-/// protocol description. The WebSocket itself is not recorded: it bypasses
-/// the walk's HTTP proxy, and attaching needs a development login.
+/// finds it still pending, a refresh and a development-credential exchange
+/// that the server refuses (only an approved login holds what they take), a
+/// sign-out of a cookie that names no session (the owner's own would end the
+/// walk's session), and the remote connection's protocol description. The
+/// WebSocket itself is not recorded: it bypasses the walk's HTTP proxy, and
+/// attaching needs a development login.
 async fn sign_in_routes(w: &Walk) {
     let device = DeviceCodeAuth::new(
         DeviceCodeAuthConfig::builder()
@@ -103,6 +105,23 @@ async fn sign_in_routes(w: &Walk) {
     assert!(
         matches!(poll, DeviceTokenPoll::Pending),
         "nobody approved the code, so it is pending: {poll:?}"
+    );
+    let nil = uuid::Uuid::nil().to_string();
+    let refused = device
+        .refresh("walk-no-refresh-token", &nil, &nil)
+        .await
+        .expect_err("a refresh token no login issued is refused");
+    assert_eq!(
+        (refused.status(), refused.code()),
+        (Some(400), Some("invalid_grant"))
+    );
+    let refused = device
+        .development_credential("walk-not-a-login")
+        .await
+        .expect_err("a subject that is not a login is refused");
+    assert_eq!(
+        (refused.status(), refused.code()),
+        (Some(400), Some("invalid_grant"))
     );
     oidc_logout(Some(&w.settings.base_api_url), "walk-no-session")
         .await

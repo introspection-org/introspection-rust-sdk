@@ -18,6 +18,8 @@ pub const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_cod
 pub const DEVICE_FLOW_CLIENT_ID: &str = "cli";
 
 const DEVICE_CODE_PATH: &str = "/v1/oauth/device/code";
+const GRANT_REFRESH_TOKEN: &str = "refresh_token";
+const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
 
 /// The poll interval when the server names none (RFC 8628 §3.2).
 const DEFAULT_INTERVAL_SECS: u64 = 5;
@@ -135,6 +137,9 @@ impl DeviceCodeParams {
 /// with ([`OAuthToken`]) carry `cp_session` for Control Plane routes,
 /// `refresh_token` / `session_id` / `org_id` for the refresh grant, and the
 /// `cp_url` / `dp_url` / `git_url` / `platform_url` the login resolved.
+/// [`Self::refresh`] renews it before it expires, and
+/// [`Self::development_credential`] trades it for the short-lived bearer
+/// `introspection dev` attaches with.
 ///
 /// ```rust,no_run
 /// use introspection_sdk::auth::{DeviceCodeAuth, DeviceCodeAuthConfig, DeviceCodeParams};
@@ -273,6 +278,48 @@ impl DeviceCodeAuth {
                 Err(err) => return Err(err),
             }
         }
+    }
+
+    /// `POST /v1/oauth/token` with the `refresh_token` grant: renew the
+    /// login's access token.
+    ///
+    /// Keyed on the three values the login returned. The answer may rotate
+    /// `refresh_token`; when it leaves it out, keep the one you have (RFC 6749
+    /// §5.1). A refresh token that no longer works is a `400` whose
+    /// [`IntrospectionAPIError::code`] is `invalid_grant`: sign in again.
+    pub async fn refresh(
+        &self,
+        refresh_token: &str,
+        session_id: &str,
+        org_id: &str,
+    ) -> ApiResult<OAuthToken> {
+        let form = [
+            ("grant_type", GRANT_REFRESH_TOKEN),
+            ("refresh_token", refresh_token),
+            ("client_id", self.client_id.as_str()),
+            ("session_id", session_id),
+            ("org_id", org_id),
+        ];
+        post_token_form_with(&self.http, &self.base_api_url, &form).await
+    }
+
+    /// `POST /v1/oauth/token` with the RFC 8693 token-exchange grant: trade a
+    /// login's access token for the short-lived development credential
+    /// `introspection dev` attaches with.
+    ///
+    /// Only a business member's login holding `runtimes:write` and scoped to
+    /// a project qualifies. The answer carries `access_token` and
+    /// `expires_in`; mint a new one when it expires. A login that does not
+    /// qualify is a `400` (`unauthorized_client`, `invalid_target` or
+    /// `invalid_grant`) whose `error_description` says why.
+    pub async fn development_credential(&self, access_token: &str) -> ApiResult<OAuthToken> {
+        let form = [
+            ("grant_type", crate::auth::GRANT_TOKEN_EXCHANGE),
+            ("client_id", self.client_id.as_str()),
+            ("subject_token", access_token),
+            ("subject_token_type", ACCESS_TOKEN_TYPE),
+        ];
+        post_token_form_with(&self.http, &self.base_api_url, &form).await
     }
 }
 
