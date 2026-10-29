@@ -75,7 +75,7 @@ impl Remotes {
     #[cfg(feature = "remotes")]
     pub async fn connect(&self) -> Result<RemoteSocket, RemoteConnectError> {
         let url = self.connect_url().map_err(RemoteConnectError::Config)?;
-        Ok(connect_remote(&url, &self.http.config().token).await?)
+        connect_remote(&url, &self.http.config().token).await
     }
 }
 
@@ -94,19 +94,24 @@ pub enum RemoteConnectError {
     /// The client's Data Plane URL has no WebSocket form.
     #[error(transparent)]
     Config(IntrospectionAPIError),
-    /// The connection or the upgrade failed.
+    /// The connection or the upgrade failed. Boxed: the WebSocket error
+    /// holds a whole HTTP response.
     #[error("remote connection failed: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(Box<tokio_tungstenite::tungstenite::Error>),
+}
+
+#[cfg(feature = "remotes")]
+impl From<tokio_tungstenite::tungstenite::Error> for RemoteConnectError {
+    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(Box::new(err))
+    }
 }
 
 /// Open the remote connection at `url` (a `ws[s]://` URL, see
 /// [`remotes_connect_url`]) with `token` as `Authorization: Bearer`. What
 /// [`Remotes::connect`] does with the client's own URL and token.
 #[cfg(feature = "remotes")]
-pub async fn connect_remote(
-    url: &str,
-    token: &str,
-) -> Result<RemoteSocket, tokio_tungstenite::tungstenite::Error> {
+pub async fn connect_remote(url: &str, token: &str) -> Result<RemoteSocket, RemoteConnectError> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
     use tokio_tungstenite::tungstenite::http::header::{HeaderValue, AUTHORIZATION};
 
