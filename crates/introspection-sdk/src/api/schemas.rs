@@ -1854,6 +1854,10 @@ pub struct Runtime {
     /// runtime group.
     #[serde(default)]
     pub template_ref: Option<String>,
+    /// The runtime peering the runtime group's sessions take their
+    /// configuration from, projected from the runtime group.
+    #[serde(default)]
+    pub peering_id: Option<Uuid>,
     /// Every MCP server the runtime's recipe declares, resolved for each
     /// environment the runtime serves; sent only by
     /// [`crate::Runtimes::get_with_mcp_requirements`].
