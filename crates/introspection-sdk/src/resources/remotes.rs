@@ -3,7 +3,7 @@
 //! A developer's machine dials the Data Plane at `/v1/remotes/connect`, a
 //! WebSocket, and serves its local MCP servers and Recipe edits to the
 //! development tasks of one Runtime. This namespace opens that socket with
-//! the client's Data Plane URL and token ([`Remotes::connect`], behind the
+//! the client's Data Plane URL and token (`Remotes::connect`, behind the
 //! `remotes` cargo feature) and reads the route's protocol description
 //! ([`Remotes::connect_docs`]).
 //!
@@ -53,7 +53,7 @@ impl Remotes {
         self.http.get_json(REMOTES_CONNECT_PATH, &()).await
     }
 
-    /// The `ws[s]://` URL [`Self::connect`] dials, derived from the client's
+    /// The `ws[s]://` URL `connect` (feature `remotes`) dials, derived from the client's
     /// Data Plane URL (see [`remotes_connect_url`]).
     pub fn connect_url(&self) -> ApiResult<String> {
         remotes_connect_url(&self.http.config().api_url)
