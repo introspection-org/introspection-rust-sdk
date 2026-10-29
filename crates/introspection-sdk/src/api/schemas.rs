@@ -942,7 +942,7 @@ pub struct Recipe {
 }
 
 /// Where a Recipe's check stands. `pending` and `failed` may be retried
-/// ([`RecipeUpdateParams::retry_validation`]); `valid` and `invalid` are the
+/// (`RecipeUpdateParams::retry_validation`, with `authoring`); `valid` and `invalid` are the
 /// checker's verdict. `Other` captures a status the CP adds later so the rest
 /// of the record still reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
