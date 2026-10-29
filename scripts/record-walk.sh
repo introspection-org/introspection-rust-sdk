@@ -7,10 +7,12 @@
 #   scripts/record-walk.sh                                 # cloud main, the current branch
 #   scripts/record-walk.sh --cloud-ref my-cloud-branch --sdk-ref my-sdk-branch
 #
-# The SDK ref must be pushed and not behind its remote: the workflow checks it
-# out from GitHub, not from this checkout. WALK_RECORD_LOCK, when set, names a
-# directory used as a lock so only one recording runs at a time on this machine.
-# Needs gh (signed in) and jq.
+# Run it from a checkout of this repository: the one around the current
+# directory, else the one holding this script. The SDK ref must be pushed and not
+# behind its remote: the workflow checks it out from GitHub, not from this
+# checkout. The run's sdk-coverage artifact stays in target/record-walk/<run id>.
+# WALK_RECORD_LOCK, when set, names a directory used as a lock so only one
+# recording runs at a time on this machine. Needs gh (signed in) and jq.
 #
 # Another SDK copies this script and changes only the four settings below.
 set -euo pipefail
@@ -30,7 +32,17 @@ POLL=30
 die() { echo "record-walk: $*" >&2; exit 1; }
 say() { echo "record-walk: $*" >&2; }
 
-cd "$(dirname "$0")/.."
+# The git remote of a `git remote -v` listing that fetches from SDK_REPO.
+sdk_remote() { awk -v r="$SDK_REPO" '$2 ~ r"(\\.git)?$" && $3 == "(fetch)" { print $1; exit }'; }
+
+script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [ -n "$top" ] && [ -n "$(git -C "$top" remote -v | sdk_remote)" ]; then
+  cd "$top"
+else
+  cd "$(dirname "$script")/.."
+fi
+[ -n "$(git remote -v 2>/dev/null | sdk_remote)" ] || die "run it from a checkout of $SDK_REPO"
 
 cloud_ref=main
 sdk_ref=$(git branch --show-current)
@@ -38,7 +50,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --cloud-ref) cloud_ref=${2:?--cloud-ref needs a value}; shift 2 ;;
     --sdk-ref) sdk_ref=${2:?--sdk-ref needs a value}; shift 2 ;;
-    -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,17p' "$script" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -47,7 +59,7 @@ command -v gh >/dev/null || die "gh is not installed"
 command -v jq >/dev/null || die "jq is not installed"
 
 # 1. The workflow records what GitHub has, so the SDK ref must be pushed and current.
-remote=$(git remote -v | awk -v r="$SDK_REPO" '$2 ~ r"(\\.git)?$" && $3 == "(fetch)" { print $1; exit }')
+remote=$(git remote -v | sdk_remote)
 [ -n "$remote" ] || die "no git remote points at $SDK_REPO"
 git fetch --quiet "$remote" "+refs/heads/$sdk_ref:refs/remotes/$remote/$sdk_ref" 2>/dev/null ||
   die "$sdk_ref is not pushed to $SDK_REPO; push it first"
@@ -58,10 +70,8 @@ if local_sha=$(git rev-parse --verify --quiet "refs/heads/$sdk_ref"); then
 fi
 say "recording $SDK_REPO@$sdk_ref ($sdk_sha) against $CLOUD_REPO@$cloud_ref"
 
-tmp=$(mktemp -d)
 lock_held=
 cleanup() {
-  rm -rf "$tmp"
   if [ -n "$lock_held" ]; then rm -rf "$WALK_RECORD_LOCK"; fi
 }
 trap cleanup EXIT
@@ -119,11 +129,14 @@ done
 say "run $conclusion"
 
 # 5. The walk is advisory in the workflow, so read its own report, not the run's conclusion.
-art="$tmp/sdk-coverage"
+# The artifact stays, so a failed walk can be read without downloading it again.
+art="$PWD/target/record-walk/$run_id"
+rm -rf "$art"
 gh run download "$run_id" --repo "$CLOUD_REPO" --name sdk-coverage --dir "$art" ||
   die "the run ($conclusion) left no sdk-coverage artifact: $run_url"
 report="$art/walk-report-$SDK.json"
 log="$art/walk-$SDK.log"
+say "artifact in $art"
 failed=$(jq -r 'if (.steps | length) == 0 then "no steps in the walk report" else
   .steps[] | select(.status != "passed" and .status != "skipped") | "step \(.n) \(.name): \(.status)" end' \
   "$report" 2>/dev/null) || failed="no readable walk report ($(basename "$report"))"
@@ -133,10 +146,11 @@ if [ -n "$failed" ]; then
   if [ -f "$log" ]; then
     grep -E -A1 'panicked at|^test result|step failed' "$log" | grep -v '^--$' | tail -40 >&2 || tail -40 "$log" >&2
   fi
+  say "read $log (a snapshot diff follows its \"Snapshot Summary\" line) and $report"
   die "the $SDK walk failed in $run_url; nothing copied"
 fi
 for f in "${RECORDING_FILES[@]}"; do
-  [ -s "$art/$ARTIFACT_RECORDING_DIR/$f" ] || die "the artifact has no $ARTIFACT_RECORDING_DIR/$f: $run_url"
+  [ -s "$art/$ARTIFACT_RECORDING_DIR/$f" ] || die "the artifact has no $ARTIFACT_RECORDING_DIR/$f: $run_url (downloaded to $art)"
 done
 mkdir -p "$RECORDING_DIR"
 for f in "${RECORDING_FILES[@]}"; do cp "$art/$ARTIFACT_RECORDING_DIR/$f" "$RECORDING_DIR/$f"; done
@@ -144,6 +158,7 @@ for f in "${RECORDING_FILES[@]}"; do cp "$art/$ARTIFACT_RECORDING_DIR/$f" "$RECO
 # 6. Report.
 echo
 echo "Run: $run_url ($conclusion; $CLOUD_REPO@$cloud_ref, $SDK=$sdk_ref $sdk_sha)"
+echo "Artifact: $art (walk-$SDK.log, walk-report-$SDK.json)"
 grep -F "| \`$SDK\`" "$art/summary.md" || true
 echo
 git status --short -- "$RECORDING_DIR"
