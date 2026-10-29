@@ -258,8 +258,8 @@ pub use schemas::{
     Paginated, PaginationParams, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
     PatternPayload, PolicyEntity, Project, ProjectCreateParams, ProjectListParams, ProjectSelector,
     ProjectUpdateParams, Recipe, RecipeListParams, RecipeValidation, RecipeValidationDiagnostic,
-    RecipeValidationSeverity, RecipeValidationSpan, RecipeValidationStatus, Repository,
-    RepositoryBranch, RepositoryBranchSort, RepositoryCommit, RepositoryCommitDetail,
+    RecipeValidationSeverity, RecipeValidationSpan, RecipeValidationStatus, RemotesConnectDocs,
+    Repository, RepositoryBranch, RepositoryBranchSort, RepositoryCommit, RepositoryCommitDetail,
     RepositoryCommitFile, RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent,
     RepositoryDirectory, RepositoryEntry, RepositoryEntryType, RepositoryFile,
     RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider,
@@ -275,7 +275,7 @@ pub use schemas::{
     TokenCreateParams, Trajectory, TrajectoryAssistantRecord, TrajectoryMetaRecord,
     TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall, TrajectoryToolRecord,
     TrajectoryUserRecord, TypedEvent, Variable, VariableCreateParams, VariableKind,
-    VariableUpdateParams,
+    VariableUpdateParams, WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs,
 };
 // The project-authoring writes, behind the `authoring` feature.
 #[cfg(feature = "authoring")]

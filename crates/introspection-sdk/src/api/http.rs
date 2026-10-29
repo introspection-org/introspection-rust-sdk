@@ -141,6 +141,11 @@ impl HttpClient {
         self.closed.store(true, Ordering::Release);
     }
 
+    /// The base URL and credential this client was built with.
+    pub(crate) fn config(&self) -> &HttpConfig {
+        &self.cfg
+    }
+
     /// `Err` once [`close`](Self::close) has been called.
     fn check_open(&self) -> ApiResult<()> {
         if self.closed.load(Ordering::Acquire) {

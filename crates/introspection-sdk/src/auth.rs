@@ -16,6 +16,8 @@
 //!   exchange for an `spa` Application's hosted-login callback.
 //! * [`EmailCodeAuth`] — a `native` Application's email-code sign-in, with
 //!   the refresh-token rotation and sign-out that keep its session alive.
+//! * [`DeviceCodeAuth`] — the RFC 8628 device-code login `introspection
+//!   login` runs, and [`oidc_logout`], which ends the session it made.
 //!
 //! Every helper returns the shared [`OAuthToken`] shape, which carries
 //! `dp_url` — the Data Plane endpoint the CP resolved for the token's
@@ -48,8 +50,14 @@
 //! credential: Control Plane routes answer it with `401`. Every token's
 //! scopes are capped by its Application's `allowed_scopes`.
 
+mod device_code;
 mod email_code;
 
+pub use device_code::{
+    DeviceCodeAuth, DeviceCodeAuthConfig, DeviceCodeAuthConfigBuilder, DeviceCodeParams,
+    DeviceCodeParamsBuilder, DeviceCodeResponse, DeviceTokenPoll, DEVICE_CODE_GRANT,
+    DEVICE_FLOW_CLIENT_ID,
+};
 pub use email_code::{
     AuthChangeEvent, AuthSession, AuthState, EmailCodeAuth, EmailCodeAuthConfig,
     EmailCodeAuthConfigBuilder, EMAIL_CODE_GRANT,
@@ -65,6 +73,7 @@ use crate::api::error::ApiResult;
 use crate::types::defaults;
 
 const TOKEN_PATH: &str = "/v1/oauth/token";
+const OIDC_LOGOUT_PATH: &str = "/v1/oidc/logout";
 const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
 const GRANT_TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
@@ -360,6 +369,35 @@ pub async fn authorization_code_token(params: AuthorizationCodeParams) -> ApiRes
         ("code_verifier", &params.code_verifier),
     ];
     post_token_form(&base, &form).await
+}
+
+/// `GET /v1/oidc/logout`: end the Control Plane session behind a
+/// `cp_session` cookie (the one [`OAuthToken::cp_session`] carries), and with
+/// it the session's Data Plane tokens.
+///
+/// The first response has already revoked the session. Its redirect starts
+/// the browser's sign-out at the identity provider, which a headless client
+/// has no use for, so it is not followed: a `3xx` is success. A cookie that
+/// names no live session revokes nothing and answers the same way.
+pub async fn oidc_logout(base_api_url: Option<&str>, cp_session: &str) -> ApiResult<()> {
+    let base = resolve_base_api_url(base_api_url);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(defaults::API_TIMEOUT_SECS))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let res = client
+        .get(format!("{base}{OIDC_LOGOUT_PATH}"))
+        .header(
+            reqwest::header::COOKIE,
+            format!("intro_cp_session={cp_session}"),
+        )
+        .send()
+        .await?;
+    let status = res.status();
+    if !status.is_success() && !status.is_redirection() {
+        return Err(crate::api::http::to_api_error(res, status).await);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

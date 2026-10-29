@@ -63,9 +63,10 @@
 //! `Endpoints::create` / `Endpoints::update` / `Endpoints::delete`, and
 //! `Repositories::create` (hosted, or a linked GitHub repository) /
 //! `Repositories::delete`. Experiments and judges are still authored by
-//! publishing a Recipe. The `introspection dev` tunnel
-//! (`/v1/remotes/connect`) stays out by design: it is a protobuf WebSocket
-//! protocol owned by the CLI's `introspection-remote-protocol` crate.
+//! publishing a Recipe. The `introspection dev` remote connection
+//! (`/v1/remotes/connect`) is [`Remotes`]: it opens the WebSocket behind the
+//! `remotes` cargo feature, and the protobuf frames that cross it stay with
+//! the CLI's `introspection-remote-protocol` crate.
 
 pub mod aauth;
 pub mod annotations;
@@ -85,6 +86,7 @@ pub mod oidc;
 pub mod organizations;
 pub mod projects;
 pub mod recipes;
+pub mod remotes;
 pub mod repositories;
 pub mod runtimes;
 pub mod tags;
@@ -109,6 +111,7 @@ pub use oidc::Oidc;
 pub use organizations::Organizations;
 pub use projects::{ProjectPeerings, Projects};
 pub use recipes::Recipes;
+pub use remotes::Remotes;
 pub use repositories::{Repositories, RepositoryContents};
 pub use runtimes::{RuntimeHandle, Runtimes};
 pub use tags::Tags;

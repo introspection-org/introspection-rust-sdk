@@ -5615,6 +5615,50 @@ pub struct TaskCommandListParams {
     pub status: Option<TaskCommandStatus>,
 }
 
+// ----- remotes (DP) ----------------------------------------------------------
+
+/// What `GET /v1/remotes/connect` answers: the remote connection's protocol,
+/// described. WebSocket routes are not expressible in OpenAPI, so the Data
+/// Plane documents the socket on a `GET` of the same path.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemotesConnectDocs {
+    /// The socket's path, `/v1/remotes/connect`.
+    pub endpoint: String,
+    /// Which schemes the socket takes, and where.
+    pub protocol: String,
+    pub authentication: WsAuthenticationDocs,
+    /// The handshake, step by step, in order.
+    pub handshake: Vec<String>,
+    /// The `remote.proto` schema version the server speaks.
+    pub schema_version: i64,
+    /// How a frame is carried in a WebSocket message.
+    pub encoding: String,
+    pub message_protocol: WsMessageProtocolDocs,
+}
+
+/// How a WebSocket route authenticates.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WsAuthenticationDocs {
+    pub method: String,
+    pub description: String,
+    pub example: String,
+}
+
+/// The frames each side of the remote connection sends.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WsMessageProtocolDocs {
+    pub remote_to_cloud: Vec<WsFrameDocs>,
+    pub cloud_to_remote: Vec<WsFrameDocs>,
+}
+
+/// One frame of the remote protocol. `frame` is the field name in the
+/// protobuf `Frame.body` oneof.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WsFrameDocs {
+    pub frame: String,
+    pub description: String,
+}
+
 // ----- runner ----------------------------------------------------------------
 
 /// Identity captured at session creation. Drives experiment routing

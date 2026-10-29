@@ -39,6 +39,7 @@ cargo add introspection-sdk
 | `arrow` | Arrow IPC decode for the telemetry reads |
 | `testing` | In-memory span exporter and test helpers (implies `otel`) |
 | `strict-schema` | Fails a response decode on any field the SDK does not model |
+| `remotes` | `client.remotes().connect()`, the `introspection dev` remote connection (a WebSocket) |
 
 ### Catch API drift with `strict-schema`
 
@@ -684,6 +685,31 @@ let page = auth
   Plane.
 
 See [`examples/api/native_email_code.rs`](crates/introspection-sdk/examples/api/native_email_code.rs).
+
+### Device-code login
+
+`introspection login` signs a member in with the OAuth 2.0 device
+authorization grant (RFC 8628): it shows a code, the member approves it in the
+browser, and the poll returns the login's tokens. Only the first-party CLI
+client (`cli`, the default) may start it today.
+
+```rust
+use introspection_sdk::auth::{oidc_logout, DeviceCodeAuth, DeviceCodeAuthConfig, DeviceCodeParams};
+
+let auth = DeviceCodeAuth::new(DeviceCodeAuthConfig::default())?;
+let device = auth.request_code(&DeviceCodeParams::default()).await?;
+println!("Open {} and enter {}", device.verification_uri, device.user_code);
+let token = auth.wait_for_token(&device).await?;
+
+// Later: end the Control Plane session the login made.
+oidc_logout(None, token.cp_session.as_deref().unwrap_or_default()).await?;
+```
+
+- `wait_for_token` honours the server's `interval` (bounded to 1–60 s), backs
+  off on `slow_down`, retries a dropped connection, and gives up when the code
+  expires. `poll_token` is one poll, for a caller that runs its own loop.
+- `oidc_logout` does not follow the identity provider redirect: the first
+  response has already revoked the session.
 
 ## Environment variables
 
