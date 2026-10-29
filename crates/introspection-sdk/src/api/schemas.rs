@@ -2740,6 +2740,10 @@ pub struct Connection {
     pub created_at: String,
     pub updated_at: String,
     pub connector_id: Uuid,
+    /// The project the connection serves. For a connector reached through a
+    /// runtime peering, the member's project, not the connector's own.
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
     /// `None` = org-owned (app subject); for a Slack workspace install this
     /// points at the workspace customer member.
     #[serde(default)]
@@ -2767,6 +2771,12 @@ pub struct Connection {
     /// routing id, not a secret.
     #[serde(default)]
     pub provider_account_id: Option<String>,
+    /// The provider's display name for the connected account.
+    #[serde(default)]
+    pub provider_account_name: Option<String>,
+    /// When the grant was last confirmed usable.
+    #[serde(default)]
+    pub last_verified_at: Option<String>,
     pub status: ConnectionStatus,
     #[serde(default)]
     pub token_expires_at: Option<String>,
@@ -4484,16 +4494,65 @@ pub struct AutomationTriggerResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemberConnection {
     pub id: Uuid,
-    /// The member who connected the app.
-    pub member_id: Uuid,
-    /// Provider application slug, e.g. `"gmail"`.
+    /// A member's own grant, or the project's own account on a connector.
+    #[serde(default)]
+    pub owner: ConnectionOwner,
+    /// The member whose grant this is; `None` for the project's own.
+    #[serde(default)]
+    pub member_id: Option<Uuid>,
+    /// The connector the connection is on, as the project sees it.
+    #[serde(default)]
+    pub connector: Option<ConnectorRef>,
+    #[serde(default)]
+    pub subject_type: Option<ConnectionSubjectType>,
+    /// Provider application slug, e.g. `"gmail"`, or the connector's slug
+    /// for a single-app connector.
     pub app: String,
+    /// The provider's id for the account, e.g. Pipedream's `apn_...`.
+    #[serde(default)]
+    pub provider_account_id: Option<String>,
     /// The provider account connected, when the provider names one.
     #[serde(default)]
     pub account_name: Option<String>,
-    /// `false` when the connection needs reconnecting.
+    /// Whether the grant was usable when last verified; `false` when the
+    /// connection needs reconnecting.
     pub healthy: bool,
+    #[serde(default)]
+    pub status: Option<ConnectionStatus>,
+    /// When the grant was last confirmed usable.
+    #[serde(default)]
+    pub last_verified_at: Option<String>,
+    /// The member who performed the grant.
+    #[serde(default)]
+    pub created_by_member_id: Option<Uuid>,
     pub created_at: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+open_wire_enum! {
+    /// Who owns a [`MemberConnection`].
+    #[derive(Default)]
+    pub enum ConnectionOwner {
+        /// A member's own grant.
+        #[default]
+        Member => "member",
+        /// The project's own account on a connector.
+        Project => "project",
+    }
+}
+
+/// The connector a [`MemberConnection`] is on, as the project sees it.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectorRef {
+    pub id: Uuid,
+    pub slug: String,
+    pub provider: String,
+    /// The peering the project reaches the connector through; `None` for
+    /// the project's own connector.
+    #[serde(default)]
+    pub peering: Option<String>,
 }
 
 /// Filters supported by `GET /v1/connections`. A caller who is not an
