@@ -56,9 +56,11 @@ platform's SDK coverage run against a live stack, so a field the API adds
 shows up there before a release ships without it. Keys in maps that are open
 by design are never reported: the `gen_ai.*` span attributes and the
 attribute families the SDK does not type, the GenAI message and part types,
-span `resource` and `events`, and endpoint `metadata`. A field nested inside a
-variant of a tagged enum, or inside a flattened struct, is not reported
-either: `serde_ignored` cannot see past serde's buffering there.
+span `resource` and `events`, and endpoint `metadata`. Fields inside a
+flattened struct or a variant of a tagged or untagged enum are reported too:
+the decode serializes the value again and reports what it dropped. So under
+`strict-schema`, a type you decode through the SDK's HTTP client must also
+implement `Serialize`.
 
 ## Run a task
 

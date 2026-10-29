@@ -31,7 +31,7 @@ impl ApiKeys {
 
     /// `GET /v1/api-keys` — every key of the project, unpaginated.
     pub async fn list(&self, params: &ApiKeyListParams) -> ApiResult<Vec<ApiKey>> {
-        #[derive(Deserialize)]
+        #[derive(Deserialize, serde::Serialize)]
         struct Page {
             api_keys: Vec<ApiKey>,
         }

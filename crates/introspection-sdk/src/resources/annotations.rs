@@ -169,7 +169,7 @@ pub struct AnnotationEventOptions {
     pub comment: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Member {
     id: Uuid,
     email: Option<String>,

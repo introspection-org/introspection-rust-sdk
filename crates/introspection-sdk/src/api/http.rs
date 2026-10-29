@@ -265,7 +265,7 @@ impl HttpClient {
     }
 
     /// GET that returns JSON. Pass `&()` for no query string.
-    pub async fn get_json<Q: Serialize, R: serde::de::DeserializeOwned>(
+    pub async fn get_json<Q: Serialize, R: ResponseBody>(
         &self,
         path: &str,
         query: &Q,
@@ -278,7 +278,7 @@ impl HttpClient {
     }
 
     /// POST a JSON body, decode JSON response.
-    pub async fn post_json<B: Serialize, R: serde::de::DeserializeOwned>(
+    pub async fn post_json<B: Serialize, R: ResponseBody>(
         &self,
         path: &str,
         body: &B,
@@ -290,7 +290,7 @@ impl HttpClient {
     }
 
     /// POST a JSON body; `None` on `204 No Content`, else the decoded JSON.
-    pub async fn post_json_or_no_content<B: Serialize, R: serde::de::DeserializeOwned>(
+    pub async fn post_json_or_no_content<B: Serialize, R: ResponseBody>(
         &self,
         path: &str,
         body: &B,
@@ -337,7 +337,7 @@ impl HttpClient {
     }
 
     /// PATCH a JSON body, decode JSON response.
-    pub async fn patch_json<B: Serialize, R: serde::de::DeserializeOwned>(
+    pub async fn patch_json<B: Serialize, R: ResponseBody>(
         &self,
         path: &str,
         body: &B,
@@ -367,7 +367,7 @@ impl HttpClient {
     /// Not auto-retried on `429`: a multipart [`Form`](reqwest::multipart::Form)
     /// is consumed on send and can't be rebuilt per attempt, and uploads are
     /// not the high-frequency path the retry policy targets.
-    pub async fn post_multipart<R: serde::de::DeserializeOwned>(
+    pub async fn post_multipart<R: ResponseBody>(
         &self,
         path: &str,
         form: reqwest::multipart::Form,
@@ -468,7 +468,27 @@ fn is_retryable_status(status: StatusCode, idempotent: bool) -> bool {
     }
 }
 
-pub(crate) async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -> ApiResult<R> {
+/// A type a JSON response decodes into.
+///
+/// With the `strict-schema` feature it must serialize too: the decode writes
+/// the value back to JSON to find the fields it dropped.
+/// Every response type the SDK returns does both.
+#[cfg(not(feature = "strict-schema"))]
+pub trait ResponseBody: serde::de::DeserializeOwned {}
+#[cfg(not(feature = "strict-schema"))]
+impl<T: serde::de::DeserializeOwned> ResponseBody for T {}
+
+/// A type a JSON response decodes into.
+///
+/// With the `strict-schema` feature it must serialize too: the decode writes
+/// the value back to JSON to find the fields it dropped.
+/// Every response type the SDK returns does both.
+#[cfg(feature = "strict-schema")]
+pub trait ResponseBody: serde::de::DeserializeOwned + Serialize {}
+#[cfg(feature = "strict-schema")]
+impl<T: serde::de::DeserializeOwned + Serialize> ResponseBody for T {}
+
+pub(crate) async fn decode_json<R: ResponseBody>(res: Response) -> ApiResult<R> {
     let route = res.url().path().to_string();
     let bytes = res.bytes().await?;
     decode_slice(&bytes, &route)
@@ -478,53 +498,137 @@ pub(crate) async fn decode_json<R: serde::de::DeserializeOwned>(res: Response) -
 ///
 /// With the `strict-schema` feature, a field in the body that `R` does not
 /// model fails the decode too, and the error lists every such field.
-pub(crate) fn decode_slice<R: serde::de::DeserializeOwned>(
-    bytes: &[u8],
-    route: &str,
-) -> ApiResult<R> {
-    let mut de = serde_json::Deserializer::from_slice(bytes);
-    let value = decode_from(&mut de, route)?;
-    de.end().map_err(parse_error)?;
-    Ok(value)
+#[cfg(not(feature = "strict-schema"))]
+pub(crate) fn decode_slice<R: ResponseBody>(bytes: &[u8], _route: &str) -> ApiResult<R> {
+    serde_json::from_slice(bytes).map_err(parse_error)
+}
+
+/// Decode a JSON response body read from `route`.
+///
+/// With the `strict-schema` feature, a field in the body that `R` does not
+/// model fails the decode too, and the error lists every such field.
+#[cfg(feature = "strict-schema")]
+pub(crate) fn decode_slice<R: ResponseBody>(bytes: &[u8], route: &str) -> ApiResult<R> {
+    decode_value(serde_json::from_slice(bytes).map_err(parse_error)?, route)
 }
 
 /// [`decode_slice`] for a body already parsed into a [`Value`].
-pub(crate) fn decode_value<R: serde::de::DeserializeOwned>(
-    value: Value,
-    route: &str,
-) -> ApiResult<R> {
-    decode_from(value, route)
+#[cfg(not(feature = "strict-schema"))]
+pub(crate) fn decode_value<R: ResponseBody>(value: Value, _route: &str) -> ApiResult<R> {
+    serde_json::from_value(value).map_err(parse_error)
+}
+
+/// [`decode_slice`] for a body already parsed into a [`Value`].
+///
+/// A field is unmodelled when the decode ignores it or drops it.
+/// `serde_ignored` sees the fields a struct ignores, but not inside a
+/// `#[serde(flatten)]` struct or an untagged or internally tagged enum: serde
+/// buffers those and discards what the type did not take without telling the
+/// deserializer. So the decoded value is serialized again, and a field of the
+/// body missing from that output was dropped. The response types keep what
+/// they model (`tests/round_trip_test.rs` holds them to that), so the diff
+/// finds exactly the unmodelled fields; see [`dropped_fields`] for the two
+/// differences that are not.
+#[cfg(feature = "strict-schema")]
+pub(crate) fn decode_value<R: ResponseBody>(value: Value, route: &str) -> ApiResult<R> {
+    let mut ignored = std::collections::HashSet::new();
+    let decoded: R = serde_ignored::deserialize(&value, |path| {
+        ignored.insert(json_path(&path));
+    })
+    .map_err(parse_error)?;
+    let back = serde_json::to_value(&decoded).map_err(|e| {
+        IntrospectionAPIError::Decode(format!("{route}: failed to re-encode the response: {e}"))
+    })?;
+    let mut unknown = Vec::new();
+    dropped_fields("$".to_string(), &value, Some(&back), &ignored, &mut unknown);
+    if unknown.is_empty() {
+        Ok(decoded)
+    } else {
+        Err(IntrospectionAPIError::Decode(format!(
+            "{route}: response fields this SDK does not model: {}",
+            unknown.join(", ")
+        )))
+    }
 }
 
 fn parse_error(e: serde_json::Error) -> IntrospectionAPIError {
     IntrospectionAPIError::Decode(format!("failed to parse JSON response: {e}"))
 }
 
-#[cfg(not(feature = "strict-schema"))]
-fn decode_from<'de, D, R>(de: D, _route: &str) -> ApiResult<R>
-where
-    D: serde::Deserializer<'de, Error = serde_json::Error>,
-    R: serde::Deserialize<'de>,
-{
-    R::deserialize(de).map_err(parse_error)
+/// Push to `out`, in body order, the path of every field of `sent` that
+/// `serde_ignored` reported or that `back`, its decoded value serialized
+/// again, does not hold.
+///
+/// A field missing from `back` is not counted when:
+///
+/// - its value is what the type leaves out when it serializes: `null` for a
+///   `None`, and `[]`, `{}` or `false` for the fields that skip an empty
+///   collection or a `false`. `serde_ignored` still reports such a field when
+///   it is unmodelled outside a buffered position.
+/// - `back` holds its value under a key the body did not send: the type read
+///   it through a `#[serde(alias)]` and writes it under its own name.
+///
+/// Only objects and arrays on both sides are walked into. A value the type
+/// writes back in another shape (a string enum, a timestamp) is a leaf.
+#[cfg(feature = "strict-schema")]
+fn dropped_fields(
+    path: String,
+    sent: &Value,
+    back: Option<&Value>,
+    ignored: &std::collections::HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    match (sent, back) {
+        (Value::Object(sent), Some(Value::Object(back))) => {
+            for (key, value) in sent {
+                let child = format!("{path}.{key}");
+                if ignored.contains(&child) {
+                    out.push(child);
+                    continue;
+                }
+                match back.get(key) {
+                    Some(other) => dropped_fields(child, value, Some(other), ignored, out),
+                    None if left_out_when_serialized(value) => {}
+                    None if back
+                        .iter()
+                        .any(|(k, v)| v == value && !sent.contains_key(k)) => {}
+                    None => out.push(child),
+                }
+            }
+        }
+        (Value::Array(sent), Some(Value::Array(back))) => {
+            for (index, value) in sent.iter().enumerate() {
+                dropped_fields(
+                    format!("{path}[{index}]"),
+                    value,
+                    back.get(index),
+                    ignored,
+                    out,
+                );
+            }
+        }
+        _ => {
+            // A leaf, or a value the type writes back in another shape. Only
+            // `serde_ignored` can still see inside it.
+            let prefix = [format!("{path}."), format!("{path}[")];
+            let mut nested: Vec<_> = ignored
+                .iter()
+                .filter(|p| prefix.iter().any(|pre| p.starts_with(pre.as_str())))
+                .cloned()
+                .collect();
+            nested.sort();
+            out.extend(nested);
+        }
+    }
 }
 
 #[cfg(feature = "strict-schema")]
-fn decode_from<'de, D, R>(de: D, route: &str) -> ApiResult<R>
-where
-    D: serde::Deserializer<'de, Error = serde_json::Error>,
-    R: serde::Deserialize<'de>,
-{
-    let mut unknown = Vec::new();
-    let value = serde_ignored::deserialize(de, |path| unknown.push(json_path(&path)))
-        .map_err(parse_error)?;
-    if unknown.is_empty() {
-        Ok(value)
-    } else {
-        Err(IntrospectionAPIError::Decode(format!(
-            "{route}: response fields this SDK does not model: {}",
-            unknown.join(", ")
-        )))
+fn left_out_when_serialized(value: &Value) -> bool {
+    match value {
+        Value::Null | Value::Bool(false) => true,
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        _ => false,
     }
 }
 
@@ -662,7 +766,7 @@ mod tests {
         })
     }
 
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     struct Tag {
         #[allow(dead_code)]
         id: String,
@@ -727,6 +831,96 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    /// A record whose fields serde buffers before it decodes them: a
+    /// flattened struct and an untagged enum.
+    #[cfg(feature = "strict-schema")]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    struct Buffered {
+        id: String,
+        #[serde(flatten)]
+        common: Common,
+        value: Either,
+    }
+
+    #[cfg(feature = "strict-schema")]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    struct Common {
+        name: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tags: Vec<String>,
+        #[serde(alias = "old_label")]
+        label: Option<String>,
+    }
+
+    #[cfg(feature = "strict-schema")]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[serde(untagged)]
+    enum Either {
+        Text(String),
+        Range { from: u32, to: u32 },
+    }
+
+    #[cfg(feature = "strict-schema")]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[serde(tag = "kind", rename_all = "snake_case")]
+    enum Tagged {
+        Point { x: u32 },
+    }
+
+    #[test]
+    #[cfg(feature = "strict-schema")]
+    fn strict_schema_reports_inside_a_flattened_struct_and_an_untagged_variant() {
+        let body = serde_json::json!({
+            "id": "a",
+            "name": "n",
+            "shade": "blue",
+            "value": {"from": 1, "to": 2, "step": 1}
+        });
+
+        let error = decode_value::<Buffered>(body, "/v1/x")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error
+                .ends_with("/v1/x: response fields this SDK does not model: $.shade, $.value.step"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "strict-schema")]
+    fn strict_schema_reports_inside_an_internally_tagged_variant() {
+        let body = serde_json::json!([{"kind": "point", "x": 1, "y": 2}]);
+
+        let error = decode_value::<Vec<Tagged>>(body, "/v1/x")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.ends_with("/v1/x: response fields this SDK does not model: $[0].y"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "strict-schema")]
+    fn strict_schema_accepts_what_a_type_leaves_out_or_renames() {
+        // `tags: []` and `label: null` are left out when the record
+        // serializes, and `old_label` comes back as `label`.
+        let body = serde_json::json!([
+            {"id": "a", "name": "n", "tags": [], "label": null, "value": "v"},
+            {"id": "b", "name": "n", "old_label": "l", "value": {"from": 1, "to": 2}}
+        ]);
+
+        let records = decode_value::<Vec<Buffered>>(body.clone(), "/v1/x").unwrap();
+        let from_bytes =
+            decode_slice::<Vec<Buffered>>(&serde_json::to_vec(&body).unwrap(), "/v1/x").unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(from_bytes[1].common.label.as_deref(), Some("l"));
     }
 
     #[test]
