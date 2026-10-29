@@ -129,8 +129,9 @@ failed=$(jq -r 'if (.steps | length) == 0 then "no steps in the walk report" els
   "$report" 2>/dev/null) || failed="no readable walk report ($(basename "$report"))"
 if [ -n "$failed" ]; then
   echo "$failed" >&2
+  # The panic, the line after it (its message), and which steps failed.
   if [ -f "$log" ]; then
-    grep -nE -i -B2 -A20 'panicked|error|failed|FAILED' "$log" | tail -80 >&2 || tail -80 "$log" >&2
+    grep -E -A1 'panicked at|^test result|step failed' "$log" | grep -v '^--$' | tail -40 >&2 || tail -40 "$log" >&2
   fi
   die "the $SDK walk failed in $run_url; nothing copied"
 fi
