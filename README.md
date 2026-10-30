@@ -598,6 +598,11 @@ match client.repositories().merge(repository.id, &merge).await? {
 }
 ```
 
+`access_token(id, &RepositoryAccessParams)` mints a short-lived token for the
+repository (`repositories:write`). Only a runner's session qualifies: any other
+credential is refused with a `403`. See
+[`examples/api/repository_access_token.rs`](crates/introspection-sdk/examples/api/repository_access_token.rs).
+
 ## Administer a project
 
 With an org credential (a member's session or access token; a project API key
@@ -712,8 +717,12 @@ oidc_logout(None, token.cp_session.as_deref().unwrap_or_default()).await?;
   three values it returned; keep the old refresh token when the answer omits it.
 - `auth.development_credential(access_token)` trades the login for the
   short-lived bearer `introspection dev` attaches with.
+- `auth.revoke(session_id, org_id, token)` ends the login's session, so its next
+  refresh fails. A session that does not exist answers the same as a revoked one.
 - `oidc_logout` does not follow the identity provider redirect: the first
   response has already revoked the session.
+
+See [`examples/api/device_login.rs`](crates/introspection-sdk/examples/api/device_login.rs).
 
 ## Environment variables
 

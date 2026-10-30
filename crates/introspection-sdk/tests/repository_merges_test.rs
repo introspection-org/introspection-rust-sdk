@@ -1,4 +1,5 @@
-//! `client.repositories().merge(id, …)` against a mock Data Plane.
+//! `client.repositories().merge(id, …)` and `.access_token(id, …)` against a
+//! mock Data Plane.
 //!
 //! The Control Plane is a separate mock with nothing mounted, so a merge that
 //! went to it instead would 404.
@@ -6,7 +7,9 @@
 mod common;
 
 use common::{client, repository_id, REPOSITORY_ID};
-use introspection_sdk::{IntrospectionAPIError, RepositoryMergeCreate};
+use introspection_sdk::{
+    IntrospectionAPIError, Lane, RepositoryAccessParams, RepositoryMergeCreate,
+};
 use serde_json::json;
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -98,4 +101,72 @@ async fn merge_surfaces_a_conflict_as_an_http_error() {
 
     assert!(matches!(err, IntrospectionAPIError::Http { .. }), "{err:?}");
     assert_eq!(err.status(), Some(409));
+}
+
+#[tokio::test]
+async fn access_token_sends_the_permissions_and_the_lane() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/v1/repositories/{REPOSITORY_ID}/access-token"
+        )))
+        .and(wiremock::matchers::query_param("lane", "development"))
+        .and(body_json(json!({"permissions": {"contents": "read"}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "provider": "github", "token": "ghs_x",
+            "expires_at": "2026-10-30T12:00:00Z", "repository": "acme/agent"
+        })))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let (client, _cp) = client(&dp).await;
+
+    let grant = client
+        .repositories()
+        .access_token(
+            repository_id(),
+            &RepositoryAccessParams {
+                permissions: [("contents".to_string(), "read".to_string())].into(),
+                lane: Some(Lane::Development),
+                project_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(grant.token.expose(), "ghs_x");
+    assert_eq!(grant.repository, "acme/agent");
+    assert!(!format!("{grant:?}").contains("ghs_x"));
+}
+
+#[tokio::test]
+async fn access_token_surfaces_a_refusal_as_an_http_error() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/v1/repositories/{REPOSITORY_ID}/access-token"
+        )))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "detail": "Only a runtime's session may mint a repository token"
+        })))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let (client, _cp) = client(&dp).await;
+
+    let err = client
+        .repositories()
+        .access_token(
+            repository_id(),
+            &RepositoryAccessParams {
+                permissions: [("contents".to_string(), "read".to_string())].into(),
+                lane: None,
+                project_id: None,
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, IntrospectionAPIError::Http { .. }), "{err:?}");
+    assert_eq!(err.status(), Some(403));
 }

@@ -1732,6 +1732,34 @@ pub struct RepositoryMergeCommit {
     pub parents: Vec<String>,
 }
 
+// ----- repository access tokens (DP) -----------------------------------------
+
+/// `POST /v1/repositories/{id}/access-token` body, plus its query.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RepositoryAccessParams {
+    /// GitHub-style permissions the minted token should carry, e.g.
+    /// `contents` → `read`. Empty takes the runtime's grant.
+    pub permissions: BTreeMap<String, String>,
+    /// `?lane=`: the lane whose grant the token is minted under.
+    #[serde(skip)]
+    pub lane: Option<Lane>,
+    /// `?project_id=`: needed only when the credential names no project.
+    #[serde(skip)]
+    pub project_id: Option<Uuid>,
+}
+
+/// A short-lived repository token, minted against the calling session's
+/// Runtime grant.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryAccessGrant {
+    /// The integration provider that minted the token.
+    pub provider: String,
+    pub token: Secret,
+    pub expires_at: String,
+    /// The canonical GitHub `owner/name`.
+    pub repository: String,
+}
+
 // ----- runtimes (CP) ---------------------------------------------------------
 
 /// How a Runtime acquires LLM provider credentials at session create —
@@ -1858,6 +1886,10 @@ pub struct Runtime {
     /// configuration from, projected from the runtime group.
     #[serde(default)]
     pub peering_id: Option<Uuid>,
+    /// The recipe release this image carries (e.g. `1.4.0`), for an image
+    /// version.
+    #[serde(default)]
+    pub image_version: Option<String>,
     /// Every MCP server the runtime's recipe declares, resolved for each
     /// environment the runtime serves; sent only by
     /// [`crate::Runtimes::get_with_mcp_requirements`].
@@ -3766,9 +3798,40 @@ pub struct Endpoint {
     /// The application that signs this endpoint's identity assertions.
     #[serde(default)]
     pub authorized_application_id: Option<Uuid>,
+    /// The last tool discovery run against a `kind: mcp` endpoint; `None` for
+    /// other kinds.
+    #[serde(default)]
+    pub mcp_check: Option<EndpointMcpCheck>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// The last `initialize` and `tools/list` run against an MCP endpoint. The
+/// worker owns it past `pending`: a client can only ask for a fresh check
+/// (`EndpointUpdateParams::mcp_check`), never write a result.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EndpointMcpCheck {
+    /// Identifies one requested check; a result lands only on its own check.
+    pub check_id: Uuid,
+    pub status: McpCheckStatus,
+    pub requested_at: String,
+    /// The member whose connection authenticates a connector-backed binding
+    /// during the check.
+    #[serde(default)]
+    pub requested_by_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    /// `serverInfo.name` the server reported. Display only.
+    #[serde(default)]
+    pub server_name: Option<String>,
+    /// Tool names the server listed; `None` until a check succeeds.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
+    /// Why the check failed or was skipped.
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 /// Filters supported by `GET /v1/endpoints`.
@@ -3903,7 +3966,15 @@ pub struct EndpointUpdateParams {
     /// Cannot be cleared.
     #[serde(default)]
     pub authorized_application_id: Option<Uuid>,
+    /// Re-run tool discovery on a `kind: mcp` endpoint as the calling member.
+    #[serde(default)]
+    pub mcp_check: Option<EndpointMcpCheckRequest>,
 }
+
+/// Asks for a fresh MCP check. Carries nothing: the worker owns the result.
+#[cfg(feature = "authoring")]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct EndpointMcpCheckRequest {}
 
 // ----- projects (CP) ---------------------------------------------------------
 
@@ -4172,6 +4243,16 @@ macro_rules! open_wire_enum {
             }
         }
     };
+}
+
+open_wire_enum! {
+    /// Where an MCP endpoint's tool discovery stands.
+    pub enum McpCheckStatus {
+        Pending => "pending",
+        Ok => "ok",
+        Failed => "failed",
+        Skipped => "skipped",
+    }
 }
 
 open_wire_enum! {

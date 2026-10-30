@@ -55,8 +55,8 @@ mod email_code;
 
 pub use device_code::{
     DeviceCodeAuth, DeviceCodeAuthConfig, DeviceCodeAuthConfigBuilder, DeviceCodeParams,
-    DeviceCodeParamsBuilder, DeviceCodeResponse, DeviceTokenPoll, DEVICE_CODE_GRANT,
-    DEVICE_FLOW_CLIENT_ID,
+    DeviceCodeParamsBuilder, DeviceCodeResponse, DeviceTokenPoll, OAuthRevocation,
+    DEVICE_CODE_GRANT, DEVICE_FLOW_CLIENT_ID,
 };
 pub use email_code::{
     AuthChangeEvent, AuthSession, AuthState, EmailCodeAuth, EmailCodeAuthConfig,
