@@ -3809,7 +3809,7 @@ pub struct Endpoint {
 
 /// The last `initialize` and `tools/list` run against an MCP endpoint. The
 /// worker owns it past `pending`: a client can only ask for a fresh check
-/// ([`EndpointUpdateParams::mcp_check`]), never write a result.
+/// (`EndpointUpdateParams::mcp_check`), never write a result.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EndpointMcpCheck {
