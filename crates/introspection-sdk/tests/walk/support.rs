@@ -51,7 +51,7 @@ pub mod walk {
     pub const MCP_HOST: &str = "example-server.modelcontextprotocol.io";
     /// An identity provider a federated application attaches and a service
     /// account refuses (step 2). Checked by its issuer alone.
-    pub const IDP_ISSUER: &str = "https://idp.walk.invalid/";
+    pub const IDP_ISSUER: &str = "https://idp.walk.invalid";
     /// The token a registered connection stores (step 6); no provider issued it.
     pub const REGISTERED_TOKEN: &str = "walk-registered-token";
     /// An image mirror (step 14), digest-pinned as a mirror must be. The copy
