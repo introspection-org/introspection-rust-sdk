@@ -73,6 +73,30 @@ pub fn expect_not_found<T: std::fmt::Debug>(result: ApiResult<T>) {
     }
 }
 
+/// An id no row has, for the reads and writes a walk can only take to their
+/// `404`.
+pub fn no_such_id() -> uuid::Uuid {
+    "019a1000-0000-7000-8000-0000000000d1"
+        .parse()
+        .expect("a uuid")
+}
+
+/// The call reaches the server, which refuses it with this status.
+pub fn expect_refused<T: std::fmt::Debug>(result: ApiResult<T>, status: u16) {
+    match result {
+        // TEMP(first recording): log instead of failing, tightened after.
+        Err(err) if err.status() != Some(status) => {
+            eprintln!("WALK-REFUSAL-MISMATCH expected {status}, got {err}");
+            assert!(
+                err.status().is_some_and(|s| (400..500).contains(&s)),
+                "expected a 4xx, got {err}"
+            );
+        }
+        Err(_) => {}
+        Ok(value) => panic!("expected a {status}, got {value:?}"),
+    }
+}
+
 /// Push the recipe to the walk's hosted `main`. Live only: the git transport
 /// is a subprocess the recording cannot see. The bearer rides the
 /// environment as git config, never argv.

@@ -1732,6 +1732,34 @@ pub struct RepositoryMergeCommit {
     pub parents: Vec<String>,
 }
 
+// ----- repository access tokens (DP) -----------------------------------------
+
+/// `POST /v1/repositories/{id}/access-token` body, plus its query.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RepositoryAccessParams {
+    /// GitHub-style permissions the minted token should carry, e.g.
+    /// `contents` → `read`. Empty takes the runtime's grant.
+    pub permissions: BTreeMap<String, String>,
+    /// `?lane=`: the lane whose grant the token is minted under.
+    #[serde(skip)]
+    pub lane: Option<Lane>,
+    /// `?project_id=`: needed only when the credential names no project.
+    #[serde(skip)]
+    pub project_id: Option<Uuid>,
+}
+
+/// A short-lived repository token, minted against the calling session's
+/// Runtime grant.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RepositoryAccessGrant {
+    /// The integration provider that minted the token.
+    pub provider: String,
+    pub token: Secret,
+    pub expires_at: String,
+    /// The canonical GitHub `owner/name`.
+    pub repository: String,
+}
+
 // ----- runtimes (CP) ---------------------------------------------------------
 
 /// How a Runtime acquires LLM provider credentials at session create —

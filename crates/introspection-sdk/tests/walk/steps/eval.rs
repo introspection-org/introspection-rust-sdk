@@ -7,13 +7,14 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     AutomationCreateParams, AutomationListParams, AutomationMetadata, AutomationTriggerType,
-    AutomationUpdateParams, EventListParams, ExperimentListParams, ImageListParams,
-    IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams, RunRequest,
-    RunnerIdentity, Task, TaskCommand, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus,
-    TaskCreate, TaskKind, TaskStatus,
+    AutomationUpdateParams, EventListParams, ExperimentListParams, ImageCreate, ImageListParams,
+    ImageSource, IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams,
+    RunRequest, RunnerIdentity, Task, TaskCommand, TaskCommandListParams, TaskCommandSpec,
+    TaskCommandStatus, TaskCreate, TaskKind, TaskStatus,
 };
 use serde_json::{json, Value};
 
+use crate::steps::{expect_refused, no_such_id};
 use crate::support::{assert_stable, settled, walk};
 use crate::{set, Walk};
 
@@ -38,6 +39,20 @@ async fn judge(w: &Walk) -> introspection_sdk::Judge {
     if let Some(image) = images.records.first() {
         sa.images().get(image.id).await.expect("read an image");
     }
+    // A build the walk cannot afford: a mirror needs a digest-pinned
+    // reference, so this one is refused before anything is built.
+    expect_refused(
+        sa.images()
+            .create(&ImageCreate::new(
+                walk::IMAGE_NAME,
+                ImageSource::Mirror {
+                    reference: walk::IMAGE_REFERENCE.into(),
+                },
+            ))
+            .await,
+        422,
+    );
+    expect_refused(sa.images().delete(no_such_id()).await, 404);
     w.owner()
         .integrations()
         .list(&PaginationParams::default())

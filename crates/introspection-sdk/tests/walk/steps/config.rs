@@ -6,18 +6,20 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
-    ConnectionListParams, ConnectionTokenParams, ConnectionTokenResult, ConnectorAuthMode,
-    ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
-    ConnectorListParams, ConnectorOAuthDiscoveryParams, ConnectorUpdateParams,
-    CredentialCreateParams, CredentialUpdateParams, EndpointCreateParams, EndpointKind,
-    EndpointListParams, EndpointUpdateParams, IntrospectionClient, Lane, Runtime,
-    RuntimeCreateParams, RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret,
-    VariableCreateParams, VariableKind, VariableUpdateParams,
+    ConnectionCreateParams, ConnectionListParams, ConnectionTokenParams, ConnectionTokenResult,
+    ConnectorAppListParams, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
+    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
+    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, CredentialCreateParams,
+    CredentialUpdateParams, EndpointCreateParams, EndpointKind, EndpointListParams,
+    EndpointUpdateParams, IntrospectionClient, Lane, Runtime, RuntimeCreateParams,
+    RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret, VariableCreateParams,
+    VariableKind, VariableUpdateParams,
 };
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::proxy::Exchange;
+use crate::steps::expect_refused;
 use crate::support::{assert_stable, settled, walk};
 use crate::{set, Walk};
 
@@ -269,6 +271,43 @@ pub async fn connector(w: &mut Walk) {
         .await
         .expect("rename the connector");
     assert_eq!(updated.name, name);
+    // Only a Pipedream connector has an app catalogue; a custom connector
+    // picks from the open MCP registry instead.
+    expect_refused(
+        sa.connectors()
+            .list_apps(
+                connector.id,
+                &ConnectorAppListParams {
+                    limit: Some(5),
+                    ..Default::default()
+                },
+            )
+            .await,
+        422,
+    );
+    sa.connectors()
+        .search_custom_apps(&ConnectorCustomAppSearchParams {
+            query: "echo".into(),
+            limit: Some(5),
+            filters: None,
+        })
+        .await
+        .expect("search the MCP registry");
+    // Registered mode: a token the caller already holds, stored and revoked
+    // before the consent flow (step 8) connects the app for real.
+    let connections = &sa.connectors().connections;
+    let registered = connections
+        .create(
+            connector.id,
+            &ConnectionCreateParams::new(walk::REGISTERED_TOKEN),
+        )
+        .await
+        .expect("register a connection");
+    assert_eq!(registered.connector_id, connector.id);
+    connections
+        .revoke(connector.id, registered.id)
+        .await
+        .expect("revoke the registered connection");
     w.connector = Some(connector);
 }
 

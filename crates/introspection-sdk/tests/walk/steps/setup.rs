@@ -5,18 +5,19 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
-    service_account_token, ApplicationCreateParams, ApplicationListParams,
-    ApplicationSecretCreateParams, ApplicationType, ApplicationUpdateParams, BranchesQuery,
-    CommitsQuery, ContentsQuery, HostedRepositoryCreateParams, IntrospectionClient,
-    PaginationParams, ProjectCreateParams, ProjectListParams, ProjectUpdateParams, Recipe,
-    RecipeCreateParams, RecipeListParams, RecipeUpdateParams, Repository, RepositoryCreateParams,
-    RepositoryListParams, RepositoryProvisioningStatus, RuntimeCreateParams,
-    ServiceAccountTokenParams, TokenCreateParams,
+    service_account_token, ApplicationCreateParams, ApplicationIdpCreateParams,
+    ApplicationIdpProvider, ApplicationListParams, ApplicationSecretCreateParams, ApplicationType,
+    ApplicationUpdateParams, BranchesQuery, CommitsQuery, ContentsQuery,
+    HostedRepositoryCreateParams, IntrospectionClient, PaginationParams, ProjectCreateParams,
+    ProjectListParams, ProjectUpdateParams, Recipe, RecipeCreateParams, RecipeListParams,
+    RecipeUpdateParams, Repository, RepositoryAccessParams, RepositoryCreateParams,
+    RepositoryListParams, RepositoryMergeCreate, RepositoryProvisioningStatus, RuntimeCreateParams,
+    RuntimePeeringListParams, ServiceAccountTokenParams, TokenCreateParams,
 };
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::steps::expect_not_found;
+use crate::steps::{expect_not_found, expect_refused, no_such_id};
 use crate::support::{
     assert_stable, recordings_dir, settled, walk, walk_project_born, Creds, Mode, BOOTSTRAP_FILE,
 };
@@ -178,6 +179,7 @@ pub async fn project(w: &mut Walk) {
         .await
         .expect("list projects");
     assert!(listed.iter().any(|p| p.id == project.id));
+    peerings(&owner, project.id).await;
 
     // projects:write is in no SDK credential's scope but the owner's.
     let updated = owner
@@ -241,6 +243,22 @@ pub async fn project(w: &mut Walk) {
         .await
         .expect("delete the sibling");
     expect_not_found(owner.projects().get(sibling.id).await);
+}
+
+/// The walk's project offers no runtime peering and is granted none.
+async fn peerings(owner: &IntrospectionClient, project: Uuid) {
+    let peerings = owner
+        .projects()
+        .peerings
+        .list(project, &RuntimePeeringListParams::default())
+        .collect_all(0)
+        .await
+        .expect("list the project's peerings");
+    assert!(peerings.is_empty());
+    expect_refused(
+        owner.projects().peerings.get(project, no_such_id()).await,
+        404,
+    );
 }
 
 pub async fn application(w: &mut Walk) {
@@ -352,7 +370,45 @@ pub async fn application(w: &mut Walk) {
     assert_eq!(renamed.name, format!("{}-renamed", walk::APPLICATION_NAME));
 
     rotate(w, application.id, first.id).await;
+    keys_and_idps(w, application.id).await;
     w.application = Some(application);
+}
+
+/// A signing key added and revoked. A server-credentials application
+/// attaches no identity provider, so the attach is refused and an unknown
+/// provider is not found.
+async fn keys_and_idps(w: &Walk, application: Uuid) {
+    let owner = w.owner();
+    let keys = &owner.applications().keys;
+    let added = keys.create(application).await.expect("add a signing key");
+    let listed = keys.list(application).await.expect("list signing keys");
+    assert!(listed
+        .iter()
+        .any(|k| k.id == added.id && k.kid == added.kid));
+    keys.delete(application, added.id)
+        .await
+        .expect("revoke the signing key");
+
+    let idps = &owner.applications().idps;
+    let listed = idps
+        .list(application, &PaginationParams::default())
+        .collect_all(0)
+        .await
+        .expect("list identity providers");
+    assert!(listed.is_empty());
+    expect_refused(
+        idps.create(
+            application,
+            &ApplicationIdpCreateParams {
+                idp_provider: Some(ApplicationIdpProvider::Generic),
+                issuer: Some(walk::IDP_ISSUER.into()),
+                ..Default::default()
+            },
+        )
+        .await,
+        400,
+    );
+    expect_refused(idps.delete(application, no_such_id()).await, 404);
 }
 
 /// Rotate: a second secret, then the first revoked.
@@ -590,6 +646,27 @@ async fn repository_reads(w: &Walk) -> String {
         .expect("list the root")
         .expect("a page");
     assert!(root.records.iter().any(|e| e.path == "judges"));
+    // `main` already holds its own head, so the merge changes nothing.
+    let merged = sa
+        .repositories()
+        .merge(
+            repository,
+            &RepositoryMergeCreate {
+                base: "main".into(),
+                head: head.clone(),
+                commit_message: None,
+            },
+        )
+        .await
+        .expect("merge main's head into main");
+    assert!(merged.is_none(), "base already contains head: {merged:?}");
+    // Only a runner's session holds a Runtime grant to mint against.
+    expect_refused(
+        sa.repositories()
+            .access_token(repository, &RepositoryAccessParams::default())
+            .await,
+        403,
+    );
     head
 }
 

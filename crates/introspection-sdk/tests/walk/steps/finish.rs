@@ -78,8 +78,9 @@ async fn members(w: &Walk) -> Organization {
 /// short of a person approving in a browser: a device code, one poll that
 /// finds it still pending, a refresh and a development-credential exchange
 /// that the server refuses (only an approved login holds what they take), a
-/// sign-out of a cookie that names no session (the owner's own would end the
-/// walk's session), and the remote connection's protocol description. The
+/// revocation of a session no login made, a sign-out of a cookie that names
+/// no session (the owner's own would end the walk's session), and the remote
+/// connection's protocol description. The
 /// WebSocket itself is not recorded: it bypasses the walk's HTTP proxy, and
 /// attaching needs a development login.
 async fn sign_in_routes(w: &Walk) {
@@ -106,6 +107,28 @@ async fn sign_in_routes(w: &Walk) {
         matches!(poll, DeviceTokenPoll::Pending),
         "nobody approved the code, so it is pending: {poll:?}"
     );
+    token_refusals(&device).await;
+    oidc_logout(Some(&w.settings.base_api_url), "walk-no-session")
+        .await
+        .expect("sign out a cookie that names no session");
+
+    let docs = w
+        .member()
+        .remotes()
+        .connect_docs()
+        .await
+        .expect("read the remote connection's protocol");
+    assert_eq!(docs.endpoint, "/v1/remotes/connect");
+    assert!(docs
+        .message_protocol
+        .remote_to_cloud
+        .iter()
+        .any(|frame| frame.frame == "attach_request"));
+}
+
+/// A refresh and a development-credential exchange the server refuses, and
+/// the revocation of a session no login made.
+async fn token_refusals(device: &DeviceCodeAuth) {
     let nil = uuid::Uuid::nil().to_string();
     let refused = device
         .refresh("walk-no-refresh-token", &nil, &nil)
@@ -123,22 +146,12 @@ async fn sign_in_routes(w: &Walk) {
         (refused.status(), refused.code()),
         (Some(400), Some("invalid_grant"))
     );
-    oidc_logout(Some(&w.settings.base_api_url), "walk-no-session")
+    // RFC 7009: a session that does not exist is answered as revoked.
+    let revoked = device
+        .revoke(&nil, &nil, None)
         .await
-        .expect("sign out a cookie that names no session");
-
-    let docs = w
-        .member()
-        .remotes()
-        .connect_docs()
-        .await
-        .expect("read the remote connection's protocol");
-    assert_eq!(docs.endpoint, "/v1/remotes/connect");
-    assert!(docs
-        .message_protocol
-        .remote_to_cloud
-        .iter()
-        .any(|frame| frame.frame == "attach_request"));
+        .expect("revoke a session no login made");
+    assert_eq!(revoked.status, "revoked");
 }
 
 pub async fn members_and_keys(w: &mut Walk) {
