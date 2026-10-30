@@ -396,19 +396,46 @@ async fn keys_and_idps(w: &Walk, application: Uuid) {
         .await
         .expect("list identity providers");
     assert!(listed.is_empty());
-    expect_refused(
-        idps.create(
-            application,
-            &ApplicationIdpCreateParams {
-                idp_provider: Some(ApplicationIdpProvider::Generic),
-                issuer: Some(walk::IDP_ISSUER.into()),
-                ..Default::default()
-            },
-        )
-        .await,
-        400,
-    );
+    let params = ApplicationIdpCreateParams {
+        idp_provider: Some(ApplicationIdpProvider::Generic),
+        issuer: Some(walk::IDP_ISSUER.into()),
+        ..Default::default()
+    };
+    // A service account signs nobody in, so it refuses an identity provider;
+    // a federated application takes one, checked by its issuer.
+    expect_refused(idps.create(application, &params).await, 400);
     expect_refused(idps.delete(application, no_such_id()).await, 404);
+    let project = w.project_id();
+    let federated = owner
+        .applications()
+        .create(
+            &ApplicationCreateParams::new(
+                format!("{}-federated", walk::APPLICATION_NAME),
+                ApplicationType::Jwks,
+            ),
+            Some(project.into()),
+        )
+        .await
+        .expect("create a federated application");
+    let idp = idps
+        .create(federated.id, &params)
+        .await
+        .expect("attach an identity provider");
+    assert_eq!(idp.issuer, walk::IDP_ISSUER);
+    let listed = idps
+        .list(federated.id, &PaginationParams::default())
+        .collect_all(0)
+        .await
+        .expect("list the federated application's identity providers");
+    assert_eq!(listed.iter().map(|i| i.id).collect::<Vec<_>>(), [idp.id]);
+    idps.delete(federated.id, idp.id)
+        .await
+        .expect("remove the identity provider");
+    owner
+        .applications()
+        .delete(federated.id, Some(project.into()))
+        .await
+        .expect("delete the federated application");
 }
 
 /// Rotate: a second secret, then the first revoked.

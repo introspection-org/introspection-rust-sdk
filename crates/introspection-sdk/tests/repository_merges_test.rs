@@ -138,3 +138,35 @@ async fn access_token_sends_the_permissions_and_the_lane() {
     assert_eq!(grant.repository, "acme/agent");
     assert!(!format!("{grant:?}").contains("ghs_x"));
 }
+
+#[tokio::test]
+async fn access_token_surfaces_a_refusal_as_an_http_error() {
+    let dp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/v1/repositories/{REPOSITORY_ID}/access-token"
+        )))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "detail": "Only a runtime's session may mint a repository token"
+        })))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let (client, _cp) = client(&dp).await;
+
+    let err = client
+        .repositories()
+        .access_token(
+            repository_id(),
+            &RepositoryAccessParams {
+                permissions: [("contents".to_string(), "read".to_string())].into(),
+                lane: None,
+                project_id: None,
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, IntrospectionAPIError::Http { .. }), "{err:?}");
+    assert_eq!(err.status(), Some(403));
+}

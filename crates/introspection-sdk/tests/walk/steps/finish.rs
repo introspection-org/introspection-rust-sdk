@@ -12,7 +12,7 @@ use introspection_sdk::{
 };
 
 use crate::cleanup::remove_walk_resources;
-use crate::steps::expect_not_found;
+use crate::steps::{expect_not_found, expect_refused};
 use crate::support::{assert_stable, walk};
 use crate::{set, Walk};
 
@@ -33,27 +33,30 @@ async fn members(w: &Walk) -> Organization {
         .await
         .expect("read the organisation");
     let slug = org.slug.clone().expect("the organisation's slug");
-    // An invite outlives the project, so a repeat run finds the one the last
-    // run sent; and the address names this organisation, or a second
-    // organisation's walk answers 409.
+    // An invite outlives the project, so a walk finds the one an earlier walk
+    // on this stack sent, and inviting again answers 409; and the address names
+    // this organisation, or a second organisation's walk answers 409 too.
     let email = format!("walk-member@{slug}.example.com");
+    let invite = owner
+        .members()
+        .create(&MemberCreateParams::Business(BusinessMemberCreate {
+            email: email.clone(),
+            name: "Walk member".into(),
+            role: Some("member".into()),
+            tags: None,
+            metadata: None,
+            policy_attributes: None,
+        }))
+        .await;
     let invited = match members
         .iter()
         .find(|m| m.email.as_deref() == Some(email.as_str()))
     {
-        Some(member) => member.clone(),
-        None => owner
-            .members()
-            .create(&MemberCreateParams::Business(BusinessMemberCreate {
-                email: email.clone(),
-                name: "Walk member".into(),
-                role: Some("member".into()),
-                tags: None,
-                metadata: None,
-                policy_attributes: None,
-            }))
-            .await
-            .expect("invite a member"),
+        Some(member) => {
+            expect_refused(invite, 409);
+            member.clone()
+        }
+        None => invite.expect("invite a member"),
     };
     assert_eq!(invited.email.as_deref(), Some(email.as_str()));
     assert_eq!(invited.role, "member");

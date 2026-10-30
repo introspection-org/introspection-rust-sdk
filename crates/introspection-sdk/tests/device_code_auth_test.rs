@@ -268,3 +268,16 @@ async fn revoke_ends_the_login_session() {
     let revoked = auth(&cp).revoke("s", "o", Some("rt")).await.unwrap();
     assert_eq!(revoked.status, "revoked");
 }
+
+#[tokio::test]
+async fn revoke_surfaces_a_refusal_as_an_http_error() {
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/revoke"))
+        .respond_with(oauth_error("invalid_client"))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    let err = auth(&cp).revoke("s", "o", None).await.unwrap_err();
+    assert_eq!(err.status(), Some(400));
+}

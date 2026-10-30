@@ -84,15 +84,7 @@ pub fn no_such_id() -> uuid::Uuid {
 /// The call reaches the server, which refuses it with this status.
 pub fn expect_refused<T: std::fmt::Debug>(result: ApiResult<T>, status: u16) {
     match result {
-        // TEMP(first recording): log instead of failing, tightened after.
-        Err(err) if err.status() != Some(status) => {
-            eprintln!("WALK-REFUSAL-MISMATCH expected {status}, got {err}");
-            assert!(
-                err.status().is_some_and(|s| (400..500).contains(&s)),
-                "expected a 4xx, got {err}"
-            );
-        }
-        Err(_) => {}
+        Err(err) => assert_eq!(err.status(), Some(status), "expected a {status}, got {err}"),
         Ok(value) => panic!("expected a {status}, got {value:?}"),
     }
 }

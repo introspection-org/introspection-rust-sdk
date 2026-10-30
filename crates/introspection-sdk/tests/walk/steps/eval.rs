@@ -39,19 +39,24 @@ async fn judge(w: &Walk) -> introspection_sdk::Judge {
     if let Some(image) = images.records.first() {
         sa.images().get(image.id).await.expect("read an image");
     }
-    // A build the walk cannot afford: a mirror needs a digest-pinned
-    // reference, so this one is refused before anything is built.
-    expect_refused(
-        sa.images()
-            .create(&ImageCreate::new(
-                walk::IMAGE_NAME,
-                ImageSource::Mirror {
-                    reference: walk::IMAGE_REFERENCE.into(),
-                },
-            ))
-            .await,
-        422,
-    );
+    // A mirror needs no upload: recording it queues the copy, and a service
+    // image is removed whatever its build has reached.
+    let mirror = sa
+        .images()
+        .create(&ImageCreate::new(
+            walk::IMAGE_NAME,
+            ImageSource::Mirror {
+                reference: walk::IMAGE_REFERENCE.into(),
+            },
+        ))
+        .await
+        .expect("mirror an image");
+    let read = sa.images().get(mirror.id).await.expect("read the mirror");
+    assert_eq!(read.name, walk::IMAGE_NAME);
+    sa.images()
+        .delete(mirror.id)
+        .await
+        .expect("delete the mirror");
     expect_refused(sa.images().delete(no_such_id()).await, 404);
     w.owner()
         .integrations()
