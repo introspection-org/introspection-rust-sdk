@@ -147,20 +147,20 @@ pub use api::{
     ConversationResolution, ConversationRuntime, ConversationSentiment, ConversationStatus,
     ConversationUsage, Conversations, Credential, CredentialCreateParams, CredentialUpdateParams,
     CustomerMemberCreate, DataPlaneToken, Dimension, DisplayIdPrefixes, Endpoint, EndpointKind,
-    EndpointListParams, EndpointMetadata, EntityUid, Event, EventListParams, Events, Experiment,
-    ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection, ExperimentGoalGuard,
-    ExperimentListParams, ExperimentStatus, FeatureFlagValue, FeedbackEvent, FeedbackPayload, File,
-    FileCreateText, FileListParams, FileType, FileUpdate, FileUpload, FileVersionCreateText,
-    FileVersionListParams, FileVersions, Files, GenAiAgent, GenAiAttributes, GenAiInput,
-    GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool, GenAiToolCall,
-    GenAiUsage, HavingTerm, IdRef, Image, ImageCreate, ImageKind, ImageListParams, ImageProvenance,
-    ImageScanStatus, ImageSource, ImageSourceKind, ImageStatus, Integration,
+    EndpointListParams, EndpointMcpCheck, EndpointMetadata, EntityUid, Event, EventListParams,
+    Events, Experiment, ExperimentGoal, ExperimentGoalComponent, ExperimentGoalDirection,
+    ExperimentGoalGuard, ExperimentListParams, ExperimentStatus, FeatureFlagValue, FeedbackEvent,
+    FeedbackPayload, File, FileCreateText, FileListParams, FileType, FileUpdate, FileUpload,
+    FileVersionCreateText, FileVersionListParams, FileVersions, Files, GenAiAgent, GenAiAttributes,
+    GenAiInput, GenAiOutput, GenAiRequest, GenAiResponse, GenAiSpan, GenAiSpanList, GenAiTool,
+    GenAiToolCall, GenAiUsage, HavingTerm, IdRef, Image, ImageCreate, ImageKind, ImageListParams,
+    ImageProvenance, ImageScanStatus, ImageSource, ImageSourceKind, ImageStatus, Integration,
     IntegrationCreateParams, IntegrationStatus, IntegrationType, IntegrationUpdateParams,
     IntrospectionAPIError, IntrospectionAgent, IntrospectionAttributes, IntrospectionEventName,
     IntrospectionHistory, IntrospectionIngest, IntrospectionInvocation, IntrospectionNewMessages,
     IntrospectionProxy, IntrospectionRecipe, IntrospectionRun, IntrospectionRuntime,
     IntrospectionStoredHistory, IntrospectionTask, Judge, JudgeGoalComponent, JudgeListParams,
-    JudgeUpdateParams, JudgementEvent, JudgementPayload, Lane, LaneRef, Me, Member,
+    JudgeUpdateParams, JudgementEvent, JudgementPayload, Lane, LaneRef, McpCheckStatus, Me, Member,
     MemberConnection, MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams,
     MemberListParams, MemberType, MemberUpdateParams, MetricDimensionValue, MetricFilter,
     MetricRow, MetricSpec, MetricValue, Metrics, MetricsConfig, MetricsMeta, MetricsQuery,
@@ -194,9 +194,10 @@ pub use api::{
 pub use api::{ArrowPage, ARROW_STREAM_ACCEPT};
 #[cfg(feature = "authoring")]
 pub use api::{
-    EndpointCreateParams, EndpointUpdateParams, GithubRepositoryCreateParams,
-    HostedRepositoryCreateParams, RecipeCreateParams, RecipeRepositorySource, RecipeUpdateParams,
-    RecipeValidationUpdate, RepositoryCreateParams, RuntimeCreateParams,
+    EndpointCreateParams, EndpointMcpCheckRequest, EndpointUpdateParams,
+    GithubRepositoryCreateParams, HostedRepositoryCreateParams, RecipeCreateParams,
+    RecipeRepositorySource, RecipeUpdateParams, RecipeValidationUpdate, RepositoryCreateParams,
+    RuntimeCreateParams,
 };
 // AG-UI protocol event surface yielded by the task-run stream. The full
 // taxonomy lives in `crate::agui`; these aliases give the common types a
