@@ -1,4 +1,4 @@
 {
-  "crates/introspection-sdk": "0.35.0",
+  "crates/introspection-sdk": "0.36.0",
   "crates/aauth-protocol": "0.2.0"
 }
