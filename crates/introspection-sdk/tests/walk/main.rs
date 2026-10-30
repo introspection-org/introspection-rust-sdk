@@ -141,6 +141,10 @@ fn backend(mode: Mode, settings: &Settings) -> Option<Backend> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sdk_end_to_end_walk() {
     let mode = Mode::from_env();
+    // TEMPORARY: see every snapshot drift in one record run. Reverted before merge.
+    if mode == Mode::Record {
+        std::env::set_var("INSTA_FORCE_PASS", "1");
+    }
     if mode == Mode::Replay && !recordings_dir().join("recording.har").exists() {
         eprintln!("walk: no recording; skipped");
         return;
