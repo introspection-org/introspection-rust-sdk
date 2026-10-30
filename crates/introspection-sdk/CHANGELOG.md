@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.36.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.35.0...v0.36.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* model the API fields added since 0.35 (Runtime.peering_id, connection verification and ownership) ([#187](https://github.com/introspection-org/introspection-rust-sdk/issues/187))
+* Recipe.validation is Option<RecipeValidation> instead of Option<BTreeMap<String, serde_json::Value>>, and RecipeValidationUpdate.status is RecipeValidationStatus instead of String.
+* RunnerContext::runtime_id and RunnerContext::recipe_id are Option<Uuid> instead of Uuid.
+
+### Features
+
+* device-code login, token refresh, development credential, OIDC logout and the remotes connection, so the CLI calls only the SDK ([#186](https://github.com/introspection-org/introspection-rust-sdk/issues/186)) ([85ddeec](https://github.com/introspection-org/introspection-rust-sdk/commit/85ddeec991c4af3e1892f5c8fb28f194181992b2))
+* model the API fields added since 0.35 (Runtime.peering_id, connection verification and ownership) ([#187](https://github.com/introspection-org/introspection-rust-sdk/issues/187)) ([588fc56](https://github.com/introspection-org/introspection-rust-sdk/commit/588fc56a22d1d5e7e44927d784cd1bb1f0b812bd))
+* RunnerContext runtime_id and recipe_id are optional ([#181](https://github.com/introspection-org/introspection-rust-sdk/issues/181)) ([3741f57](https://github.com/introspection-org/introspection-rust-sdk/commit/3741f57807fd52c46f12dfe1be8ac6f45f2a27f9))
+* strict-schema reports unknown fields inside flattened structs and tagged or untagged enums ([#183](https://github.com/introspection-org/introspection-rust-sdk/issues/183)) ([837837e](https://github.com/introspection-org/introspection-rust-sdk/commit/837837eae656a2653205f824d456a227e22ac0f8))
+* type Recipe.validation as RecipeValidation ([#182](https://github.com/introspection-org/introspection-rust-sdk/issues/182)) ([852dfbb](https://github.com/introspection-org/introspection-rust-sdk/commit/852dfbba4242e8575dc3597f5bce53841125ae1e))
+
 ## [0.35.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.34.0...v0.35.0) (2026-10-28)
 
 
