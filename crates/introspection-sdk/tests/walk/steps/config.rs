@@ -304,7 +304,10 @@ pub async fn connector(w: &mut Walk) {
         .await
         .expect("register a connection");
     assert_eq!(registered.connector_id, connector.id);
-    connections
+    // Revoking takes connectors:delete, in the owner's scope alone.
+    w.owner()
+        .connectors()
+        .connections
         .revoke(connector.id, registered.id)
         .await
         .expect("revoke the registered connection");
