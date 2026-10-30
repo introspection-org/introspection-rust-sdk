@@ -1,6 +1,10 @@
-//! Steps 18 and 19: the owner's reads and a development API key, then
-//! everything the walk made, removed in reverse.
+//! Steps 18 and 19: the owner's reads, the sign-in routes `introspection
+//! login` takes and a development API key, then everything the walk made,
+//! removed in reverse.
 
+use introspection_sdk::auth::{
+    oidc_logout, DeviceCodeAuth, DeviceCodeAuthConfig, DeviceCodeParams, DeviceTokenPoll,
+};
 use introspection_sdk::{
     ApiKeyCapability, ApiKeyCreateParams, ApiKeyListParams, ApiKeyUpdateParams,
     BusinessMemberCreate, Lane, MemberCreateParams, MemberListParams, MemberUpdateParams,
@@ -70,10 +74,78 @@ async fn members(w: &Walk) -> Organization {
     org
 }
 
+/// What `introspection login`, `logout` and `dev` reach through the SDK,
+/// short of a person approving in a browser: a device code, one poll that
+/// finds it still pending, a refresh and a development-credential exchange
+/// that the server refuses (only an approved login holds what they take), a
+/// sign-out of a cookie that names no session (the owner's own would end the
+/// walk's session), and the remote connection's protocol description. The
+/// WebSocket itself is not recorded: it bypasses the walk's HTTP proxy, and
+/// attaching needs a development login.
+async fn sign_in_routes(w: &Walk) {
+    let device = DeviceCodeAuth::new(
+        DeviceCodeAuthConfig::builder()
+            .base_api_url(w.settings.base_api_url.clone())
+            .build()
+            .expect("device-code config"),
+    )
+    .expect("device-code client");
+    let code = device
+        .request_code(&DeviceCodeParams::default())
+        .await
+        .expect("request a device code");
+    assert!(!code.user_code.is_empty());
+    assert!(code
+        .verification_uri_complete
+        .starts_with(&code.verification_uri));
+    let poll = device
+        .poll_token(&code.device_code)
+        .await
+        .expect("poll the device code");
+    assert!(
+        matches!(poll, DeviceTokenPoll::Pending),
+        "nobody approved the code, so it is pending: {poll:?}"
+    );
+    let nil = uuid::Uuid::nil().to_string();
+    let refused = device
+        .refresh("walk-no-refresh-token", &nil, &nil)
+        .await
+        .expect_err("a refresh token no login issued is refused");
+    assert_eq!(
+        (refused.status(), refused.code()),
+        (Some(400), Some("invalid_grant"))
+    );
+    let refused = device
+        .development_credential("walk-not-a-login")
+        .await
+        .expect_err("a subject that is not a login is refused");
+    assert_eq!(
+        (refused.status(), refused.code()),
+        (Some(400), Some("invalid_grant"))
+    );
+    oidc_logout(Some(&w.settings.base_api_url), "walk-no-session")
+        .await
+        .expect("sign out a cookie that names no session");
+
+    let docs = w
+        .member()
+        .remotes()
+        .connect_docs()
+        .await
+        .expect("read the remote connection's protocol");
+    assert_eq!(docs.endpoint, "/v1/remotes/connect");
+    assert!(docs
+        .message_protocol
+        .remote_to_cloud
+        .iter()
+        .any(|frame| frame.frame == "attach_request"));
+}
+
 pub async fn members_and_keys(w: &mut Walk) {
     let sa = w.sa();
     let project = w.project_id();
     let org = members(w).await;
+    sign_in_routes(w).await;
     let key = sa
         .api_keys()
         .create(

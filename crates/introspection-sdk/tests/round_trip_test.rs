@@ -250,6 +250,11 @@ const TYPED: &[(&str, &str, Check)] = &[
         r"^/v1/oauth/connections/token$",
         round_trip::<ConnectionTokenResult>,
     ),
+    (
+        "POST",
+        r"^/v1/oauth/device/code$",
+        round_trip::<DeviceCodeResponse>,
+    ),
     ("POST", r"^/v1/oauth/token$", round_trip::<OAuthToken>),
     ("GET", r"^/v1/oidc/me$", round_trip::<Me>),
     ("GET", r"^/v1/projects$", round_trip::<Paginated<Project>>),
@@ -258,6 +263,11 @@ const TYPED: &[(&str, &str, Check)] = &[
     ("GET", r"^/v1/recipes$", round_trip::<Paginated<Recipe>>),
     ("POST", r"^/v1/recipes$", round_trip::<Recipe>),
     ("GET|PATCH", r"^/v1/recipes/[^/]+$", round_trip::<Recipe>),
+    (
+        "GET",
+        r"^/v1/remotes/connect$",
+        round_trip::<RemotesConnectDocs>,
+    ),
     ("GET", r"^/v1/repositories$", round_trip::<Vec<Repository>>),
     ("POST", r"^/v1/repositories$", round_trip::<Repository>),
     ("GET", r"^/v1/repositories/[^/]+$", round_trip::<Repository>),

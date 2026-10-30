@@ -169,7 +169,7 @@ pub use api::{
     PatternAssignmentPayload, PatternEvent, PatternPayload, PolicyEntity, Project,
     ProjectCreateParams, ProjectListParams, ProjectSelector, ProjectUpdateParams, Recipe,
     RecipeListParams, RecipeValidation, RecipeValidationDiagnostic, RecipeValidationSeverity,
-    RecipeValidationSpan, RecipeValidationStatus, Repository, RepositoryBranch,
+    RecipeValidationSpan, RecipeValidationStatus, RemotesConnectDocs, Repository, RepositoryBranch,
     RepositoryBranchSort, RepositoryCommit, RepositoryCommitDetail, RepositoryCommitFile,
     RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent, RepositoryDirectory,
     RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams,
@@ -185,7 +185,8 @@ pub use api::{
     TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
     TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension,
     TokenCount, TokenCreateParams, Trajectory, TypedEvent, UploadSource, Variable,
-    VariableCreateParams, VariableKind, VariableUpdateParams, MAX_COMMAND_WAIT_SECONDS,
+    VariableCreateParams, VariableKind, VariableUpdateParams, WsAuthenticationDocs, WsFrameDocs,
+    WsMessageProtocolDocs, MAX_COMMAND_WAIT_SECONDS,
 };
 // jscpd:ignore-end
 #[cfg(feature = "arrow")]
@@ -201,9 +202,10 @@ pub use api::{
 // discoverable name at the crate root (`Event` alone would be ambiguous).
 pub use agui::{Event as AgUiEvent, EventType as AgUiEventType};
 pub use auth::{
-    authorization_code_token, service_account_token, token_exchange, AuthChangeEvent, AuthSession,
-    AuthState, AuthorizationCodeParams, EmailCodeAuth, EmailCodeAuthConfig, OAuthToken,
-    ServiceAccountTokenParams, TokenExchangeParams,
+    authorization_code_token, oidc_logout, service_account_token, token_exchange, AuthChangeEvent,
+    AuthSession, AuthState, AuthorizationCodeParams, DeviceCodeAuth, DeviceCodeAuthConfig,
+    DeviceCodeParams, DeviceCodeResponse, DeviceTokenPoll, EmailCodeAuth, EmailCodeAuthConfig,
+    OAuthToken, ServiceAccountTokenParams, TokenExchangeParams,
 };
 pub use client::{IntrospectionClient, IntrospectionError, Result, USER_AGENT, VERSION};
 pub use data_plane::DataPlaneResources;
@@ -223,7 +225,7 @@ pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
     Applications, Approvals, Automations, Connections, Connectors, Credentials, Endpoints,
     ExperimentHandle, Experiments, Images, Integrations, Judges, MemberConnections, Members,
-    Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Repositories,
+    Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
     RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
 };
 pub use runner::{Runner, RunnerSource};

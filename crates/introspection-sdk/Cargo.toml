@@ -46,6 +46,10 @@ strict-schema = ["dep:serde_ignored"]
 # endpoints. Off by default: a runner reads these resources and never writes
 # them. CI's `--all-features` builds and tests it.
 authoring = []
+# Open the `introspection dev` remote connection (`/v1/remotes/connect`), a
+# WebSocket: `Remotes::connect`. Off by default, since only the CLI's dev
+# server dials in and the WebSocket client is a dependency nothing else needs.
+remotes = ["dep:tokio-tungstenite"]
 
 [dependencies]
 # Async runtime
@@ -97,6 +101,11 @@ derive_builder = "0.20"
 # the `arrow` feature). `ipc` alone keeps the dependency tree lean — no
 # csv/json/prettyprint/pyarrow.
 arrow = { version = "60", default-features = false, features = ["ipc"], optional = true }
+
+# The `remotes` feature's WebSocket client. wss through rustls with the
+# native roots, the trust store reqwest reads, so a private CA trusted on the
+# REST path is trusted on the socket too.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"], optional = true }
 
 # Streaming support (StreamExt)
 futures = "0.3"
@@ -171,6 +180,12 @@ required-features = ["otel"]
 name = "authoring_test"
 path = "tests/authoring_test.rs"
 required-features = ["authoring"]
+
+# Opens the remote connection's WebSocket.
+[[test]]
+name = "remotes_test"
+path = "tests/remotes_test.rs"
+required-features = ["remotes"]
 
 # The end-to-end walk replays a recording that includes the Arrow reads, so
 # it needs the decoder, and the authoring writes; CI runs
