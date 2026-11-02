@@ -7,20 +7,21 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     AccessTagCreate, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationNavigationParams, AnnotationTarget, Annotations, ApprovalListParams,
-    ConversationContains, ConversationExportFormat, ConversationExportParams,
-    ConversationItemGetParams, ConversationItemListParams, ConversationListParams, EventListParams,
-    File, FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
-    FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
-    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
-    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
-    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
-    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    AnnotationNavigationParams, AnnotationTarget, Annotations, ApprovalDecision,
+    ApprovalListParams, ConversationContains, ConversationExportFormat, ConversationExportParams,
+    ConversationItemGetParams, ConversationItemListParams, ConversationListParams, DecidedBy,
+    EventListParams, File, FileCreateText, FileListParams, FileUpdate, FileUpload,
+    FileVersionCreateText, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
+    Lane, MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter,
+    MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
+    ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams,
+    TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate,
+    TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::steps::expect_not_found;
+use crate::steps::{expect_not_found, expect_refused, no_such_id};
 use crate::support::{assert_stable, settled, span_event_id, walk};
 use crate::{set, Walk};
 
@@ -1016,12 +1017,15 @@ async fn annotation_reads(
         .collect_all(0)
         .await
         .expect("list events");
-    if let Some(first) = events.first() {
-        let id = serde_json::to_value(first).expect("event JSON")["id"]
-            .as_str()
-            .expect("an id")
-            .to_string();
-        sa.events().get(&id).await.expect("read the event");
+    match events.first() {
+        Some(first) => {
+            let id = serde_json::to_value(first).expect("event JSON")["id"]
+                .as_str()
+                .expect("an id")
+                .to_string();
+            sa.events().get(&id).await.expect("read the event");
+        }
+        None => expect_refused(sa.events().get(&no_such_id().to_string()).await, 404),
     }
     let table = sa
         .events()
@@ -1061,6 +1065,21 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
         .await
         .expect("approvals");
     assert!(approvals.is_empty());
+    // Only an agent's request makes an approval or a mission, so the reads
+    // and a decision name one that does not exist.
+    let aauth = sa.aauth();
+    expect_refused(aauth.missions().get(no_such_id()).await, 404);
+    expect_refused(aauth.approvals().get(no_such_id()).await, 404);
+    expect_refused(
+        aauth
+            .approvals()
+            .decide(
+                no_such_id(),
+                &ApprovalDecision::approve(DecidedBy::user("walk-approver")),
+            )
+            .await,
+        404,
+    );
     // `/v1/connections` lists the project's connection rows: the project's own
     // grant on the walk's connector (step 8), and no member's. Connecting an
     // app (Pipedream) needs that provider's credentials; with none on the

@@ -159,6 +159,14 @@ path = "examples/api/runtimes.rs"
 name = "native-email-code"
 path = "examples/api/native_email_code.rs"
 
+[[example]]
+name = "device-login"
+path = "examples/api/device_login.rs"
+
+[[example]]
+name = "repository-access-token"
+path = "examples/api/repository_access_token.rs"
+
 # These drive the OTel surface through the in-memory exporters, so they only
 # compile with `testing`. Cargo cannot feature-gate an integration test from
 # inside the file, so declare the requirement here: a plain `cargo test` skips

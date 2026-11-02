@@ -1,5 +1,6 @@
 //! The device-code login (`POST /v1/oauth/device/code`, then the token poll)
-//! and `GET /v1/oidc/logout`, against a mock Control Plane.
+//! the refresh, development-credential and revoke calls, and
+//! `GET /v1/oidc/logout`, against a mock Control Plane.
 
 use introspection_sdk::auth::{
     oidc_logout, DeviceCodeAuth, DeviceCodeAuthConfig, DeviceCodeParams, DeviceTokenPoll,
@@ -252,4 +253,31 @@ async fn development_credential_exchanges_the_login_access_token() {
     let credential = auth(&cp).development_credential("login").await.unwrap();
     assert_eq!(credential.access_token, "dev");
     assert_eq!(credential.expires_in, 300);
+}
+
+#[tokio::test]
+async fn revoke_ends_the_login_session() {
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/revoke"))
+        .and(body_string("client_id=cli&session_id=s&org_id=o&token=rt"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "revoked"})))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    let revoked = auth(&cp).revoke("s", "o", Some("rt")).await.unwrap();
+    assert_eq!(revoked.status, "revoked");
+}
+
+#[tokio::test]
+async fn revoke_surfaces_a_refusal_as_an_http_error() {
+    let cp = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/revoke"))
+        .respond_with(oauth_error("invalid_client"))
+        .expect(1)
+        .mount(&cp)
+        .await;
+    let err = auth(&cp).revoke("s", "o", None).await.unwrap_err();
+    assert_eq!(err.status(), Some(400));
 }

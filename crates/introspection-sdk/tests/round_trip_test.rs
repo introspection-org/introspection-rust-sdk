@@ -59,6 +59,17 @@ fn api_key_page(body: &Value) -> Outcome {
     round_trip::<Vec<ApiKey>>(&obj["api_keys"])
 }
 
+/// A connector catalogue wraps its apps in a `data` envelope the SDK unwraps
+/// privately; check the envelope holds nothing else.
+fn connector_app_page(body: &Value) -> Outcome {
+    let obj = body.as_object().ok_or("not an object")?;
+    let extra: Vec<_> = obj.keys().filter(|k| *k != "data").collect();
+    if !extra.is_empty() {
+        return Err(format!("envelope keys the SDK drops: {extra:?}"));
+    }
+    round_trip::<Vec<ConnectorApp>>(&obj["data"])
+}
+
 /// `(method, path regex, check)`, first match wins. Paths are matched without
 /// host and query.
 const TYPED: &[(&str, &str, Check)] = &[
@@ -78,6 +89,61 @@ const TYPED: &[(&str, &str, Check)] = &[
         round_trip::<Paginated<AnnotationState>>,
     ),
     ("GET", r"^/v1/api-keys$", api_key_page),
+    (
+        "GET",
+        r"^/v1/applications/[^/]+/idps$",
+        round_trip::<Paginated<ApplicationIdp>>,
+    ),
+    (
+        "POST",
+        r"^/v1/applications/[^/]+/idps$",
+        round_trip::<ApplicationIdp>,
+    ),
+    (
+        "GET",
+        r"^/v1/applications/[^/]+/keys$",
+        round_trip::<Vec<ApplicationKey>>,
+    ),
+    (
+        "POST",
+        r"^/v1/applications/[^/]+/keys$",
+        round_trip::<ApplicationKey>,
+    ),
+    ("GET", r"^/v1/connectors/custom/apps$", connector_app_page),
+    (
+        "POST",
+        r"^/v1/connectors/[^/]+/connections$",
+        round_trip::<Connection>,
+    ),
+    ("POST", r"^/v1/images$", round_trip::<Image>),
+    ("POST", r"^/v1/oauth/revoke$", round_trip::<OAuthRevocation>),
+    (
+        "GET",
+        r"^/v1/projects/[^/]+/peerings$",
+        round_trip::<Paginated<RuntimePeering>>,
+    ),
+    (
+        "POST",
+        r"^/v1/annotations$",
+        round_trip::<AnnotationCreated>,
+    ),
+    (
+        "GET",
+        r"^/v1/annotations/facets$",
+        round_trip::<Vec<AnnotationFacet>>,
+    ),
+    (
+        "GET",
+        r"^/v1/annotations/navigation$",
+        round_trip::<AnnotationNavigation>,
+    ),
+    (
+        "GET",
+        r"^/v1/repositories/[^/]+/branches$",
+        round_trip::<Paginated<RepositoryBranch>>,
+    ),
+    ("POST", r"^/v1/tokens$", round_trip::<DataPlaneToken>),
+    ("GET", r"^/v1/organizations/me$", round_trip::<Organization>),
     ("POST", r"^/v1/api-keys$", round_trip::<ApiKeyCreated>),
     ("PATCH", r"^/v1/api-keys/[^/]+$", round_trip::<ApiKey>),
     (
@@ -347,21 +413,7 @@ const TYPED: &[(&str, &str, Check)] = &[
 ];
 
 /// JSON responses no SDK type decodes: `(method, path regex, reason)`.
-const UNTYPED: &[(&str, &str, &str)] = &[
-    (
-        "POST",
-        r"^/v1/annotations$",
-        "Annotations::create returns ()",
-    ),
-    (
-        "GET",
-        r"^/v1/annotations/(facets|navigation)$",
-        "no SDK method",
-    ),
-    ("GET", r"^/v1/repositories/[^/]+/branches$", "no SDK method"),
-    ("POST", r"^/v1/tokens$", "no SDK method"),
-    ("GET", r"^/v1/organizations/me$", "no SDK method"),
-];
+const UNTYPED: &[(&str, &str, &str)] = &[];
 
 /// The SDK type for a JSON export, picked by its media type. The replay and
 /// ATIF exports have none: `Conversations::export_json_value` returns them

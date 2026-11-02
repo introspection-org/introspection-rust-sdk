@@ -21,9 +21,10 @@ use crate::api::paginator::Paginator;
 #[cfg(feature = "authoring")]
 use crate::api::schemas::RepositoryCreateParams;
 use crate::api::schemas::{
-    BranchesQuery, CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryBranch,
-    RepositoryCommit, RepositoryCommitDetail, RepositoryContent, RepositoryEntry,
-    RepositoryListParams, RepositoryMergeCommit, RepositoryMergeCreate, StringOrUuid,
+    BranchesQuery, CommitsQuery, ContentsQuery, Paginated, Repository, RepositoryAccessGrant,
+    RepositoryAccessParams, RepositoryBranch, RepositoryCommit, RepositoryCommitDetail,
+    RepositoryContent, RepositoryEntry, RepositoryListParams, RepositoryMergeCommit,
+    RepositoryMergeCreate, StringOrUuid,
 };
 
 #[derive(Serialize)]
@@ -162,6 +163,32 @@ impl Repositories {
     ) -> ApiResult<Option<RepositoryMergeCommit>> {
         let path = format!("/v1/repositories/{repository_id}/merges");
         self.dp_http.post_json_or_no_content(&path, merge).await
+    }
+
+    /// `POST /v1/repositories/{id}/access-token` (DP, `repositories:write`)
+    /// — mint a short-lived token for the repository.
+    ///
+    /// What the token may reach is the grant of the Runtime the caller's
+    /// session runs on, so only a runner's credential qualifies: any other
+    /// is refused with a `403`, and a repository outside the grant is a
+    /// `404`.
+    pub async fn access_token(
+        &self,
+        repository_id: Uuid,
+        params: &RepositoryAccessParams,
+    ) -> ApiResult<RepositoryAccessGrant> {
+        let mut query = Vec::new();
+        if let Some(lane) = &params.lane {
+            query.push(format!("lane={}", encode(lane.as_str())));
+        }
+        if let Some(project_id) = params.project_id {
+            query.push(format!("project_id={project_id}"));
+        }
+        let mut path = format!("/v1/repositories/{repository_id}/access-token");
+        if !query.is_empty() {
+            path = format!("{path}?{}", query.join("&"));
+        }
+        self.dp_http.post_json(&path, params).await
     }
 
     /// The files of one repository, read through the Data Plane.

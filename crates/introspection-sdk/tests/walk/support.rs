@@ -49,6 +49,16 @@ pub mod walk {
     pub const MCP_ISSUER: &str = "https://example-server.modelcontextprotocol.io/";
     pub const MCP_ENDPOINT: &str = "https://example-server.modelcontextprotocol.io/mcp";
     pub const MCP_HOST: &str = "example-server.modelcontextprotocol.io";
+    /// An identity provider a federated application attaches and a service
+    /// account refuses (step 2). Checked by its issuer alone.
+    pub const IDP_ISSUER: &str = "https://idp.walk.invalid";
+    /// The token a registered connection stores (step 6); no provider issued it.
+    pub const REGISTERED_TOKEN: &str = "walk-registered-token";
+    /// An image mirror (step 14), digest-pinned as a mirror must be. The copy
+    /// may fail on a stack with no egress; the walk does not wait for it.
+    pub const IMAGE_NAME: &str = "walk/busybox";
+    pub const IMAGE_REFERENCE: &str =
+        "docker.io/library/busybox@sha256:9ae97d36d26566ff84e8893c64a6dc4fe8ca6d1144bf5b87b2b85a32def253c7";
     pub const API_ENDPOINT_NAME: &str = "walk-api";
     pub const API_ENDPOINT_HOST: &str = "walk-api.example.com";
     /// Not a secret: a literal header value the binding stores encrypted.

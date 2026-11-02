@@ -18,6 +18,7 @@ pub const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_cod
 pub const DEVICE_FLOW_CLIENT_ID: &str = "cli";
 
 const DEVICE_CODE_PATH: &str = "/v1/oauth/device/code";
+const REVOKE_PATH: &str = "/v1/oauth/revoke";
 const GRANT_REFRESH_TOKEN: &str = "refresh_token";
 const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -321,6 +322,51 @@ impl DeviceCodeAuth {
         ];
         post_token_form_with(&self.http, &self.base_api_url, &form).await
     }
+
+    /// `POST /v1/oauth/revoke` (RFC 7009): end the login's session, so its
+    /// next refresh fails.
+    ///
+    /// Keyed on the `session_id` and `org_id` the login returned. A session
+    /// behind a Control Plane cookie also needs `token`, its refresh token or
+    /// the cookie value. A session that does not exist is answered the same
+    /// as a revoked one (RFC 7009 §2.2).
+    pub async fn revoke(
+        &self,
+        session_id: &str,
+        org_id: &str,
+        token: Option<&str>,
+    ) -> ApiResult<OAuthRevocation> {
+        let mut form = vec![
+            ("client_id", self.client_id.as_str()),
+            ("session_id", session_id),
+            ("org_id", org_id),
+        ];
+        if let Some(token) = token {
+            form.push(("token", token));
+        }
+        let res = self
+            .http
+            .post(format!("{}{REVOKE_PATH}", self.base_api_url))
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .body(urlencode_form(&form))
+            .send()
+            .await?;
+        let status = res.status();
+        if !status.is_success() {
+            return Err(to_api_error(res, status).await);
+        }
+        crate::api::http::decode_json(res).await
+    }
+}
+
+/// CP `POST /v1/oauth/revoke` response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthRevocation {
+    /// `revoked`, whether or not the session existed.
+    pub status: String,
 }
 
 #[cfg(test)]
