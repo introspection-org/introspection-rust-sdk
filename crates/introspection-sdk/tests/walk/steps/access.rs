@@ -11,7 +11,7 @@ use introspection_sdk::{
     Conversation, ConversationListParams, CustomerMemberCreate, DataPlaneResources, FileCreateText,
     FileListParams, MemberCreateParams, MemberListParams, MemberType, MemberUpdateParams,
     RunRequest, Runner, RunnerIdentity, ServiceAccountTokenParams, ShareCreate, ShareResourceType,
-    Task, TaskCreate, TaskListParams, TaskStatus,
+    ShareUpdate, Task, TaskCreate, TaskListParams, TaskStatus,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -389,6 +389,15 @@ pub async fn access(w: &mut Walk) {
         })
         .await
         .expect("share the conversation to Blake");
+    // Blake sees the whole conversation, not only what follows the share.
+    let to_blake = avery_shares
+        .update(
+            &to_blake.id.to_string(),
+            &ShareUpdate { visible_from: None },
+        )
+        .await
+        .expect("open the share to the whole history");
+    assert_eq!(to_blake.visible_from, None);
     let to_platform = avery_shares
         .create(&ShareCreate {
             granted_tag: Some(walk::GROUP_TAG.into()),

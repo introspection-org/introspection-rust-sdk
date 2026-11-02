@@ -12,7 +12,7 @@ use introspection_sdk::{
 };
 
 use crate::cleanup::remove_walk_resources;
-use crate::steps::expect_not_found;
+use crate::steps::{expect_not_found, expect_refused};
 use crate::support::{assert_stable, walk};
 use crate::{set, Walk};
 
@@ -33,27 +33,30 @@ async fn members(w: &Walk) -> Organization {
         .await
         .expect("read the organisation");
     let slug = org.slug.clone().expect("the organisation's slug");
-    // An invite outlives the project, so a repeat run finds the one the last
-    // run sent; and the address names this organisation, or a second
-    // organisation's walk answers 409.
+    // An invite outlives the project, so a walk finds the one an earlier walk
+    // on this stack sent, and inviting again answers 409; and the address names
+    // this organisation, or a second organisation's walk answers 409 too.
     let email = format!("walk-member@{slug}.example.com");
+    let invite = owner
+        .members()
+        .create(&MemberCreateParams::Business(BusinessMemberCreate {
+            email: email.clone(),
+            name: "Walk member".into(),
+            role: Some("member".into()),
+            tags: None,
+            metadata: None,
+            policy_attributes: None,
+        }))
+        .await;
     let invited = match members
         .iter()
         .find(|m| m.email.as_deref() == Some(email.as_str()))
     {
-        Some(member) => member.clone(),
-        None => owner
-            .members()
-            .create(&MemberCreateParams::Business(BusinessMemberCreate {
-                email: email.clone(),
-                name: "Walk member".into(),
-                role: Some("member".into()),
-                tags: None,
-                metadata: None,
-                policy_attributes: None,
-            }))
-            .await
-            .expect("invite a member"),
+        Some(member) => {
+            expect_refused(invite, 409);
+            member.clone()
+        }
+        None => invite.expect("invite a member"),
     };
     assert_eq!(invited.email.as_deref(), Some(email.as_str()));
     assert_eq!(invited.role, "member");
@@ -78,8 +81,9 @@ async fn members(w: &Walk) -> Organization {
 /// short of a person approving in a browser: a device code, one poll that
 /// finds it still pending, a refresh and a development-credential exchange
 /// that the server refuses (only an approved login holds what they take), a
-/// sign-out of a cookie that names no session (the owner's own would end the
-/// walk's session), and the remote connection's protocol description. The
+/// revocation of a session no login made, a sign-out of a cookie that names
+/// no session (the owner's own would end the walk's session), and the remote
+/// connection's protocol description. The
 /// WebSocket itself is not recorded: it bypasses the walk's HTTP proxy, and
 /// attaching needs a development login.
 async fn sign_in_routes(w: &Walk) {
@@ -106,6 +110,28 @@ async fn sign_in_routes(w: &Walk) {
         matches!(poll, DeviceTokenPoll::Pending),
         "nobody approved the code, so it is pending: {poll:?}"
     );
+    token_refusals(&device).await;
+    oidc_logout(Some(&w.settings.base_api_url), "walk-no-session")
+        .await
+        .expect("sign out a cookie that names no session");
+
+    let docs = w
+        .member()
+        .remotes()
+        .connect_docs()
+        .await
+        .expect("read the remote connection's protocol");
+    assert_eq!(docs.endpoint, "/v1/remotes/connect");
+    assert!(docs
+        .message_protocol
+        .remote_to_cloud
+        .iter()
+        .any(|frame| frame.frame == "attach_request"));
+}
+
+/// A refresh and a development-credential exchange the server refuses, and
+/// the revocation of a session no login made.
+async fn token_refusals(device: &DeviceCodeAuth) {
     let nil = uuid::Uuid::nil().to_string();
     let refused = device
         .refresh("walk-no-refresh-token", &nil, &nil)
@@ -123,22 +149,12 @@ async fn sign_in_routes(w: &Walk) {
         (refused.status(), refused.code()),
         (Some(400), Some("invalid_grant"))
     );
-    oidc_logout(Some(&w.settings.base_api_url), "walk-no-session")
+    // RFC 7009: a session that does not exist is answered as revoked.
+    let revoked = device
+        .revoke(&nil, &nil, None)
         .await
-        .expect("sign out a cookie that names no session");
-
-    let docs = w
-        .member()
-        .remotes()
-        .connect_docs()
-        .await
-        .expect("read the remote connection's protocol");
-    assert_eq!(docs.endpoint, "/v1/remotes/connect");
-    assert!(docs
-        .message_protocol
-        .remote_to_cloud
-        .iter()
-        .any(|frame| frame.frame == "attach_request"));
+        .expect("revoke a session no login made");
+    assert_eq!(revoked.status, "revoked");
 }
 
 pub async fn members_and_keys(w: &mut Walk) {
