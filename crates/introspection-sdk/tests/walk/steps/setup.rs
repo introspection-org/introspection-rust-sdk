@@ -613,7 +613,10 @@ pub async fn recipe(w: &mut Walk) {
         .into_iter()
         .find(|r| r.git_commit_sha == head)
         .expect("the push-versioned recipe");
-    assert_stable!(recipe, @r#"
+    // The slug ends in the first 12 characters of the template repository's
+    // commit, which moves with that repository; the text before it is pinned.
+    let slug = recipe.slug.replace(&head[..12], "[sha]");
+    assert_stable!(recipe, { ".slug" => slug }, @r#"
     {
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
@@ -637,7 +640,7 @@ pub async fn recipe(w: &mut Walk) {
       "org_id": "[uuid]",
       "project_id": "[uuid]",
       "repository_id": "[uuid]",
-      "slug": "hello-mcp-production-main-c77869250658",
+      "slug": "hello-mcp-production-main-[sha]",
       "sub_path": ".",
       "updated_at": "[timestamp]",
       "validation": {
