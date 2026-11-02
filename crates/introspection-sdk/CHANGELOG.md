@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.37.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.36.0...v0.37.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* `Runtime` gains `image_version`, and `Endpoint` and `EndpointUpdateParams` gain `mcp_check`, so struct literals of these types must set the new field, or use `..Default::default()` where the type has a default.
+
+### Features
+
+* repository access tokens, device login revocation, the runtime's image version and the endpoint MCP check ([#188](https://github.com/introspection-org/introspection-rust-sdk/issues/188)) ([47edd0f](https://github.com/introspection-org/introspection-rust-sdk/commit/47edd0f6662dbb169b2c485414957112f0f028d4))
+
 ## [0.36.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.35.0...v0.36.0) (2026-10-30)
 
 
