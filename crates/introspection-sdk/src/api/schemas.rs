@@ -3438,6 +3438,50 @@ impl<'de> Deserialize<'de> for MemberType {
     }
 }
 
+/// A member's Ark seat — mirrors the CP `SeatTier` enum. A member with no
+/// seat is on a standard one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeatTier {
+    Standard,
+    Pro,
+    /// Forward-compatible escape hatch.
+    Other(String),
+}
+
+impl SeatTier {
+    /// On-the-wire string form.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Standard => "standard",
+            Self::Pro => "pro",
+            Self::Other(s) => s,
+        }
+    }
+}
+
+impl From<&str> for SeatTier {
+    fn from(s: &str) -> Self {
+        match s {
+            "standard" => Self::Standard,
+            "pro" => Self::Pro,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for SeatTier {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SeatTier {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::from(s.as_str()))
+    }
+}
+
 /// A member — the CP read model returned by every `/v1/members` route.
 ///
 /// `tags` and `metadata` are both `key:value`-shaped labels but differ in
@@ -3492,6 +3536,14 @@ pub struct Member {
     /// Application may act as.
     #[serde(default)]
     pub is_external_credential_agent: bool,
+    /// The member's Ark seat; `None` is a standard seat. Only an org on the
+    /// Ark plan is billed by it.
+    #[serde(default)]
+    pub seat_tier: Option<SeatTier>,
+    /// The member's monthly spend limit override in cents; `None` takes their
+    /// seat's default.
+    #[serde(default)]
+    pub spend_limit_cents: Option<i64>,
     /// Facts the recipe's Cedar policies read about this member (its
     /// principal's attributes); an `{"__entity": {...}}` value references a
     /// [`PolicyEntity`].
@@ -3679,6 +3731,20 @@ pub struct MemberUpdateParams {
     /// untouched. Setting them needs an org owner or admin.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_attributes: Option<HashMap<String, serde_json::Value>>,
+    /// The member's Ark seat, which sets what the org pays for them. `None`
+    /// leaves it untouched. Needs `billing:write`, and only a business member
+    /// holds a seat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seat_tier: Option<SeatTier>,
+    /// The member's monthly spend limit in cents, overriding their seat's
+    /// default. `None` leaves it untouched; `Some(None)` sends `null`, which
+    /// returns it to the default. Needs `billing:write`.
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub spend_limit_cents: Option<Option<i64>>,
 }
 
 // ----- endpoints (CP) --------------------------------------------------------

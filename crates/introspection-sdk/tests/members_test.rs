@@ -10,7 +10,7 @@ use introspection_sdk::api::{HttpClient, HttpConfig, RunRequest};
 use introspection_sdk::{
     AdvancedOptions, BusinessMemberCreate, ClientConfig, CustomerMemberCreate, IntrospectionClient,
     MemberCreateParams, MemberListParams, MemberType, MemberUpdateParams, Members,
-    PaginationParams, RunnerIdentity,
+    PaginationParams, RunnerIdentity, SeatTier,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -274,6 +274,84 @@ async fn update_replaces_metadata_and_an_empty_map_clears_it() {
         ..Default::default()
     };
     members.update(member_id(), &clear_tags).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_member_reads_its_seat_and_spend_limit() {
+    let server = MockServer::start().await;
+    let mut pro = member_json();
+    pro["member_type"] = json!("business");
+    pro["seat_tier"] = json!("pro");
+    pro["spend_limit_cents"] = json!(50_000);
+    let mut unseated = member_json();
+    unseated["seat_tier"] = json!(null);
+    unseated["spend_limit_cents"] = json!(null);
+    let mut newer = member_json();
+    newer["seat_tier"] = json!("enterprise");
+    Mock::given(method("GET"))
+        .and(path("/v1/members"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![
+            pro,
+            unseated,
+            newer,
+            member_json(),
+        ])))
+        .mount(&server)
+        .await;
+
+    let found: Vec<_> = Members::new(build_http(&server))
+        .list(&MemberListParams::default())
+        .collect()
+        .await;
+    let found: Vec<_> = found.into_iter().map(Result::unwrap).collect();
+
+    assert_eq!(found[0].seat_tier, Some(SeatTier::Pro));
+    assert_eq!(found[0].spend_limit_cents, Some(50_000));
+    assert_eq!(found[1].seat_tier, None);
+    assert_eq!(found[1].spend_limit_cents, None);
+    // A seat this SDK predates still decodes.
+    assert_eq!(
+        found[2].seat_tier,
+        Some(SeatTier::Other("enterprise".into()))
+    );
+    // A server that predates seats omits both.
+    assert_eq!(found[3].seat_tier, None);
+    assert_eq!(found[3].spend_limit_cents, None);
+}
+
+#[tokio::test]
+async fn update_sets_a_seat_and_a_null_spend_limit_returns_it_to_the_default() {
+    let server = MockServer::start().await;
+    let member_path = format!("/v1/members/{MEMBER_ID}");
+    Mock::given(method("PATCH"))
+        .and(path(member_path.clone()))
+        .and(body_json(
+            json!({ "seat_tier": "pro", "spend_limit_cents": 25_000 }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(member_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(member_path))
+        .and(body_json(json!({ "spend_limit_cents": null })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(member_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let members = Members::new(build_http(&server));
+    let upgrade = MemberUpdateParams {
+        seat_tier: Some(SeatTier::Pro),
+        spend_limit_cents: Some(Some(25_000)),
+        ..Default::default()
+    };
+    members.update(member_id(), &upgrade).await.unwrap();
+    let reset = MemberUpdateParams {
+        spend_limit_cents: Some(None),
+        ..Default::default()
+    };
+    members.update(member_id(), &reset).await.unwrap();
 }
 
 #[tokio::test]

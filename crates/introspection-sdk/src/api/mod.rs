@@ -268,7 +268,7 @@ pub use schemas::{
     ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest,
     RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams,
     RuntimeLlmMode, RuntimeMcpRequirement, RuntimePeering, RuntimePeeringListParams,
-    RuntimeSettingListParams, RuntimeUpdateParams, Secret, ShareCreate, ShareListParams,
+    RuntimeSettingListParams, RuntimeUpdateParams, SeatTier, Secret, ShareCreate, ShareListParams,
     ShareResourceType, ShareUpdate, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions,
     TaskCancelResponse, TaskCommand, TaskCommandKind, TaskCommandListParams, TaskCommandSpec,
     TaskCommandStatus, TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams,

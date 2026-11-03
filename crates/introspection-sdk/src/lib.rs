@@ -178,7 +178,7 @@ pub use api::{
     ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunFrame, RunHandle, RunRequest,
     RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams,
     RuntimeLlmMode, RuntimeMcpRequirement, RuntimePeering, RuntimePeeringListParams,
-    RuntimeSettingListParams, RuntimeUpdateParams, Secret, ShareCreate, ShareListParams,
+    RuntimeSettingListParams, RuntimeUpdateParams, SeatTier, Secret, ShareCreate, ShareListParams,
     ShareResourceType, ShareUpdate, Shares, SortDirection, SpanAttributes, SpanStatus, SseEvent,
     StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCommand,
     TaskCommandKind, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCommands,
