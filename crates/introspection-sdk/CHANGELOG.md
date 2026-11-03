@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.38.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.37.0...v0.38.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* Member and MemberUpdateParams gain the public fields seat_tier and spend_limit_cents (cargo semver-checks: constructible_struct_adds_field), so an exhaustive struct literal of either no longer compiles.
+
+### Features
+
+* model a member's seat tier and spend limit; redact the template commit in the walk's recipe slug ([#191](https://github.com/introspection-org/introspection-rust-sdk/issues/191)) ([8cd2382](https://github.com/introspection-org/introspection-rust-sdk/commit/8cd2382e218c12ba4d42eb3da5354c7d01d70d30))
+
 ## [0.37.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.36.0...v0.37.0) (2026-11-02)
 
 
