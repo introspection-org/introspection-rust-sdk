@@ -473,6 +473,8 @@ async fn integration_access_token_cap_error_carries_its_detail() {
         err,
         IntrospectionAPIError::Http { status: 403, .. }
     ));
+    assert_eq!(err.code(), Some("integration_token_cap_exceeded"));
+    assert_eq!(err.to_string(), "permissions exceed the cap (status=403)");
     assert_eq!(err.body().and_then(|b| b.get("detail")), Some(&detail));
 }
 

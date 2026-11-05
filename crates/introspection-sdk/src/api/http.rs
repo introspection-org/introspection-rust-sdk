@@ -725,10 +725,12 @@ pub(crate) async fn to_api_error(res: Response, status: StatusCode) -> Introspec
 /// The envelope's `code`, or for an RFC 6749 §5.2 token-endpoint error (a
 /// top-level `{"error", "error_description"}` body) its `error`, so a caller
 /// can branch on `invalid_grant` the way it branches on `runner_expired`.
+/// Failing both, the `code` of an object `detail` (`{"detail": {"code"}}`).
 fn extract_code(value: &serde_json::Value) -> Option<String> {
     let obj = value.as_object()?;
     obj.get("code")
-        .or_else(|| obj.get("error"))?
+        .or_else(|| obj.get("error"))
+        .or_else(|| obj.get("detail")?.as_object()?.get("code"))?
         .as_str()
         .map(str::to_string)
 }
@@ -743,6 +745,9 @@ fn extract_message(value: &serde_json::Value) -> Option<String> {
     };
     if let Some(s) = detail.as_str() {
         return Some(s.to_string());
+    }
+    if let Some(message) = detail.get("message").and_then(|m| m.as_str()) {
+        return Some(message.to_string());
     }
     if let Some(arr) = detail.as_array() {
         let msgs: Vec<String> = arr
@@ -759,6 +764,49 @@ fn extract_message(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_object_detail_supplies_the_code_and_message() {
+        let body = serde_json::json!({
+            "detail": {
+                "code": "integration_token_cap_exceeded",
+                "message": "permissions exceed the cap",
+                "allowed": {"metadata": "read"},
+            }
+        });
+        assert_eq!(
+            extract_code(&body).as_deref(),
+            Some("integration_token_cap_exceeded")
+        );
+        assert_eq!(
+            extract_message(&body).as_deref(),
+            Some("permissions exceed the cap")
+        );
+    }
+
+    #[test]
+    fn a_top_level_code_wins_over_the_detail_code() {
+        let body = serde_json::json!({
+            "code": "runner_expired",
+            "detail": {"code": "nested", "message": "m"},
+        });
+        assert_eq!(extract_code(&body).as_deref(), Some("runner_expired"));
+        let oauth = serde_json::json!({
+            "error": "invalid_grant",
+            "detail": {"code": "nested"},
+        });
+        assert_eq!(extract_code(&oauth).as_deref(), Some("invalid_grant"));
+    }
+
+    #[test]
+    fn a_string_or_list_detail_carries_no_code() {
+        let string = serde_json::json!({"detail": "Missing scope"});
+        assert_eq!(extract_code(&string), None);
+        assert_eq!(extract_message(&string).as_deref(), Some("Missing scope"));
+        let list = serde_json::json!({"detail": [{"msg": "a"}, {"msg": "b"}]});
+        assert_eq!(extract_code(&list), None);
+        assert_eq!(extract_message(&list).as_deref(), Some("a; b"));
+    }
 
     fn page_with_unknown_fields() -> Value {
         serde_json::json!({

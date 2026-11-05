@@ -68,10 +68,11 @@ impl Integrations {
     /// `POST /v1/integrations/{id}/access-token` (`integrations:token`) —
     /// mint a short-lived provider token from the integration.
     ///
-    /// A request outside the server's cap is a `403` whose `detail.code` is
-    /// `integration_token_cap_exceeded` (read it from
-    /// [`IntrospectionAPIError::body`](crate::IntrospectionAPIError::body));
-    /// an inactive or expired integration is a `409`.
+    /// A request outside the server's cap is a `403` whose
+    /// [`code`](crate::IntrospectionAPIError::code) is
+    /// `integration_token_cap_exceeded`, with the permitted set under
+    /// `detail.allowed` in [`body`](crate::IntrospectionAPIError::body); an
+    /// inactive or expired integration is a `409`.
     pub async fn access_token(
         &self,
         integration_id: Uuid,
