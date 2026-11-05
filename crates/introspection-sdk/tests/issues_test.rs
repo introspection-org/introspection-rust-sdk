@@ -289,7 +289,7 @@ async fn a_conditional_edit_and_delete_send_if_match_and_surface_412() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
         .and(path(format!("/v1/issues/{ISSUE_ID}")))
-        .and(header("If-Match", "\"1793754000123\""))
+        .and(header("If-Match", "\"2026-11-04T01:00:00.123456Z\""))
         .respond_with(
             ResponseTemplate::new(412)
                 .set_body_json(json!({"detail": "Issue changed; read it again"})),
@@ -299,13 +299,13 @@ async fn a_conditional_edit_and_delete_send_if_match_and_surface_412() {
         .await;
     Mock::given(method("DELETE"))
         .and(path(format!("/v1/issues/{ISSUE_ID}")))
-        .and(header("If-Match", "\"1793754000123\""))
+        .and(header("If-Match", "\"2026-11-04T01:00:00.123456Z\""))
         .respond_with(ResponseTemplate::new(204))
         .expect(1)
         .mount(&server)
         .await;
     let issues = build_http(&server).issues();
-    let tag = "\"1793754000123\"";
+    let tag = "\"2026-11-04T01:00:00.123456Z\"";
 
     let stale = issues
         .update(
@@ -333,12 +333,8 @@ async fn a_conditional_edit_and_delete_send_if_match_and_surface_412() {
 }
 
 #[test]
-fn an_issue_etag_is_its_updated_at_in_epoch_milliseconds() {
+fn an_issue_etag_is_its_updated_at_as_rendered() {
     let mut issue: introspection_sdk::Issue = serde_json::from_value(issue_json()).unwrap();
     issue.updated_at = "2026-11-04T01:00:00.123456Z".into();
-    assert_eq!(issue.etag().as_deref(), Some("\"1793754000123\""));
-    issue.updated_at = "2026-11-04T03:00:00.123+02:00".into();
-    assert_eq!(issue.etag().as_deref(), Some("\"1793754000123\""));
-    issue.updated_at = "not a time".into();
-    assert_eq!(issue.etag(), None);
+    assert_eq!(issue.etag(), "\"2026-11-04T01:00:00.123456Z\"");
 }

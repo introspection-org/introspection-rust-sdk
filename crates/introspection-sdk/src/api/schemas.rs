@@ -4785,46 +4785,11 @@ pub struct Issue {
 
 impl Issue {
     /// The issue's entity tag, as `GET` and `PATCH` return it in `ETag`: its
-    /// `updated_at` in epoch milliseconds, quoted. Send it as `If-Match`.
-    /// `None` when `updated_at` is not an RFC 3339 timestamp.
-    pub fn etag(&self) -> Option<String> {
-        rfc3339_millis(&self.updated_at).map(|millis| format!("\"{millis}\""))
+    /// `updated_at` exactly as the API rendered it, quoted. Send it as
+    /// `If-Match` to refuse an edit when the issue has changed since.
+    pub fn etag(&self) -> String {
+        format!("\"{}\"", self.updated_at)
     }
-}
-
-/// Milliseconds since the Unix epoch of an RFC 3339 timestamp such as
-/// `2026-11-04T01:00:00.123456Z` or `...+02:00`.
-fn rfc3339_millis(value: &str) -> Option<i64> {
-    let (date, rest) = value.split_once(['T', 't', ' '])?;
-    let mut parts = date.splitn(3, '-');
-    let year: i64 = parts.next()?.parse().ok()?;
-    let month: i64 = parts.next()?.parse().ok()?;
-    let day: i64 = parts.next()?.parse().ok()?;
-    let zone_at = rest.find(['Z', 'z', '+', '-'])?;
-    let (time, zone) = rest.split_at(zone_at);
-    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
-    let mut fields = clock.splitn(3, ':');
-    let hour: i64 = fields.next()?.parse().ok()?;
-    let minute: i64 = fields.next()?.parse().ok()?;
-    let second: i64 = fields.next()?.parse().ok()?;
-    let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
-    let offset_minutes = match zone {
-        "Z" | "z" => 0,
-        _ => {
-            let sign = if zone.starts_with('-') { -1 } else { 1 };
-            let (hours, minutes) = zone.get(1..)?.split_once(':')?;
-            sign * (hours.parse::<i64>().ok()? * 60 + minutes.parse::<i64>().ok()?)
-        }
-    };
-    // Days from the civil date (Howard Hinnant's algorithm).
-    let shifted = if month <= 2 { year - 1 } else { year };
-    let era = shifted.div_euclid(400);
-    let year_of_era = shifted - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second - offset_minutes * 60;
-    Some(seconds * 1_000 + millis)
 }
 
 /// `POST /v1/issues` body. Build with [`Self::new`] and struct-update syntax
