@@ -18,6 +18,16 @@ use serde_json::Value;
 use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 
+fn with_if_match(
+    request: reqwest::RequestBuilder,
+    if_match: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match if_match {
+        Some(tag) => request.header(reqwest::header::IF_MATCH, tag),
+        None => request,
+    }
+}
+
 /// Resolved HTTP configuration used by every REST API call.
 #[derive(Debug, Clone)]
 pub struct HttpConfig {
@@ -351,6 +361,35 @@ impl HttpClient {
             .send_retrying(false, || self.inner.patch(self.url(path)).json(body))
             .await?;
         decode_json(res).await
+    }
+
+    /// PATCH a JSON body, sending `If-Match` when a version is given, and
+    /// decode the JSON response. A stale version answers `412`.
+    pub(crate) async fn patch_json_if_match<B: Serialize, R: ResponseBody>(
+        &self,
+        path: &str,
+        body: &B,
+        if_match: Option<&str>,
+    ) -> ApiResult<R> {
+        let res = self
+            .send_retrying(false, || {
+                with_if_match(self.inner.patch(self.url(path)).json(body), if_match)
+            })
+            .await?;
+        decode_json(res).await
+    }
+
+    /// DELETE, sending `If-Match` when a version is given; no response body.
+    pub(crate) async fn delete_empty_if_match(
+        &self,
+        path: &str,
+        if_match: Option<&str>,
+    ) -> ApiResult<()> {
+        self.send_retrying(false, || {
+            with_if_match(self.inner.delete(self.url(path)), if_match)
+        })
+        .await?;
+        Ok(())
     }
 
     /// POST with no body, no response body.

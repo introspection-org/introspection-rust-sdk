@@ -26,6 +26,8 @@
 //!   `metadata` it labels them with.
 //! - [`Automations`] — Data Plane `/v1/automations` CRUD plus `trigger()`:
 //!   scheduled prompts, one-off reminders, and platform work.
+//! - [`Issues`] — Data Plane `/v1/issues` CRUD: a project's pursuits, their
+//!   evidence, and the human requests on them.
 //! - [`MemberConnections`] — Data Plane `/v1/connections` CRUD: the apps
 //!   members connected for themselves.
 //! - [`Images`] — Data Plane `/v1/images`: what an eval task's compose
@@ -50,7 +52,7 @@
 //! - [`Judges`] — read, and toggle or resample, the judges a Recipe declares.
 //! - [`Oidc`] — `GET /v1/oidc/me`, who the credential is.
 //!
-//! The Data Plane namespaces here (automations, connections and images) are
+//! The Data Plane namespaces here (automations, issues, connections and images) are
 //! reached through [`crate::DataPlaneResources`], which the client and the
 //! runner both implement.
 //!
@@ -80,6 +82,7 @@ pub mod endpoints;
 pub mod experiments;
 pub mod images;
 pub mod integrations;
+pub mod issues;
 pub mod judges;
 pub mod members;
 pub mod oidc;
@@ -105,6 +108,7 @@ pub use endpoints::Endpoints;
 pub use experiments::{ExperimentHandle, Experiments};
 pub use images::Images;
 pub use integrations::Integrations;
+pub use issues::Issues;
 pub use judges::Judges;
 pub use members::Members;
 pub use oidc::Oidc;
