@@ -161,8 +161,11 @@ pub use api::{
     IntrospectionAgent, IntrospectionAttributes, IntrospectionEventName, IntrospectionHistory,
     IntrospectionIngest, IntrospectionInvocation, IntrospectionNewMessages, IntrospectionProxy,
     IntrospectionRecipe, IntrospectionRun, IntrospectionRuntime, IntrospectionStoredHistory,
-    IntrospectionTask, Judge, JudgeGoalComponent, JudgeListParams, JudgeUpdateParams,
-    JudgementEvent, JudgementPayload, Lane, LaneRef, McpCheckStatus, Me, Member, MemberConnection,
+    IntrospectionTask, Issue, IssueCreateParams, IssueEventReference, IssueFile, IssueLink,
+    IssueListParams, IssueMutation, IssueOpenRequest, IssueOwner, IssuePatch, IssuePriority,
+    IssueRequestMutation, IssueRequestStatus, IssueSpanReference, IssueStatus, IssueUpdateParams,
+    Judge, JudgeGoalComponent, JudgeListParams, JudgeUpdateParams, JudgementEvent,
+    JudgementPayload, Lane, LaneRef, McpCheckStatus, Me, Member, MemberConnection,
     MemberConnectionCreate, MemberConnectionListParams, MemberCreateParams, MemberListParams,
     MemberType, MemberUpdateParams, MetricDimensionValue, MetricFilter, MetricRow, MetricSpec,
     MetricValue, Metrics, MetricsConfig, MetricsMeta, MetricsQuery, MetricsResponse, MetricsWindow,
@@ -227,9 +230,9 @@ pub use resources::tags::{
 pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
     Applications, Approvals, Automations, Connections, Connectors, Credentials, Endpoints,
-    ExperimentHandle, Experiments, Images, Integrations, Judges, MemberConnections, Members,
-    Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
-    RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
+    ExperimentHandle, Experiments, Images, Integrations, Issues, Judges, MemberConnections,
+    Members, Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes,
+    Repositories, RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

@@ -18,6 +18,10 @@ use serde_json::Value;
 use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 
+/// The header a keyed write carries: one key per deliberate write, resent
+/// unchanged on every retry of it, so the server applies the write once.
+const IDEMPOTENCY_KEY: &str = "Idempotency-Key";
+
 /// Resolved HTTP configuration used by every REST API call.
 #[derive(Debug, Clone)]
 pub struct HttpConfig {
@@ -351,6 +355,59 @@ impl HttpClient {
             .send_retrying(false, || self.inner.patch(self.url(path)).json(body))
             .await?;
         decode_json(res).await
+    }
+
+    /// POST a JSON body under an `Idempotency-Key`, decode JSON response. The
+    /// server applies one key once, so a `502` / `503` / `504` is retried
+    /// with the same key too.
+    pub(crate) async fn post_json_keyed<B: Serialize, R: ResponseBody>(
+        &self,
+        path: &str,
+        body: &B,
+        idempotency_key: &str,
+    ) -> ApiResult<R> {
+        let res = self
+            .send_retrying(true, || {
+                self.inner
+                    .post(self.url(path))
+                    .header(IDEMPOTENCY_KEY, idempotency_key)
+                    .json(body)
+            })
+            .await?;
+        decode_json(res).await
+    }
+
+    /// [`Self::post_json_keyed`] for a PATCH.
+    pub(crate) async fn patch_json_keyed<B: Serialize, R: ResponseBody>(
+        &self,
+        path: &str,
+        body: &B,
+        idempotency_key: &str,
+    ) -> ApiResult<R> {
+        let res = self
+            .send_retrying(true, || {
+                self.inner
+                    .patch(self.url(path))
+                    .header(IDEMPOTENCY_KEY, idempotency_key)
+                    .json(body)
+            })
+            .await?;
+        decode_json(res).await
+    }
+
+    /// DELETE under an `Idempotency-Key`, no response body.
+    pub(crate) async fn delete_empty_keyed(
+        &self,
+        path: &str,
+        idempotency_key: &str,
+    ) -> ApiResult<()> {
+        self.send_retrying(true, || {
+            self.inner
+                .delete(self.url(path))
+                .header(IDEMPOTENCY_KEY, idempotency_key)
+        })
+        .await?;
+        Ok(())
     }
 
     /// POST with no body, no response body.

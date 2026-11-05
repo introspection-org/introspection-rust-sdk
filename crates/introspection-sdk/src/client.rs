@@ -27,9 +27,9 @@ use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
     Aauth, Annotations, ApiKeys, Applications, Automations, Connectors, Credentials, Endpoints,
-    ExperimentHandle, Experiments, Images, Integrations, Judges, MemberConnections, Members, Oidc,
-    Organizations, Projects, Recipes, Remotes, Repositories, RuntimeHandle, Runtimes, Tags, Tokens,
-    Variables,
+    ExperimentHandle, Experiments, Images, Integrations, Issues, Judges, MemberConnections,
+    Members, Oidc, Organizations, Projects, Recipes, Remotes, Repositories, RuntimeHandle,
+    Runtimes, Tags, Tokens, Variables,
 };
 use crate::types::{self, ClientConfig};
 
@@ -318,6 +318,11 @@ impl IntrospectionClient {
     /// Data Plane `/v1/automations` CRUD and `trigger()`.
     pub fn automations(&self) -> Automations {
         Automations::new(self.dp_http.clone())
+    }
+
+    /// Data Plane `/v1/issues` CRUD, with human requests through `update()`.
+    pub fn issues(&self) -> Issues {
+        Issues::new(self.dp_http.clone())
     }
 
     /// Data Plane `/v1/remotes/connect`: the `introspection dev` remote
