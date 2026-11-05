@@ -8,9 +8,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    DataPlaneResources, IssueCreateParams, IssueLink, IssueListParams, IssueOwner, IssuePriority,
-    IssueRequestMutation, IssueRequestStatus, IssueSpanReference, IssueStatus, IssueUpdateParams,
-    PaginationParams, TaskStatus,
+    IssueCreateParams, IssueLink, IssueListParams, IssueOwner, IssuePriority, IssueRequestMutation,
+    IssueRequestStatus, IssueSpanReference, IssueStatus, IssueUpdateParams, PaginationParams,
+    TaskStatus,
 };
 use serde_json::json;
 use uuid::Uuid;

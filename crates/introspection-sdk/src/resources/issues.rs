@@ -13,7 +13,9 @@
 //! `request=true`).
 //!
 //! These are Data Plane routes, gated on `issues:read` / `issues:write`, and
-//! `issues:delete` to delete.
+//! `issues:delete` to delete. `issues()` is an inherent method on each holder,
+//! not on [`crate::DataPlaneResources`]: adding a method to that public trait
+//! breaks its outside implementors, so it joins the trait at the next major.
 //!
 //! [`IssueMutation`]: crate::IssueMutation
 
@@ -30,6 +32,13 @@ use crate::api::schemas::{Issue, IssueCreateParams, IssueListParams, IssuePatch}
 #[derive(Clone)]
 pub struct Issues {
     http: Arc<HttpClient>,
+}
+
+impl HttpClient {
+    /// `/v1/issues` on this Data Plane client's own credential.
+    pub fn issues(self: &Arc<Self>) -> Issues {
+        Issues::new(self.clone())
+    }
 }
 
 impl Issues {

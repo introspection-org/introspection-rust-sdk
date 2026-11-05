@@ -24,7 +24,7 @@ use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::client::IntrospectionClient;
-use crate::resources::{Automations, Images, Issues, MemberConnections};
+use crate::resources::{Automations, Images, MemberConnections};
 use crate::runner::Runner;
 
 #[cfg(doc)]
@@ -47,8 +47,6 @@ pub trait DataPlaneResources {
     fn metrics(&self) -> Metrics;
     /// `/v1/automations`.
     fn automations(&self) -> Automations;
-    /// `/v1/issues` — a project's pursuits and the human requests on them.
-    fn issues(&self) -> Issues;
     /// `/v1/connections` — the apps members connected for themselves. On a
     /// runner, `create` defaults `runtime` to the runner's runtime group.
     fn connections(&self) -> MemberConnections;
@@ -79,9 +77,6 @@ macro_rules! delegate_data_plane {
             }
             fn automations(&self) -> Automations {
                 <$ty>::automations(self)
-            }
-            fn issues(&self) -> Issues {
-                <$ty>::issues(self)
             }
             fn connections(&self) -> MemberConnections {
                 <$ty>::connections(self)
@@ -121,9 +116,6 @@ impl DataPlaneResources for Arc<HttpClient> {
     }
     fn automations(&self) -> Automations {
         Automations::new(self.clone())
-    }
-    fn issues(&self) -> Issues {
-        Issues::new(self.clone())
     }
     fn connections(&self) -> MemberConnections {
         MemberConnections::new(self.clone(), None)
