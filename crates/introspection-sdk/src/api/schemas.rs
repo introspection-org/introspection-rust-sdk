@@ -5472,6 +5472,44 @@ pub struct IntegrationAccessToken {
     pub permissions: BTreeMap<String, IntegrationTokenPermission>,
 }
 
+/// `GET /v1/integrations/{id}/repositories`: every repository the
+/// installation can reach, in one response. The variant is the body's `type`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type")]
+#[non_exhaustive]
+pub enum IntegrationRepositories {
+    #[serde(rename = "github")]
+    Github {
+        records: Vec<GithubInstallationRepository>,
+    },
+}
+
+impl IntegrationRepositories {
+    /// The repositories, when this is a GitHub installation's list.
+    pub fn github_records(&self) -> Option<&[GithubInstallationRepository]> {
+        match self {
+            Self::Github { records } => Some(records),
+        }
+    }
+}
+
+/// A repository a GitHub App installation can reach.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GithubInstallationRepository {
+    /// GitHub's numeric repository id.
+    pub id: i64,
+    pub name: String,
+    /// `owner/name`.
+    pub full_name: String,
+    pub html_url: String,
+    pub default_branch: String,
+    pub private: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub pushed_at: Option<String>,
+}
+
 // judges
 
 /// A judge a Recipe declares. Its definition is authored in the Recipe; only

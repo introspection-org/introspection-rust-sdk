@@ -16,7 +16,7 @@ use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
     Integration, IntegrationAccessToken, IntegrationAccessTokenParams, IntegrationCreateParams,
-    IntegrationUpdateParams, PaginationParams,
+    IntegrationRepositories, IntegrationUpdateParams, PaginationParams,
 };
 
 /// `client.integrations` namespace. Holds a CP-bound HTTP client.
@@ -80,5 +80,14 @@ impl Integrations {
     ) -> ApiResult<IntegrationAccessToken> {
         let path = format!("/v1/integrations/{integration_id}/access-token");
         self.http.post_json(&path, params).await
+    }
+
+    /// `GET /v1/integrations/{id}/repositories` (`integrations:read`) — the
+    /// repositories the installation can reach, read with the control
+    /// plane's own credential, all in one response. A non-GitHub integration
+    /// is a `400`; an inactive one a `409`.
+    pub async fn repositories(&self, integration_id: Uuid) -> ApiResult<IntegrationRepositories> {
+        let path = format!("/v1/integrations/{integration_id}/repositories");
+        self.http.get_json(&path, &()).await
     }
 }

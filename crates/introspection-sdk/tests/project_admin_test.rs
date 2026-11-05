@@ -479,6 +479,76 @@ async fn integration_access_token_cap_error_carries_its_detail() {
 }
 
 #[tokio::test]
+async fn integration_repositories_decode_the_installation_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/integrations/{ID}/repositories")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "github",
+            "records": [
+                {
+                    "id": 1, "name": "recipes", "full_name": "acme/recipes",
+                    "html_url": "https://github.com/acme/recipes", "default_branch": "main",
+                    "private": true, "description": null,
+                    "pushed_at": "2026-11-01T00:00:00Z",
+                },
+                {
+                    "id": 2, "name": "site", "full_name": "acme/site",
+                    "html_url": "https://github.com/acme/site", "default_branch": "trunk",
+                    "private": false, "description": "Marketing site", "pushed_at": null,
+                },
+            ],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let repositories = client(&server)
+        .integrations()
+        .repositories(id())
+        .await
+        .expect("integrations.repositories");
+    let records = repositories.github_records().expect("a GitHub list");
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].id, 1);
+    assert_eq!(records[0].full_name, "acme/recipes");
+    assert_eq!(records[0].html_url, "https://github.com/acme/recipes");
+    assert_eq!(records[0].default_branch, "main");
+    assert!(records[0].private);
+    assert_eq!(records[0].description, None);
+    assert_eq!(
+        records[0].pushed_at.as_deref(),
+        Some("2026-11-01T00:00:00Z")
+    );
+    assert_eq!(records[1].description.as_deref(), Some("Marketing site"));
+    assert_eq!(records[1].pushed_at, None);
+}
+
+#[tokio::test]
+async fn integration_repositories_of_a_non_github_integration_is_a_400() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/integrations/{ID}/repositories")))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "detail": {
+                "code": "integration_type_unsupported",
+                "message": "only GitHub integrations list repositories",
+            },
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .integrations()
+        .repositories(id())
+        .await
+        .expect_err("a non-GitHub integration is refused");
+    assert_eq!(err.status(), Some(400));
+    assert_eq!(err.code(), Some("integration_type_unsupported"));
+}
+
+#[tokio::test]
 async fn projects_get_encodes_the_slug_and_me_decodes_flags() {
     let server = MockServer::start().await;
     let project = json!({
