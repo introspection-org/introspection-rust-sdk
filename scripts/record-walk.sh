@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Re-record this SDK's end-to-end walk on introspection-cloud's Scenarios
-# workflow (suite `sdk`), which runs every SDK's walk against a Compose stack
+# Re-record this SDK's end-to-end walk on introspection-cloud's SDK Walks
+# workflow (sdk-walks.yml), which runs every SDK's walk against a Compose stack
 # built from the cloud ref, with this SDK checked out at the SDK ref. The
 # recording is then copied into the walk's recording directory.
 #
@@ -25,7 +25,7 @@ RECORDING_DIR=crates/introspection-sdk/tests/recordings/walk
 REPLAY="cargo test -p introspection-sdk --all-features --test walk"
 
 CLOUD_REPO=introspection-org/introspection-cloud
-WORKFLOW=scenarios.yml
+WORKFLOW=sdk-walks.yml
 RECORDING_FILES=(recording.har bootstrap.json)
 POLL=30
 
@@ -87,24 +87,26 @@ if [ -n "${WALK_RECORD_LOCK:-}" ]; then
   echo "$SDK_REPO@$sdk_ref" >"$WALK_RECORD_LOCK/branch"
 fi
 
-# 3. A dispatch cancels a running Scenarios run on the same ref, so wait for none to run.
+# 3. A dispatch cancels a running SDK Walks run on the same ref, so wait for none to run.
 busy() {
   gh run list --repo "$CLOUD_REPO" --workflow "$WORKFLOW" --limit 50 \
     --json databaseId,status,url --jq '[.[] | select(.status != "completed") | .url] | join(" ")'
 }
 while :; do
-  runs=$(busy) || die "cannot list $CLOUD_REPO's Scenarios runs"
+  runs=$(busy) || die "cannot list $CLOUD_REPO's SDK Walks runs"
   [ -n "$runs" ] || break
-  say "waiting for running Scenarios runs: $runs"
+  say "waiting for running SDK Walks runs: $runs"
   sleep "$POLL"
 done
 
-# 4. Dispatch, then find that run: gh prints its URL; failing that, the newest
-# dispatch on the cloud ref by this user created after the dispatch.
+# 4. Dispatch SDK Walks with this SDK's ref (its only input; the other SDKs walk
+# at main), then find that run: gh prints its URL; failing that, the newest
+# workflow_dispatch run of sdk-walks.yml on the cloud ref by this user created
+# after the dispatch.
 me=$(gh api user --jq .login)
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 out=$(gh workflow run "$WORKFLOW" --repo "$CLOUD_REPO" --ref "$cloud_ref" \
-  -f suite=sdk -f sdk_refs="$SDK=$sdk_ref" 2>&1) || die "dispatch failed: $out"
+  -f sdk_refs="$SDK=$sdk_ref" 2>&1) || die "dispatch failed: $out"
 run_id=$(grep -oE "/actions/runs/[0-9]+" <<<"$out" | head -1 | cut -d/ -f4 || true)
 for _ in $(seq 20); do
   [ -z "$run_id" ] || break
@@ -128,7 +130,10 @@ while :; do
 done
 say "run $conclusion"
 
-# 5. The walk is advisory in the workflow, so read its own report, not the run's conclusion.
+# 5. The run's conclusion covers every SDK's walk and the coverage floors, and a
+# walk named in the repository variable SDK_WALKS_ADVISORY does not fail it. So
+# read this walk's own report, not the run's conclusion: a red run can hold a
+# green walk, and a green run a failed advisory one.
 # The artifact stays, so a failed walk can be read without downloading it again.
 art="$PWD/target/record-walk/$run_id"
 rm -rf "$art"
