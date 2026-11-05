@@ -430,6 +430,8 @@ static URL: LazyLock<Regex> = LazyLock::new(|| re(r"^https?://"));
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| re(r"\d"));
 static MEASURED_KEY: LazyLock<Regex> =
     LazyLock::new(|| re(r"(_ms$|_count$|_tokens$|^max_turn$|^display_index$)"));
+// A dependency version the server reports moves with the server's pin, not the API.
+static VERSION_KEY: LazyLock<Regex> = LazyLock::new(|| re(r"^validator_version$"));
 static VOLATILE_KEY: LazyLock<Regex> = LazyLock::new(|| {
     re(
         r"(^id$|_at$|_sha$|token$|secret$|^key$|_key$|cookie$|^url$|_url$|^expires_in$|^client_id$|_prefix$|_suffix$|^prefix$|^key_display$|image_tag$|_image_name$|_bytes$)",
@@ -458,7 +460,9 @@ pub fn stable(value: &Value, key: &str) -> Value {
 }
 
 fn stable_string(s: &str, key: &str) -> String {
-    let placeholder = if UUID.is_match(s) {
+    let placeholder = if VERSION_KEY.is_match(key) {
+        "[version]"
+    } else if UUID.is_match(s) {
         "[uuid]"
     } else if TIMESTAMP.is_match(s) {
         "[timestamp]"
