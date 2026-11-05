@@ -4867,15 +4867,14 @@ pub struct IssueUpdateParams {
     pub spans: Option<Vec<IssueSpanReference>>,
 }
 
-/// Create one human request on an issue (`expected_revision` 0, with a
-/// `question` and an `assignee_id`), or change one at its current revision.
+/// Create one human request on an issue, or change one. An `id` the issue does
+/// not have yet creates the request (with a `question` and an `assignee_id`);
+/// an existing one changes it, and the last write wins.
 #[derive(Debug, Clone, Serialize)]
 pub struct IssueRequestMutation {
     /// The request's id. A new request's id is minted by the client, as a
     /// UUID7.
     pub id: Uuid,
-    /// 0 creates the request; otherwise its current revision.
-    pub expected_revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<String>,
     /// Who the request is assigned to; set it again to reassign.
@@ -4890,12 +4889,10 @@ pub struct IssueRequestMutation {
 }
 
 impl IssueRequestMutation {
-    /// A new request: revision 0, a fresh UUID7 id, the question and its
-    /// assignee.
+    /// A new request: a fresh UUID7 id, the question and its assignee.
     pub fn create(question: impl Into<String>, assignee_id: Uuid) -> Self {
         Self {
             id: Uuid::now_v7(),
-            expected_revision: 0,
             question: Some(question.into()),
             assignee_id: Some(assignee_id),
             status: None,
@@ -4903,12 +4900,11 @@ impl IssueRequestMutation {
         }
     }
 
-    /// A change to request `id` at its current `expected_revision` that
-    /// changes nothing yet. Combine with struct-update syntax.
-    pub fn change(id: Uuid, expected_revision: u64) -> Self {
+    /// A change to request `id` that changes nothing yet. Combine with
+    /// struct-update syntax.
+    pub fn change(id: Uuid) -> Self {
         Self {
             id,
-            expected_revision,
             question: None,
             assignee_id: None,
             status: None,

@@ -246,7 +246,6 @@ async fn update_with_a_request_mutation_sends_the_request_body() {
         .and(body_json(json!({
             "request": {
                 "id": REQUEST_ID,
-                "expected_revision": 2,
                 "status": "resolved",
                 "resolution": "Missing salary is allowed.",
             }
@@ -259,7 +258,7 @@ async fn update_with_a_request_mutation_sends_the_request_body() {
     let change = IssueRequestMutation {
         status: Some(IssueRequestStatus::Resolved),
         resolution: Some("Missing salary is allowed.".into()),
-        ..IssueRequestMutation::change(id(REQUEST_ID), 2)
+        ..IssueRequestMutation::change(id(REQUEST_ID))
     };
     build_http(&server)
         .issues()
@@ -269,7 +268,7 @@ async fn update_with_a_request_mutation_sends_the_request_body() {
 }
 
 #[test]
-fn a_new_request_is_revision_zero_with_a_fresh_uuid7() {
+fn a_new_request_has_a_fresh_uuid7() {
     let request = IssueRequestMutation::create("Is a missing salary allowed?", id(MEMBER_ID));
     assert_eq!(request.id.get_version_num(), 7);
     let wire = serde_json::to_value(&request).unwrap();
@@ -277,7 +276,6 @@ fn a_new_request_is_revision_zero_with_a_fresh_uuid7() {
         wire,
         json!({
             "id": request.id.to_string(),
-            "expected_revision": 0,
             "question": "Is a missing salary allowed?",
             "assignee_id": MEMBER_ID,
         })
@@ -324,7 +322,7 @@ async fn a_conditional_edit_and_delete_send_if_match_and_surface_412() {
     let refused = issues
         .update(
             id(ISSUE_ID),
-            IssueRequestMutation::change(id(REQUEST_ID), 2),
+            IssueRequestMutation::change(id(REQUEST_ID)),
             Some(tag),
         )
         .await

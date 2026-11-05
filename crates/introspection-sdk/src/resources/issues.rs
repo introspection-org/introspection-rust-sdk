@@ -7,8 +7,8 @@
 //! [`Issue::etag`] as `If-Match` to refuse the edit (412) when the issue has
 //! changed since it was read. Each evidence list (`files`, `links`, `events`,
 //! `spans`), `tags` and `metadata` replaces the stored one wholesale. A human
-//! request on the issue is the other `PATCH` body, [`IssueMutation`]: create
-//! one at revision 0, or change one at its own revision. Request history is
+//! request on the issue is the other `PATCH` body, [`IssueMutation`]: a new
+//! request id creates one, and an existing id changes it. Request history is
 //! read through [`crate::Events`] (`introspection.issue` with
 //! `request=true`).
 //!
@@ -72,8 +72,7 @@ impl Issues {
         let patch = patch.into();
         if if_match.is_some() && matches!(patch, IssuePatch::Mutation(_)) {
             return Err(IntrospectionAPIError::InvalidConfig(
-                "If-Match applies to a brief edit; a request change names its own revision"
-                    .to_string(),
+                "If-Match applies to a brief edit, not a request change".to_string(),
             ));
         }
         let path = format!("/v1/issues/{issue_id}");
