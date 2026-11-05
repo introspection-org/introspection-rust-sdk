@@ -4987,9 +4987,6 @@ pub struct IssueListParams {
     /// `key:value` pairs, ANDed, keys distinct (at most 16).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Vec<String>>,
-    /// Case-insensitive substring of the title.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub search: Option<String>,
     /// Ask for `total_count` on each page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_total: Option<bool>,

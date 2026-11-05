@@ -113,7 +113,6 @@ async fn list_sends_repeated_filters_and_decodes_every_field() {
         has_open_requests: Some(true),
         exclude_task_status: Some(vec![TaskStatus::Completed, TaskStatus::Failed]),
         metadata: Some(vec!["source:check-in".into(), "customer:acme".into()]),
-        search: Some("affiliation".into()),
         include_total: Some(true),
         ..Default::default()
     };
@@ -144,7 +143,6 @@ async fn list_sends_repeated_filters_and_decodes_every_field() {
         ("metadata", "customer:acme"),
         ("metadata", "source:check-in"),
         ("owner", "project"),
-        ("search", "affiliation"),
         ("status", "open"),
         ("status", "waiting"),
     ]
