@@ -78,14 +78,11 @@ fn query_pairs(request: &Request) -> Vec<(String, String)> {
         .collect()
 }
 
-fn idempotency_key(request: &Request) -> String {
+fn if_match(request: &Request) -> Option<String> {
     request
         .headers
-        .get("Idempotency-Key")
-        .expect("a write carries an Idempotency-Key")
-        .to_str()
-        .unwrap()
-        .to_string()
+        .get("If-Match")
+        .map(|value| value.to_str().unwrap().to_string())
 }
 
 #[tokio::test]
@@ -172,11 +169,10 @@ async fn get_reads_one_issue() {
 }
 
 #[tokio::test]
-async fn create_sends_only_the_fields_set_under_the_given_key() {
+async fn create_sends_only_the_fields_set() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/issues"))
-        .and(header("Idempotency-Key", "create-1"))
         .and(body_json(json!({
             "title": "Clarify affiliation rules",
             "description": "Agree the affiliate standard.",
@@ -198,11 +194,7 @@ async fn create_sends_only_the_fields_set_under_the_given_key() {
             id(TASK_ID),
         )
     };
-    let issue = build_http(&server)
-        .issues()
-        .create(&params, Some("create-1"))
-        .await
-        .unwrap();
+    let issue = build_http(&server).issues().create(&params).await.unwrap();
     assert_eq!(issue.id, id(ISSUE_ID));
 }
 
@@ -212,7 +204,6 @@ async fn update_omits_unset_fields_and_sends_an_empty_list_to_clear_one() {
     Mock::given(method("PATCH"))
         .and(path(format!("/v1/issues/{ISSUE_ID}")))
         .and(body_json(json!({
-            "expected_revision": 3,
             "status": "closed",
             "links": [{"url": "https://github.com/acme/app/pull/12"}],
             "spans": [],
@@ -231,7 +222,7 @@ async fn update_omits_unset_fields_and_sends_an_empty_list_to_clear_one() {
         }]),
         spans: Some(Vec::<IssueSpanReference>::new()),
         metadata: Some(BTreeMap::new()),
-        ..IssueUpdateParams::new(3)
+        ..IssueUpdateParams::default()
     };
     build_http(&server)
         .issues()
@@ -240,9 +231,11 @@ async fn update_omits_unset_fields_and_sends_an_empty_list_to_clear_one() {
         .unwrap();
 
     let received = server.received_requests().await.unwrap();
-    // No key given: the client mints a UUID7 for this one write.
-    let key = Uuid::parse_str(&idempotency_key(&received[0])).unwrap();
-    assert_eq!(key.get_version_num(), 7);
+    assert_eq!(
+        if_match(&received[0]),
+        None,
+        "no If-Match unless one is given"
+    );
 }
 
 #[tokio::test]
@@ -270,7 +263,7 @@ async fn update_with_a_request_mutation_sends_the_request_body() {
     };
     build_http(&server)
         .issues()
-        .update(id(ISSUE_ID), change, Some("resolve-1"))
+        .update(id(ISSUE_ID), change, None)
         .await
         .unwrap();
 }
@@ -292,27 +285,60 @@ fn a_new_request_is_revision_zero_with_a_fresh_uuid7() {
 }
 
 #[tokio::test]
-async fn a_retried_write_resends_the_same_key() {
+async fn a_conditional_edit_and_delete_send_if_match_and_surface_412() {
     let server = MockServer::start().await;
-    Mock::given(method("DELETE"))
+    Mock::given(method("PATCH"))
         .and(path(format!("/v1/issues/{ISSUE_ID}")))
-        .respond_with(ResponseTemplate::new(503))
-        .up_to_n_times(1)
+        .and(header("If-Match", "\"1793754000123\""))
+        .respond_with(
+            ResponseTemplate::new(412)
+                .set_body_json(json!({"detail": "Issue changed; read it again"})),
+        )
+        .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("DELETE"))
         .and(path(format!("/v1/issues/{ISSUE_ID}")))
+        .and(header("If-Match", "\"1793754000123\""))
         .respond_with(ResponseTemplate::new(204))
+        .expect(1)
         .mount(&server)
         .await;
+    let issues = build_http(&server).issues();
+    let tag = "\"1793754000123\"";
 
-    build_http(&server)
-        .issues()
-        .delete(id(ISSUE_ID), None)
+    let stale = issues
+        .update(
+            id(ISSUE_ID),
+            IssueUpdateParams {
+                title: Some("Renamed".into()),
+                ..Default::default()
+            },
+            Some(tag),
+        )
         .await
-        .unwrap();
+        .unwrap_err();
+    assert_eq!(stale.status(), Some(412));
+    issues.delete(id(ISSUE_ID), Some(tag)).await.unwrap();
 
-    let received = server.received_requests().await.unwrap();
-    assert_eq!(received.len(), 2);
-    assert_eq!(idempotency_key(&received[0]), idempotency_key(&received[1]));
+    let refused = issues
+        .update(
+            id(ISSUE_ID),
+            IssueRequestMutation::change(id(REQUEST_ID), 2),
+            Some(tag),
+        )
+        .await
+        .unwrap_err();
+    assert!(refused.to_string().contains("If-Match"), "{refused}");
+}
+
+#[test]
+fn an_issue_etag_is_its_updated_at_in_epoch_milliseconds() {
+    let mut issue: introspection_sdk::Issue = serde_json::from_value(issue_json()).unwrap();
+    issue.updated_at = "2026-11-04T01:00:00.123456Z".into();
+    assert_eq!(issue.etag().as_deref(), Some("\"1793754000123\""));
+    issue.updated_at = "2026-11-04T03:00:00.123+02:00".into();
+    assert_eq!(issue.etag().as_deref(), Some("\"1793754000123\""));
+    issue.updated_at = "not a time".into();
+    assert_eq!(issue.etag(), None);
 }

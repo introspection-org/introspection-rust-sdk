@@ -18,9 +18,15 @@ use serde_json::Value;
 use crate::api::backoff::{backoff_delay, retry_after_from};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 
-/// The header a keyed write carries: one key per deliberate write, resent
-/// unchanged on every retry of it, so the server applies the write once.
-const IDEMPOTENCY_KEY: &str = "Idempotency-Key";
+fn with_if_match(
+    request: reqwest::RequestBuilder,
+    if_match: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match if_match {
+        Some(tag) => request.header(reqwest::header::IF_MATCH, tag),
+        None => request,
+    }
+}
 
 /// Resolved HTTP configuration used by every REST API call.
 #[derive(Debug, Clone)]
@@ -357,54 +363,30 @@ impl HttpClient {
         decode_json(res).await
     }
 
-    /// POST a JSON body under an `Idempotency-Key`, decode JSON response. The
-    /// server applies one key once, so a `502` / `503` / `504` is retried
-    /// with the same key too.
-    pub(crate) async fn post_json_keyed<B: Serialize, R: ResponseBody>(
+    /// PATCH a JSON body, sending `If-Match` when a version is given, and
+    /// decode the JSON response. A stale version answers `412`.
+    pub(crate) async fn patch_json_if_match<B: Serialize, R: ResponseBody>(
         &self,
         path: &str,
         body: &B,
-        idempotency_key: &str,
+        if_match: Option<&str>,
     ) -> ApiResult<R> {
         let res = self
-            .send_retrying(true, || {
-                self.inner
-                    .post(self.url(path))
-                    .header(IDEMPOTENCY_KEY, idempotency_key)
-                    .json(body)
+            .send_retrying(false, || {
+                with_if_match(self.inner.patch(self.url(path)).json(body), if_match)
             })
             .await?;
         decode_json(res).await
     }
 
-    /// [`Self::post_json_keyed`] for a PATCH.
-    pub(crate) async fn patch_json_keyed<B: Serialize, R: ResponseBody>(
+    /// DELETE, sending `If-Match` when a version is given; no response body.
+    pub(crate) async fn delete_empty_if_match(
         &self,
         path: &str,
-        body: &B,
-        idempotency_key: &str,
-    ) -> ApiResult<R> {
-        let res = self
-            .send_retrying(true, || {
-                self.inner
-                    .patch(self.url(path))
-                    .header(IDEMPOTENCY_KEY, idempotency_key)
-                    .json(body)
-            })
-            .await?;
-        decode_json(res).await
-    }
-
-    /// DELETE under an `Idempotency-Key`, no response body.
-    pub(crate) async fn delete_empty_keyed(
-        &self,
-        path: &str,
-        idempotency_key: &str,
+        if_match: Option<&str>,
     ) -> ApiResult<()> {
-        self.send_retrying(true, || {
-            self.inner
-                .delete(self.url(path))
-                .header(IDEMPOTENCY_KEY, idempotency_key)
+        self.send_retrying(false, || {
+            with_if_match(self.inner.delete(self.url(path)), if_match)
         })
         .await?;
         Ok(())

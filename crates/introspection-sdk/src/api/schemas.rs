@@ -4751,8 +4751,8 @@ pub struct Issue {
     pub description: String,
     pub status: IssueStatus,
     pub priority: IssuePriority,
-    /// Send it back as [`IssueUpdateParams::expected_revision`]; an edit
-    /// against a stale revision answers 409.
+    /// Orders the issue's activity snapshots. For a conditional edit, use
+    /// [`Self::etag`].
     pub revision: u64,
     /// The fixed worker Task. Nullable in the persisted schema.
     #[serde(default)]
@@ -4781,6 +4781,50 @@ pub struct Issue {
     /// Open human requests, oldest first.
     #[serde(default, deserialize_with = "null_as_default")]
     pub open_requests: Vec<IssueOpenRequest>,
+}
+
+impl Issue {
+    /// The issue's entity tag, as `GET` and `PATCH` return it in `ETag`: its
+    /// `updated_at` in epoch milliseconds, quoted. Send it as `If-Match`.
+    /// `None` when `updated_at` is not an RFC 3339 timestamp.
+    pub fn etag(&self) -> Option<String> {
+        rfc3339_millis(&self.updated_at).map(|millis| format!("\"{millis}\""))
+    }
+}
+
+/// Milliseconds since the Unix epoch of an RFC 3339 timestamp such as
+/// `2026-11-04T01:00:00.123456Z` or `...+02:00`.
+fn rfc3339_millis(value: &str) -> Option<i64> {
+    let (date, rest) = value.split_once(['T', 't', ' '])?;
+    let mut parts = date.splitn(3, '-');
+    let year: i64 = parts.next()?.parse().ok()?;
+    let month: i64 = parts.next()?.parse().ok()?;
+    let day: i64 = parts.next()?.parse().ok()?;
+    let zone_at = rest.find(['Z', 'z', '+', '-'])?;
+    let (time, zone) = rest.split_at(zone_at);
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, ""));
+    let mut fields = clock.splitn(3, ':');
+    let hour: i64 = fields.next()?.parse().ok()?;
+    let minute: i64 = fields.next()?.parse().ok()?;
+    let second: i64 = fields.next()?.parse().ok()?;
+    let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
+    let offset_minutes = match zone {
+        "Z" | "z" => 0,
+        _ => {
+            let sign = if zone.starts_with('-') { -1 } else { 1 };
+            let (hours, minutes) = zone.get(1..)?.split_once(':')?;
+            sign * (hours.parse::<i64>().ok()? * 60 + minutes.parse::<i64>().ok()?)
+        }
+    };
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let shifted = if month <= 2 { year - 1 } else { year };
+    let era = shifted.div_euclid(400);
+    let year_of_era = shifted - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second - offset_minutes * 60;
+    Some(seconds * 1_000 + millis)
 }
 
 /// `POST /v1/issues` body. Build with [`Self::new`] and struct-update syntax
@@ -4832,11 +4876,10 @@ impl IssueCreateParams {
 
 /// `PATCH /v1/issues/{id}` body that edits the brief. `None` leaves a field
 /// as it is; each list (and `metadata`) replaces the stored one wholesale, so
-/// `Some(vec![])` clears it. Read the issue first and send its `revision`.
+/// `Some(vec![])` clears it. Pass the issue's [`Issue::etag`] as `If-Match` to
+/// refuse the edit when the issue has changed since it was read.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct IssueUpdateParams {
-    /// The [`Issue::revision`] this edit was made against, at least 1.
-    pub expected_revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4857,17 +4900,6 @@ pub struct IssueUpdateParams {
     pub events: Option<Vec<IssueEventReference>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spans: Option<Vec<IssueSpanReference>>,
-}
-
-impl IssueUpdateParams {
-    /// An edit against `expected_revision` that changes nothing yet. Combine
-    /// with struct-update syntax.
-    pub fn new(expected_revision: u64) -> Self {
-        Self {
-            expected_revision,
-            ..Default::default()
-        }
-    }
 }
 
 /// Create one human request on an issue (`expected_revision` 0, with a
