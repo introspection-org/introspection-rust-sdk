@@ -210,8 +210,7 @@ pub use genai_span::{
     GenAiSpanList, GenAiTool, GenAiToolCall, GenAiUsage, IdRef, IntrospectionAgent,
     IntrospectionAttributes, IntrospectionHistory, IntrospectionIngest, IntrospectionInvocation,
     IntrospectionNewMessages, IntrospectionProxy, IntrospectionRecipe, IntrospectionRun,
-    IntrospectionRuntime, IntrospectionStoredHistory, IntrospectionTask, NameRef, SpanAttributes,
-    SpanStatus, TokenCount,
+    IntrospectionRuntime, IntrospectionTask, NameRef, SpanAttributes, SpanStatus, TokenCount,
 };
 pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;

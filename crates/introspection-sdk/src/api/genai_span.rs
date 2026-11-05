@@ -346,7 +346,7 @@ pub struct IntrospectionNewMessages {
 }
 
 /// `introspection.history.*`: where the conversation linker placed this model
-/// call, inferred from hashes of its input history.
+/// call.
 ///
 /// Absent on a span the linker never placed (tool, proxy and API calls).
 #[serde_with::skip_serializing_none]
@@ -360,34 +360,7 @@ pub struct IntrospectionHistory {
     #[serde(default)]
     pub continuation_method: Option<String>,
     #[serde(default)]
-    pub hash_hit: Option<bool>,
-    #[serde(default)]
     pub new_messages: Option<IntrospectionNewMessages>,
-    /// A stored history existed but stopped matching before the last
-    /// assistant message: stale, edited, or the previous output replayed in
-    /// another form.
-    #[serde(default)]
-    pub diverged: Option<bool>,
-    #[serde(default)]
-    pub stored: Option<IntrospectionStoredHistory>,
-}
-
-/// `introspection.history.stored.*`: how the history the processor had
-/// stored compared with the call's. Stamped where the two disagree.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
-pub struct IntrospectionStoredHistory {
-    /// Messages the stored hashes represented when read (0 when expired or
-    /// never stored).
-    #[serde(default)]
-    pub length: Option<i64>,
-    /// How far the stored hashes matched the incoming history.
-    #[serde(default, rename = "match")]
-    pub match_: Option<i64>,
-    /// The stored hashes reached past this call's history and output: a later
-    /// call was processed first.
-    #[serde(default)]
-    pub ahead: Option<bool>,
 }
 
 /// `introspection.ingest.*`: which processor instance handled the span and

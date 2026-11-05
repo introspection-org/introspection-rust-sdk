@@ -83,7 +83,6 @@ fn full_span() -> serde_json::Value {
                     "position": 1,
                     "is_new": true,
                     "continuation_method": "history",
-                    "hash_hit": false,
                     "new_messages": {"start": 0, "end": 1}
                 }
             }
@@ -165,7 +164,6 @@ fn introspection_attributes_sit_beside_gen_ai_not_inside_it() {
     assert_eq!(history.position, Some(1));
     assert_eq!(history.is_new, Some(true));
     assert_eq!(history.continuation_method.as_deref(), Some("history"));
-    assert_eq!(history.hash_hit, Some(false));
     let new_messages = history.new_messages.unwrap();
     assert_eq!((new_messages.start, new_messages.end), (Some(0), Some(1)));
 }
@@ -223,25 +221,37 @@ fn cost_is_typed_where_the_server_emits_it() {
 }
 
 #[test]
-fn the_processor_stamp_and_stored_history_are_typed() {
+fn the_processor_stamp_is_typed() {
     let value = json!({
         "trace_id": "t", "span_id": "s", "start_time": "2026-01-01T00:00:00Z",
         "attributes": {"introspection": {
-            "ingest": {"host": "dp-7f", "ip": "10.0.0.4", "node": "n1", "time": 1793068862940002_i64},
-            "history": {"diverged": true, "stored": {"length": 4, "match": 2, "ahead": false}}
+            "ingest": {"host": "dp-7f", "ip": "10.0.0.4", "node": "n1", "time": 1793068862940002_i64}
         }}
     });
     let span = parse(value.clone());
-    let introspection = span.attributes.introspection.clone().unwrap();
-    let ingest = introspection.ingest.unwrap();
+    let ingest = span
+        .attributes
+        .introspection
+        .clone()
+        .unwrap()
+        .ingest
+        .unwrap();
     assert_eq!(ingest.host.as_deref(), Some("dp-7f"));
     assert_eq!(ingest.time, Some(1793068862940002));
-    let history = introspection.history.unwrap();
-    assert_eq!(history.diverged, Some(true));
-    let stored = history.stored.unwrap();
-    assert_eq!(stored.match_, Some(2));
-    assert_eq!(stored.ahead, Some(false));
     assert_eq!(serde_json::to_value(&span).unwrap(), value);
+}
+
+#[test]
+fn a_span_stamped_by_the_retired_history_hashes_still_parses() {
+    let span = parse(json!({
+        "trace_id": "t", "span_id": "s", "start_time": "2026-01-01T00:00:00Z",
+        "attributes": {"introspection": {"history": {
+            "position": 2, "hash_hit": true, "diverged": true,
+            "stored": {"length": 4, "match": 2, "ahead": false}
+        }}}
+    }));
+    let history = span.attributes.introspection.unwrap().history.unwrap();
+    assert_eq!(history.position, Some(2));
 }
 
 // ----- null is never serialized ---------------------------------------------
