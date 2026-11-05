@@ -12,7 +12,8 @@ use introspection_sdk::{
     ApiKeyStatus, ApplicationCreateParams, ApplicationIdpCreateParams, ApplicationIdpProvider,
     ApplicationListParams, ApplicationType, ClientConfig, CredentialCreateParams,
     CredentialUpdateParams, FeatureFlagValue, ImageCreate, ImageKind, ImageListParams, ImageSource,
-    ImageStatus, IntegrationCreateParams, IntegrationStatus, IntegrationType, IntrospectionClient,
+    ImageStatus, IntegrationAccessTokenParams, IntegrationCreateParams, IntegrationStatus,
+    IntegrationTokenPermission, IntegrationType, IntrospectionAPIError, IntrospectionClient,
     JudgeUpdateParams, Lane, PaginationParams, RuntimeSettingListParams, Secret,
     TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, VariableCreateParams,
     VariableUpdateParams, MAX_COMMAND_WAIT_SECONDS,
@@ -407,6 +408,72 @@ async fn variables_integrations_and_judges_send_their_wire_names() {
         .await
         .expect("judges.update");
     assert!(!judge.enabled);
+}
+
+#[tokio::test]
+async fn integration_access_token_posts_the_typed_body_and_redacts_the_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/integrations/{ID}/access-token")))
+        .and(body_json(
+            json!({ "type": "github", "permissions": { "metadata": "read" } }),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "token": "ghs_secret", "expires_at": "2026-11-05T11:02:00Z", "type": "github",
+            "permissions": { "metadata": "read" },
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let token = client(&server)
+        .integrations()
+        .access_token(id(), &IntegrationAccessTokenParams::github_metadata_read())
+        .await
+        .expect("integrations.access_token");
+    assert_eq!(token.token.expose(), "ghs_secret");
+    assert_eq!(token.expires_at, "2026-11-05T11:02:00Z");
+    assert_eq!(token.integration_type, IntegrationType::Github);
+    assert_eq!(
+        token.permissions.get("metadata"),
+        Some(&IntegrationTokenPermission::Read)
+    );
+    let debug = format!("{token:?}");
+    assert!(!debug.contains("ghs_secret"), "{debug}");
+    assert!(debug.contains("<redacted>"), "{debug}");
+}
+
+#[tokio::test]
+async fn integration_access_token_cap_error_carries_its_detail() {
+    let server = MockServer::start().await;
+    let detail = json!({
+        "code": "integration_token_cap_exceeded",
+        "message": "permissions exceed the cap",
+        "allowed": { "metadata": "read" },
+    });
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/integrations/{ID}/access-token")))
+        .and(body_json(
+            json!({ "type": "github", "permissions": { "contents": "write" } }),
+        ))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({ "detail": detail })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let params = IntegrationAccessTokenParams::github(
+        [("contents".to_string(), IntegrationTokenPermission::Write)].into(),
+    );
+    let err = client(&server)
+        .integrations()
+        .access_token(id(), &params)
+        .await
+        .expect_err("a request outside the cap is refused");
+    assert!(matches!(
+        err,
+        IntrospectionAPIError::Http { status: 403, .. }
+    ));
+    assert_eq!(err.body().and_then(|b| b.get("detail")), Some(&detail));
 }
 
 #[tokio::test]

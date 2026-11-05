@@ -5422,6 +5422,56 @@ pub struct IntegrationUpdateParams {
     pub slack_interactivity_enabled: Option<bool>,
 }
 
+open_wire_enum! {
+    /// The level of one permission on an integration access token.
+    pub enum IntegrationTokenPermission {
+        Read => "read",
+        Write => "write",
+    }
+}
+
+/// Body of `POST /v1/integrations/{id}/access-token`. The variant is the
+/// body's `type`, and must match the integration's own type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type")]
+#[non_exhaustive]
+pub enum IntegrationAccessTokenParams {
+    /// A GitHub App installation token. `permissions` maps a GitHub App
+    /// permission name to its level; the server caps it, and allows only
+    /// `metadata` → `read` today.
+    #[serde(rename = "github")]
+    Github {
+        permissions: BTreeMap<String, IntegrationTokenPermission>,
+    },
+}
+
+impl IntegrationAccessTokenParams {
+    /// A GitHub installation token carrying `permissions`.
+    pub fn github(permissions: BTreeMap<String, IntegrationTokenPermission>) -> Self {
+        Self::Github { permissions }
+    }
+
+    /// A GitHub installation token carrying only `metadata: read`.
+    pub fn github_metadata_read() -> Self {
+        Self::github(BTreeMap::from([(
+            "metadata".to_string(),
+            IntegrationTokenPermission::Read,
+        )]))
+    }
+}
+
+/// A short-lived (at most an hour) provider token minted from an
+/// integration. The server never stores it; read it with [`Secret::expose`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IntegrationAccessToken {
+    pub token: Secret,
+    pub expires_at: String,
+    #[serde(rename = "type")]
+    pub integration_type: IntegrationType,
+    /// The permissions the token carries.
+    pub permissions: BTreeMap<String, IntegrationTokenPermission>,
+}
+
 // judges
 
 /// A judge a Recipe declares. Its definition is authored in the Recipe; only
