@@ -12,7 +12,8 @@ use introspection_sdk::{
     ApiKeyStatus, ApplicationCreateParams, ApplicationIdpCreateParams, ApplicationIdpProvider,
     ApplicationListParams, ApplicationType, ClientConfig, CredentialCreateParams,
     CredentialUpdateParams, FeatureFlagValue, ImageCreate, ImageKind, ImageListParams, ImageSource,
-    ImageStatus, IntegrationCreateParams, IntegrationStatus, IntegrationType, IntrospectionClient,
+    ImageStatus, IntegrationAccessTokenParams, IntegrationCreateParams, IntegrationStatus,
+    IntegrationTokenPermission, IntegrationType, IntrospectionAPIError, IntrospectionClient,
     JudgeUpdateParams, Lane, PaginationParams, RuntimeSettingListParams, Secret,
     TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, VariableCreateParams,
     VariableUpdateParams, MAX_COMMAND_WAIT_SECONDS,
@@ -407,6 +408,144 @@ async fn variables_integrations_and_judges_send_their_wire_names() {
         .await
         .expect("judges.update");
     assert!(!judge.enabled);
+}
+
+#[tokio::test]
+async fn integration_access_token_posts_the_typed_body_and_redacts_the_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/integrations/{ID}/access-token")))
+        .and(body_json(
+            json!({ "type": "github", "permissions": { "metadata": "read" } }),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "token": "ghs_secret", "expires_at": "2026-11-05T11:02:00Z", "type": "github",
+            "permissions": { "metadata": "read" },
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let token = client(&server)
+        .integrations()
+        .access_token(id(), &IntegrationAccessTokenParams::github_metadata_read())
+        .await
+        .expect("integrations.access_token");
+    assert_eq!(token.token.expose(), "ghs_secret");
+    assert_eq!(token.expires_at, "2026-11-05T11:02:00Z");
+    assert_eq!(token.integration_type, IntegrationType::Github);
+    assert_eq!(
+        token.permissions.get("metadata"),
+        Some(&IntegrationTokenPermission::Read)
+    );
+    let debug = format!("{token:?}");
+    assert!(!debug.contains("ghs_secret"), "{debug}");
+    assert!(debug.contains("<redacted>"), "{debug}");
+}
+
+#[tokio::test]
+async fn integration_access_token_cap_error_carries_its_detail() {
+    let server = MockServer::start().await;
+    let detail = json!({
+        "code": "integration_token_cap_exceeded",
+        "message": "permissions exceed the cap",
+        "allowed": { "metadata": "read" },
+    });
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/integrations/{ID}/access-token")))
+        .and(body_json(
+            json!({ "type": "github", "permissions": { "contents": "write" } }),
+        ))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({ "detail": detail })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let params = IntegrationAccessTokenParams::github(
+        [("contents".to_string(), IntegrationTokenPermission::Write)].into(),
+    );
+    let err = client(&server)
+        .integrations()
+        .access_token(id(), &params)
+        .await
+        .expect_err("a request outside the cap is refused");
+    assert!(matches!(
+        err,
+        IntrospectionAPIError::Http { status: 403, .. }
+    ));
+    assert_eq!(err.code(), Some("integration_token_cap_exceeded"));
+    assert_eq!(err.to_string(), "permissions exceed the cap (status=403)");
+    assert_eq!(err.body().and_then(|b| b.get("detail")), Some(&detail));
+}
+
+#[tokio::test]
+async fn integration_repositories_decode_the_installation_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/integrations/{ID}/repositories")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "github",
+            "records": [
+                {
+                    "id": 1, "name": "recipes", "full_name": "acme/recipes",
+                    "html_url": "https://github.com/acme/recipes", "default_branch": "main",
+                    "private": true, "description": null,
+                    "pushed_at": "2026-11-01T00:00:00Z",
+                },
+                {
+                    "id": 2, "name": "site", "full_name": "acme/site",
+                    "html_url": "https://github.com/acme/site", "default_branch": "trunk",
+                    "private": false, "description": "Marketing site", "pushed_at": null,
+                },
+            ],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let repositories = client(&server)
+        .integrations()
+        .repositories(id())
+        .await
+        .expect("integrations.repositories");
+    let records = repositories.github_records().expect("a GitHub list");
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].id, 1);
+    assert_eq!(records[0].full_name, "acme/recipes");
+    assert_eq!(records[0].html_url, "https://github.com/acme/recipes");
+    assert_eq!(records[0].default_branch, "main");
+    assert!(records[0].private);
+    assert_eq!(records[0].description, None);
+    assert_eq!(
+        records[0].pushed_at.as_deref(),
+        Some("2026-11-01T00:00:00Z")
+    );
+    assert_eq!(records[1].description.as_deref(), Some("Marketing site"));
+    assert_eq!(records[1].pushed_at, None);
+}
+
+#[tokio::test]
+async fn integration_repositories_of_a_non_github_integration_is_a_400() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/integrations/{ID}/repositories")))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "detail": {
+                "code": "integration_type_unsupported",
+                "message": "only GitHub integrations list repositories",
+            },
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .integrations()
+        .repositories(id())
+        .await
+        .expect_err("a non-GitHub integration is refused");
+    assert_eq!(err.status(), Some(400));
+    assert_eq!(err.code(), Some("integration_type_unsupported"));
 }
 
 #[tokio::test]

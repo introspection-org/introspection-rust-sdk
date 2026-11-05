@@ -15,7 +15,8 @@ use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Integration, IntegrationCreateParams, IntegrationUpdateParams, PaginationParams,
+    Integration, IntegrationAccessToken, IntegrationAccessTokenParams, IntegrationCreateParams,
+    IntegrationRepositories, IntegrationUpdateParams, PaginationParams,
 };
 
 /// `client.integrations` namespace. Holds a CP-bound HTTP client.
@@ -62,5 +63,31 @@ impl Integrations {
     pub async fn delete(&self, integration_id: Uuid) -> ApiResult<()> {
         let path = format!("/v1/integrations/{integration_id}");
         self.http.delete_empty(&path).await
+    }
+
+    /// `POST /v1/integrations/{id}/access-token` (`integrations:token`) —
+    /// mint a short-lived provider token from the integration.
+    ///
+    /// A request outside the server's cap is a `403` whose
+    /// [`code`](crate::IntrospectionAPIError::code) is
+    /// `integration_token_cap_exceeded`, with the permitted set under
+    /// `detail.allowed` in [`body`](crate::IntrospectionAPIError::body); an
+    /// inactive or expired integration is a `409`.
+    pub async fn access_token(
+        &self,
+        integration_id: Uuid,
+        params: &IntegrationAccessTokenParams,
+    ) -> ApiResult<IntegrationAccessToken> {
+        let path = format!("/v1/integrations/{integration_id}/access-token");
+        self.http.post_json(&path, params).await
+    }
+
+    /// `GET /v1/integrations/{id}/repositories` (`integrations:read`) — the
+    /// repositories the installation can reach, read with the control
+    /// plane's own credential, all in one response. A non-GitHub integration
+    /// is a `400`; an inactive one a `409`.
+    pub async fn repositories(&self, integration_id: Uuid) -> ApiResult<IntegrationRepositories> {
+        let path = format!("/v1/integrations/{integration_id}/repositories");
+        self.http.get_json(&path, &()).await
     }
 }
