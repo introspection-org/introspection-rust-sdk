@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.39.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.38.0...v0.39.0) (2026-11-05)
+
+
+### Features
+
+* **integrations:** add integration access tokens and repositories ([#197](https://github.com/introspection-org/introspection-rust-sdk/issues/197)) ([ebcf4ae](https://github.com/introspection-org/introspection-rust-sdk/commit/ebcf4ae8260a89a6bed48cf35c79d26f69f05c1a))
+* **issues:** add the Data Plane issues client ([#198](https://github.com/introspection-org/introspection-rust-sdk/issues/198)) ([add4cd1](https://github.com/introspection-org/introspection-rust-sdk/commit/add4cd1e4e65d0ff70c098b8b59fe7c7cf2af3fe))
+
 ## [0.38.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.37.0...v0.38.0) (2026-11-03)
 
 
