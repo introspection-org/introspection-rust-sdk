@@ -925,6 +925,29 @@ mod tests {
         );
     }
 
+    #[test]
+    #[cfg(feature = "strict-schema")]
+    fn strict_schema_decodes_a_chat_spans_tool_call_and_response_ids() {
+        let body = serde_json::json!({
+            "object": "list",
+            "data": [{
+                "trace_id": "t",
+                "start_time": "2026-11-06T04:24:50Z",
+                "attributes": {"introspection": {
+                    "contains": {"version": 2, "values": ["gen_ai.output.messages.parts.type:tool_call"]},
+                    "tool_response_ids": ["toolu_01", "*"],
+                    "tool_call_ids": ["toolu_02"]
+                }}
+            }]
+        });
+
+        let list = decode_value::<crate::api::genai_span::GenAiSpanList>(body, "/v1/x").unwrap();
+
+        let introspection = list.data[0].attributes.introspection.as_ref().unwrap();
+        assert_eq!(introspection.tool_response_ids, ["toolu_01", "*"]);
+        assert_eq!(introspection.tool_call_ids, ["toolu_02"]);
+    }
+
     /// A record whose fields serde buffers before it decodes them: a
     /// flattened struct and an untagged enum.
     #[cfg(feature = "strict-schema")]
