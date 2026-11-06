@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.40.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.39.0...v0.40.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **conversations:** IntrospectionAttributes gains the public fields tool_call_ids and tool_response_ids, so a struct literal that names every field no longer compiles.
+
+### Features
+
+* **conversations:** model a chat span's tool call and response ids ([#200](https://github.com/introspection-org/introspection-rust-sdk/issues/200)) ([4b1ad2d](https://github.com/introspection-org/introspection-rust-sdk/commit/4b1ad2dc8a6fee8ad272c1f4312c1b822cff86ac))
+
 ## [0.39.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.38.0...v0.39.0) (2026-11-05)
 
 
