@@ -471,6 +471,17 @@ pub struct IntrospectionAttributes {
     pub history: Option<IntrospectionHistory>,
     #[serde(default)]
     pub contains: Option<IntrospectionContains>,
+    /// `introspection.tool_response_ids`: the id of each tool response in a
+    /// chat span's input delta, which is the id of the tool call it answers.
+    /// Stamped from contains version 2; a list the processor cut at its bound
+    /// ends in `*`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_response_ids: Vec<String>,
+    /// `introspection.tool_call_ids`: the id of each tool call a chat span's
+    /// output requests. Stamped from contains version 2; a list the processor
+    /// cut at its bound ends in `*`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_ids: Vec<String>,
     #[serde(default)]
     pub agent: Option<IntrospectionAgent>,
     #[serde(default)]
