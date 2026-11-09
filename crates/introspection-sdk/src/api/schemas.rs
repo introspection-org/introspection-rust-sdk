@@ -407,6 +407,12 @@ pub struct TaskCreate {
     /// Consent to `tasks.commands` against the live sandbox; eval tasks only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commands: Option<bool>,
+    /// Exact pushed Recipe commit (40 hex characters) to materialize for an
+    /// evaluation task. The bound Runtime stays authoritative for the
+    /// repository, image and subpath. Requires [`TaskKind::Eval`] and a
+    /// Git-backed Runtime; otherwise the server answers 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe_git_commit_sha: Option<String>,
     /// Recipe agent to run; `None` uses the recipe default (`agents/agent.yaml`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
@@ -8223,6 +8229,32 @@ mod tests {
             body["repositories"][0],
             json!({"repo": "acme/api-service", "ref": "main", "depth": 0})
         );
+    }
+
+    #[test]
+    fn task_create_serialises_the_recipe_git_commit_sha_only_when_set() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let body = serde_json::to_value(TaskCreate {
+            kind: Some(TaskKind::Eval),
+            commands: Some(true),
+            recipe_git_commit_sha: Some(sha.into()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            body,
+            json!({"kind": "eval", "commands": true, "recipe_git_commit_sha": sha})
+        );
+
+        let body = serde_json::to_value(TaskCreate {
+            kind: Some(TaskKind::Eval),
+            commands: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(body.get("recipe_git_commit_sha").is_none());
     }
 
     #[test]
