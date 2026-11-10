@@ -595,7 +595,8 @@ pub async fn evidence(w: &mut Walk) {
     assert!(conversation.usage.total_tokens > 0);
     conversation_reads(&sa, &conversation_id, w).await;
     let output = set(&w.output_file, "the output file").id;
-    issues(&sa, task, output).await;
+    // Issues are a project member's (or the Operator's), not an application's.
+    issues(&w.member(), task, output).await;
 }
 
 /// What an issue says, without what the server stamps on it.
@@ -613,8 +614,8 @@ fn issue_brief(issue: &Issue) -> Value {
 
 /// An issue owned by the walk's task, with its output as evidence: open,
 /// read, list, edit under its etag, close, delete.
-async fn issues(sa: &IntrospectionClient, task: Uuid, output: Uuid) {
-    let issue = sa
+async fn issues(member: &IntrospectionClient, task: Uuid, output: Uuid) {
+    let issue = member
         .issues()
         .create(&IssueCreateParams {
             priority: Some(IssuePriority::High),
@@ -646,9 +647,9 @@ async fn issues(sa: &IntrospectionClient, task: Uuid, output: Uuid) {
     assert_eq!(issue.task_id, Some(task));
     assert_eq!(issue.files.first().map(|f| f.file_id), Some(output));
 
-    let read = sa.issues().get(issue.id).await.expect("read the issue");
+    let read = member.issues().get(issue.id).await.expect("read the issue");
     assert_eq!(read.id, issue.id);
-    let listed = sa
+    let listed = member
         .issues()
         .list(&IssueListParams {
             tag: Some(format!("suite:{}", walk::TAG_NAME)),
@@ -659,7 +660,7 @@ async fn issues(sa: &IntrospectionClient, task: Uuid, output: Uuid) {
         .expect("list issues");
     assert!(listed.iter().any(|i| i.id == issue.id));
 
-    let closed = sa
+    let closed = member
         .issues()
         .update(
             issue.id,
@@ -676,7 +677,8 @@ async fn issues(sa: &IntrospectionClient, task: Uuid, output: Uuid) {
     assert!(closed.closed_at.is_some());
     // The etag it was read under is stale now, so a second edit is refused.
     expect_refused(
-        sa.issues()
+        member
+            .issues()
             .update(
                 issue.id,
                 IssueUpdateParams {
@@ -689,11 +691,12 @@ async fn issues(sa: &IntrospectionClient, task: Uuid, output: Uuid) {
         412,
     );
 
-    sa.issues()
+    member
+        .issues()
         .delete(issue.id, Some(&closed.etag()))
         .await
         .expect("delete the issue");
-    expect_not_found(sa.issues().get(issue.id).await);
+    expect_not_found(member.issues().get(issue.id).await);
 }
 
 async fn first_items(
