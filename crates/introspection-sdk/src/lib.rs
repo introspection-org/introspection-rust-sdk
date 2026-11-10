@@ -225,8 +225,7 @@ pub use resources::aauth::{
 };
 pub use resources::annotations::{
     AnnotationComment, AnnotationCreated, AnnotationEventOptions, AnnotationInclude,
-    AnnotationListParams, AnnotationMutation, AnnotationNavigation, AnnotationNavigationParams,
-    AnnotationState, AnnotationTarget,
+    AnnotationListParams, AnnotationMutation, AnnotationState, AnnotationTarget,
 };
 pub use resources::tags::{
     AccessTagCreate, AnnotationTagCreate, Tag, TagCreate, TagKind, TagListParams, TagUpdate,

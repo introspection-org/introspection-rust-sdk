@@ -7,16 +7,15 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use introspection_sdk::{
     AccessTagCreate, AnnotationEventOptions, AnnotationListParams, AnnotationMutation,
-    AnnotationNavigationParams, AnnotationTarget, Annotations, ApprovalDecision,
-    ApprovalListParams, ConversationContains, ConversationExportFormat, ConversationExportParams,
-    ConversationItemGetParams, ConversationItemListParams, ConversationListParams, DecidedBy,
-    EventListParams, File, FileCreateText, FileListParams, FileUpdate, FileUpload,
-    FileVersionCreateText, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
-    Lane, MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter,
-    MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
-    ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams,
-    TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate,
-    TaskStatus, TaskUpdate,
+    AnnotationTarget, Annotations, ApprovalDecision, ApprovalListParams, ConversationContains,
+    ConversationExportFormat, ConversationExportParams, ConversationItemGetParams,
+    ConversationItemListParams, ConversationListParams, DecidedBy, EventListParams, File,
+    FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
+    FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
+    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
+    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
+    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
+    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -980,7 +979,7 @@ async fn annotations(
             .first()
             .is_some_and(|a| a.labels.contains(&"walk".to_string())));
     }
-    annotation_reads(w, sa, &conversation_id, &target).await;
+    annotation_reads(sa, &conversation_id).await;
 }
 
 /// The span export as the bytes the server sent. The replay answers a request
@@ -1005,13 +1004,8 @@ async fn span_export_bytes(
     assert!(!streamed.is_empty(), "the span export has a body");
 }
 
-/// The annotation as events (JSON and Arrow) and its navigation.
-async fn annotation_reads(
-    w: &Walk,
-    sa: &IntrospectionClient,
-    conversation_id: &str,
-    target: &AnnotationTarget,
-) {
+/// The annotation as events (JSON and Arrow).
+async fn annotation_reads(sa: &IntrospectionClient, conversation_id: &str) {
     let params = EventListParams {
         conversation_id: Some(conversation_id.to_string()),
         ..EventListParams::new(IntrospectionEventName::Annotation)
@@ -1044,12 +1038,6 @@ async fn annotation_reads(
         table.batches.iter().map(|b| b.num_rows()).sum::<usize>(),
         events.len()
     );
-    let member = w.member();
-    let annotations = member.annotations();
-    annotations
-        .navigation(target, &AnnotationNavigationParams::default())
-        .await
-        .expect("annotation navigation");
 }
 
 /// The AAuth surfaces and the member's app connections, read empty.
