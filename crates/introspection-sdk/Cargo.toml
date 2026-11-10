@@ -50,6 +50,24 @@ authoring = []
 # WebSocket: `Remotes::connect`. Off by default, since only the CLI's dev
 # server dials in and the WebSocket client is a dependency nothing else needs.
 remotes = ["dep:tokio-tungstenite"]
+# The end-to-end walk as the `introspection-walk` binary, for a caller that
+# runs it without compiling it (introspection-cloud's SDK walk job). Not for
+# users: CI builds it debug-only and never publishes it. `strict-schema`, as
+# under the test's `--all-features`, so API drift still fails the walk.
+walk = [
+    "arrow",
+    "authoring",
+    "strict-schema",
+    "tokio/net",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:http-body-util",
+    "dep:regex",
+    "dep:base64",
+    "dep:url",
+    "dep:insta",
+    "dep:ring",
+]
 
 [dependencies]
 # Async runtime
@@ -106,6 +124,16 @@ arrow = { version = "60", default-features = false, features = ["ipc"], optional
 # native roots, the trust store reqwest reads, so a private CA trusted on the
 # REST path is trusted on the socket too.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"], optional = true }
+
+# The `walk` binary's dependencies, the walk test's dev-dependencies below.
+hyper = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+http-body-util = { version = "0.1", optional = true }
+regex = { version = "1", optional = true }
+base64 = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+insta = { version = "1", features = ["json", "redactions"], optional = true }
+ring = { version = "0.17", optional = true }
 
 # Streaming support (StreamExt)
 futures = "0.3"
@@ -202,6 +230,13 @@ required-features = ["remotes"]
 name = "walk"
 path = "tests/walk/main.rs"
 required-features = ["arrow", "authoring"]
+
+[[bin]]
+name = "introspection-walk"
+path = "tests/walk/bin.rs"
+required-features = ["walk"]
+# The walk test already runs the modules' unit tests.
+test = false
 
 # Linting configuration
 # Run: cargo clippy -- -W clippy::all -W clippy::pedantic

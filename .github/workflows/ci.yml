@@ -110,6 +110,21 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
+      # introspection-cloud's SDK walk job downloads this instead of compiling
+      # the walk. Never released or published.
+      - name: Build the walk binary
+        if: github.event_name == 'push'
+        run: cargo build --locked --features walk --bin introspection-walk
+
+      - name: Upload the walk binary
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: introspection-walk-linux-x64
+          path: target/debug/introspection-walk
+          retention-days: 30
+          if-no-files-found: error
+
   # Fails when the duplicated-line share of crates/**/*.rs exceeds the
   # threshold in .jscpd.json. The threshold is a ratchet: lower it when a
   # refactor removes duplication; never raise it.
