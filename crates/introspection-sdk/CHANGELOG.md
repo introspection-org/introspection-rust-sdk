@@ -5,7 +5,13 @@
 
 ### ⚠ BREAKING CHANGES
 
+* **annotations:** `AnnotationState` drops the commenter, latest-comment and `updated_by_member_id` fields for `reviewer_member_ids`, and `AnnotationFacet` gains four optional fields.
 * ShareResourceType, TagKind, ExperimentGoalDirection, ExperimentGoalComponent, RepositoryContent and FeatureFlagValue gain a fallback variant, so an exhaustive match on them needs a new arm. ShareResourceType also gains PartialEq, Eq, Hash, Display and as_str().
+
+### Features
+
+* **annotations:** follow the narrowed annotation row; JSON-lines conversation export; judgement payload by kind ([#219](https://github.com/introspection-org/introspection-rust-sdk/issues/219)) ([f77174a](https://github.com/introspection-org/introspection-rust-sdk/commit/f77174abe9eee48ccd891d1a3548c8eee2bb6f98))
+
 
 ### Bug Fixes
 
