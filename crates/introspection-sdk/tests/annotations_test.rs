@@ -2,17 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationListParams,
-    AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations, ClientConfig, Event,
-    EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate, TagKind, TagUpdate,
-    Tags,
+    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationExportParams,
+    AnnotationFacet, AnnotationListParams, AnnotationMutation, AnnotationTagCreate,
+    AnnotationTarget, Annotations, ClientConfig, Event, EventListParams, IntrospectionClient,
+    IntrospectionEventName, TagCreate, TagKind, TagUpdate, Tags,
 };
 use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{body_json, header, method, path, query_param};
+use wiremock::Request;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TRACE_ID: &str = "0af7651916cd43dd8448eb211c80319c";
@@ -55,6 +56,10 @@ fn target() -> AnnotationTarget {
     }
 }
 
+fn member() -> Uuid {
+    MEMBER_ID.parse().unwrap()
+}
+
 fn annotation() -> serde_json::Value {
     json!({
         "trace_id": TRACE_ID,
@@ -62,13 +67,9 @@ fn annotation() -> serde_json::Value {
         "conversation_id": "conversation-1",
         "labels": ["needs-review"],
         "assignee_member_ids": [MEMBER_ID],
-        "annotator_member_ids": [],
-        "has_comment": false,
-        "comment_count": 0,
-        "latest_comment": null,
-        "latest_comment_member_id": null,
+        "reviewer_member_ids": [MEMBER_ID],
+        "comment_count": 1,
         "updated_at": "2026-08-25T12:00:00Z",
-        "updated_by_member_id": MEMBER_ID,
         "assignment_event_id": EVENT_ID
     })
 }
@@ -103,10 +104,232 @@ async fn lists_folded_annotation_state_with_filters() {
         })
         .await
         .unwrap();
-    assert_eq!(
-        stream.next().await.unwrap().unwrap().labels,
-        vec!["needs-review"]
-    );
+    let state = stream.next().await.unwrap().unwrap();
+    assert_eq!(state.labels, vec!["needs-review"]);
+    assert_eq!(state.reviewer_member_ids, vec![member()]);
+    assert_eq!(state.comment_count, 1);
+}
+
+const JSON_LINES: &str = "application/x-ndjson";
+
+fn export_body() -> String {
+    let older = json!({
+        "trace_id": TRACE_ID,
+        "span_id": "00f067aa0ba902b7",
+        "human_commenter_member_ids": [MEMBER_ID],
+        "updated_at": "2026-08-25T12:00:00Z"
+    });
+    format!("{}\n{older}\n", annotation())
+}
+
+#[tokio::test]
+async fn export_reads_every_row_with_the_filters_on_the_query() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations/export"))
+        .and(header("accept", JSON_LINES))
+        .and(query_param("assignee_member_id", MEMBER_ID))
+        .and(query_param("conversation_id", "conversation-1"))
+        .and(query_param("status", "reviewed"))
+        .and(|request: &Request| {
+            let labels: Vec<_> = request
+                .url
+                .query_pairs()
+                .filter(|(key, _)| key == "label")
+                .map(|(_, value)| value.into_owned())
+                .collect();
+            let paged = request
+                .url
+                .query_pairs()
+                .any(|(key, _)| key == "limit" || key == "next" || key == "include_total");
+            labels == ["needs-review", "wrong-tool"] && !paged
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_raw(export_body(), JSON_LINES))
+        .expect(1)
+        .mount(&dp)
+        .await;
+
+    let rows: Vec<_> = Annotations::data_plane(http(&dp))
+        .export(&AnnotationExportParams {
+            assignee_member_id: Some(member()),
+            conversation_id: Some("conversation-1".into()),
+            labels: vec!["needs-review".into(), "wrong-tool".into()],
+            status: Some("reviewed".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+
+    let spans: Vec<_> = rows.iter().map(|row| row.span_id.as_str()).collect();
+    assert_eq!(spans, [SPAN_ID, "00f067aa0ba902b7"]);
+    assert_eq!(rows[0].labels, vec!["needs-review"]);
+    // The second row names its reviewers the way an older Data Plane does.
+    assert_eq!(rows[1].reviewer_member_ids, vec![member()]);
+}
+
+#[tokio::test]
+async fn export_stream_passes_the_json_lines_bytes_through() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations/export"))
+        .and(header("accept", JSON_LINES))
+        .and(query_param("trace_id", TRACE_ID))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(export_body(), JSON_LINES))
+        .expect(1)
+        .mount(&dp)
+        .await;
+
+    let chunks: Vec<_> = Annotations::data_plane(http(&dp))
+        .export_stream(&AnnotationExportParams {
+            trace_id: Some(TRACE_ID.into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+
+    assert_eq!(chunks.concat(), export_body().as_bytes());
+}
+
+#[tokio::test]
+async fn export_of_an_empty_body_yields_nothing() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations/export"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("", JSON_LINES))
+        .expect(1)
+        .mount(&dp)
+        .await;
+
+    let rows: Vec<_> = Annotations::data_plane(http(&dp))
+        .export(&AnnotationExportParams::default())
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+
+    assert!(rows.is_empty());
+}
+
+#[tokio::test]
+async fn export_surfaces_a_406() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations/export"))
+        .respond_with(ResponseTemplate::new(406))
+        .expect(1)
+        .mount(&dp)
+        .await;
+
+    let result = Annotations::data_plane(http(&dp))
+        .export(&AnnotationExportParams::default())
+        .await;
+
+    let err = result.err().expect("the 406 is an error");
+    assert_eq!(err.status(), Some(406), "{err}");
+}
+
+#[tokio::test]
+async fn export_refuses_an_id_and_an_email_for_one_filter_without_a_request() {
+    let dp = MockServer::start().await;
+
+    let result = Annotations::data_plane(http(&dp))
+        .export(&AnnotationExportParams {
+            assignee_member_id: Some(member()),
+            assigned_to_email: Some("expert@example.com".into()),
+            ..Default::default()
+        })
+        .await;
+
+    let err = result.err().expect("the conflict is an error");
+    assert_eq!(err.status(), Some(422), "{err}");
+    assert!(dp.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn facets_read_the_dataset_summary_of_a_review_queue_bucket() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations/facets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"dimension": "status", "value": "backlog", "count": 3},
+            {
+                "dimension": "review_queue",
+                "value": "needs-review",
+                "count": 2,
+                "conversation_count": 1,
+                "comment_count": 4,
+                "reviewer_member_ids": [MEMBER_ID],
+                "updated_at": "2026-08-25T12:00:00Z"
+            }
+        ])))
+        .mount(&dp)
+        .await;
+
+    let facets: Vec<AnnotationFacet> = Annotations::data_plane(http(&dp)).facets().await.unwrap();
+
+    assert_eq!(facets[0].conversation_count, None);
+    assert_eq!(facets[1].dimension, "review_queue");
+    assert_eq!(facets[1].conversation_count, Some(1));
+    assert_eq!(facets[1].comment_count, Some(4));
+    assert_eq!(facets[1].reviewer_member_ids, Some(vec![member()]));
+}
+
+#[tokio::test]
+async fn reads_the_row_an_older_data_plane_sends() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [{
+                "trace_id": TRACE_ID,
+                "span_id": SPAN_ID,
+                "conversation_id": "conversation-1",
+                "labels": ["needs-review"],
+                "assignee_member_ids": [MEMBER_ID],
+                "annotator_member_ids": [MEMBER_ID],
+                "commenter_member_ids": [MEMBER_ID],
+                "human_commenter_member_ids": [MEMBER_ID],
+                "has_comment": true,
+                "has_human_comment": true,
+                "comment_count": 2,
+                "latest_comment": "looks wrong",
+                "latest_comment_member_id": MEMBER_ID,
+                "latest_comment_actor_member_id": MEMBER_ID,
+                "latest_comment_actor_type": "human",
+                "updated_at": "2026-08-25T12:00:00Z",
+                "updated_by_member_id": MEMBER_ID,
+                "assignment_event_id": EVENT_ID
+            }],
+            "count": 1, "total_count": null, "next": null
+        })))
+        .mount(&dp)
+        .await;
+    let result = Annotations::new(http(&dp), http(&dp))
+        .list(&AnnotationListParams::default())
+        .await
+        .unwrap()
+        .next()
+        .await
+        .unwrap();
+
+    // With `strict-schema` the retired fields are reported, not dropped; the
+    // renamed one is read either way.
+    if cfg!(feature = "strict-schema") {
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("latest_comment"), "{error}");
+        assert!(!error.contains("human_commenter_member_ids"), "{error}");
+        return;
+    }
+    let state = result.unwrap();
+    assert_eq!(state.reviewer_member_ids, vec![member()]);
+    assert_eq!(state.comment_count, 2);
 }
 
 #[tokio::test]

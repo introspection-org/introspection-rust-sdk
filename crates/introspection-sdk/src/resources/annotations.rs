@@ -3,6 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,6 +12,9 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::{decode_json, HttpClient};
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{Paginated, PaginationParams};
+use crate::api::telemetry::{parse_json_lines, JSON_LINES_ACCEPT};
+
+const EXPORT_PATH: &str = "/v1/annotations/export";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AnnotationTarget {
@@ -17,6 +22,8 @@ pub struct AnnotationTarget {
     pub span_id: String,
 }
 
+/// One span's current annotation state. The comment text is not on it: read
+/// the span's `introspection.annotation` events for that.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnotationState {
@@ -28,30 +35,13 @@ pub struct AnnotationState {
     pub labels: Vec<String>,
     #[serde(default)]
     pub assignee_member_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub annotator_member_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub commenter_member_ids: Vec<Uuid>,
-    /// The commenters who are people, not agents.
-    #[serde(default)]
-    pub human_commenter_member_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub has_comment: bool,
-    #[serde(default)]
-    pub has_human_comment: bool,
+    /// The members whose comment completed a review. A Data Plane that
+    /// predates the rename sends it as `human_commenter_member_ids`.
+    #[serde(default, alias = "human_commenter_member_ids")]
+    pub reviewer_member_ids: Vec<Uuid>,
     #[serde(default)]
     pub comment_count: u64,
-    #[serde(default)]
-    pub latest_comment: Option<String>,
-    #[serde(default)]
-    pub latest_comment_member_id: Option<Uuid>,
-    #[serde(default)]
-    pub latest_comment_actor_member_id: Option<Uuid>,
-    /// Who wrote the latest comment (`human`, `agent`, ...).
-    #[serde(default)]
-    pub latest_comment_actor_type: Option<String>,
     pub updated_at: String,
-    pub updated_by_member_id: Uuid,
     #[serde(default)]
     pub assignment_event_id: Option<Uuid>,
 }
@@ -91,14 +81,53 @@ pub struct AnnotationListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// The filters of `GET /v1/annotations/export`: those of the list, with no
+/// page to ask for.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AnnotationExportParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotated_by_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    /// Every label a row must carry, sent as a repeated `label`.
+    #[serde(rename = "label", skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    /// `backlog`, `assigned` or `reviewed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// The annotator as an email, resolved as on [`AnnotationListParams`].
+    #[serde(skip)]
+    pub annotated_by_email: Option<String>,
+    /// The assignee as an email, resolved like `annotated_by_email`.
+    #[serde(skip)]
+    pub assigned_to_email: Option<String>,
+}
+
 /// One filter bucket of `GET /v1/annotations/facets`: how many annotated
 /// spans currently carry `value` along `dimension` (`annotator`,
-/// `assignee`, `label` or `status`).
+/// `assignee`, `label`, `status` or `review_queue`).
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AnnotationFacet {
     pub dimension: String,
     pub value: String,
     pub count: u64,
+    /// Set, with the three fields after it, on the `label` and
+    /// `review_queue` buckets, which summarize a dataset.
+    #[serde(default)]
+    pub conversation_count: Option<u64>,
+    #[serde(default)]
+    pub comment_count: Option<u64>,
+    #[serde(default)]
+    pub reviewer_member_ids: Option<Vec<Uuid>>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 /// What `GET /v1/annotations/navigation` answers: the annotation at the
@@ -210,28 +239,96 @@ impl Annotations {
         params: &AnnotationListParams,
     ) -> ApiResult<Paginator<AnnotationState>> {
         let mut params = params.clone();
-        if params.annotated_by_member_id.is_some() && params.annotated_by_email.is_some() {
-            return Err(validation(
+        params.annotated_by_member_id = self
+            .member_filter(
+                params.annotated_by_member_id,
+                params.annotated_by_email.take(),
                 "Use annotated_by_member_id or annotated_by_email, not both",
                 "conflicting_annotation_annotator_filters",
-            ));
-        }
-        if params.assignee_member_id.is_some() && params.assigned_to_email.is_some() {
-            return Err(validation(
+            )
+            .await?;
+        params.assignee_member_id = self
+            .member_filter(
+                params.assignee_member_id,
+                params.assigned_to_email.take(),
                 "Use assignee_member_id or assigned_to_email, not both",
                 "conflicting_annotation_assignee_filters",
-            ));
-        }
-        if let Some(email) = params.annotated_by_email.take() {
-            params.annotated_by_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
-        }
-        if let Some(email) = params.assigned_to_email.take() {
-            params.assignee_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
-        }
+            )
+            .await?;
         Ok(
             Paginator::new(self.dp_http.clone(), "/v1/annotations", &params)
                 .expect("AnnotationListParams must serialize to an object"),
         )
+    }
+
+    /// `GET /v1/annotations/export` — every row the list returns for these
+    /// filters, unpaginated, each decoded as its line arrives. An email
+    /// filter costs the same member lookup as in [`Self::list`]. A Data
+    /// Plane that predates the route answers `404` or `406`.
+    pub async fn export(
+        &self,
+        params: &AnnotationExportParams,
+    ) -> ApiResult<impl Stream<Item = ApiResult<AnnotationState>>> {
+        let response = self.export_response(params).await?;
+        Ok(parse_json_lines(
+            response.bytes_stream(),
+            EXPORT_PATH.to_string(),
+        ))
+    }
+
+    /// `GET /v1/annotations/export` as the JSON-lines bytes the server sent,
+    /// each chunk passed through as it arrives.
+    pub async fn export_stream(
+        &self,
+        params: &AnnotationExportParams,
+    ) -> ApiResult<impl Stream<Item = ApiResult<Bytes>>> {
+        let response = self.export_response(params).await?;
+        Ok(response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(IntrospectionAPIError::from)))
+    }
+
+    async fn export_response(
+        &self,
+        params: &AnnotationExportParams,
+    ) -> ApiResult<reqwest::Response> {
+        let mut params = params.clone();
+        params.annotated_by_member_id = self
+            .member_filter(
+                params.annotated_by_member_id,
+                params.annotated_by_email.take(),
+                "Use annotated_by_member_id or annotated_by_email, not both",
+                "conflicting_annotation_annotator_filters",
+            )
+            .await?;
+        params.assignee_member_id = self
+            .member_filter(
+                params.assignee_member_id,
+                params.assigned_to_email.take(),
+                "Use assignee_member_id or assigned_to_email, not both",
+                "conflicting_annotation_assignee_filters",
+            )
+            .await?;
+        self.dp_http
+            .get_raw(EXPORT_PATH, &params, Some(JSON_LINES_ACCEPT))
+            .await
+    }
+
+    /// A member filter given as an id or as an email, as the id.
+    async fn member_filter(
+        &self,
+        id: Option<Uuid>,
+        email: Option<String>,
+        conflict: &str,
+        code: &str,
+    ) -> ApiResult<Option<Uuid>> {
+        let Some(email) = email else {
+            return Ok(id);
+        };
+        if id.is_some() {
+            return Err(validation(conflict, code));
+        }
+        Ok(Some(self.resolve_reviewer_ids(vec![email]).await?[0]))
     }
 
     /// `POST /v1/annotations` — append one event: a mutation, plus
@@ -444,5 +541,31 @@ fn http_error(
         request_id: None,
         body: Some(body),
         retry_after: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::TryStreamExt;
+
+    #[tokio::test]
+    async fn export_rows_join_a_line_split_across_chunks() {
+        let chunks = [
+            "{\"trace_id\":\"t\",\"span_id\":\"a\",\"updated_at\":\"2026-08-25T12:00:00Z\"}\n{\"trace_id\":\"t\",\"span",
+            "_id\":\"b\",\"labels\":[\"x\"],\"updated_",
+            "at\":\"2026-08-25T12:00:00Z\"}\n",
+        ]
+        .map(|chunk| Ok::<_, reqwest::Error>(Bytes::from_static(chunk.as_bytes())));
+
+        let rows: Vec<AnnotationState> =
+            parse_json_lines(futures::stream::iter(chunks), EXPORT_PATH.to_string())
+                .try_collect()
+                .await
+                .unwrap();
+
+        let spans: Vec<_> = rows.iter().map(|row| row.span_id.as_str()).collect();
+        assert_eq!(spans, ["a", "b"]);
+        assert_eq!(rows[1].labels, ["x"]);
     }
 }

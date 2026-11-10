@@ -220,9 +220,9 @@ pub use resources::aauth::{
     Budget, DecidedBy, Decision, Mission, MissionListParams, MissionLogEntry,
 };
 pub use resources::annotations::{
-    AnnotationCreated, AnnotationEventOptions, AnnotationFacet, AnnotationListParams,
-    AnnotationMutation, AnnotationNavigation, AnnotationNavigationParams, AnnotationState,
-    AnnotationTarget,
+    AnnotationCreated, AnnotationEventOptions, AnnotationExportParams, AnnotationFacet,
+    AnnotationListParams, AnnotationMutation, AnnotationNavigation, AnnotationNavigationParams,
+    AnnotationState, AnnotationTarget,
 };
 pub use resources::tags::{
     AccessTagCreate, AnnotationTagCreate, Tag, TagCreate, TagKind, TagListParams, TagUpdate,

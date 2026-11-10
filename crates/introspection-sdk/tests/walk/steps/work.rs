@@ -671,6 +671,9 @@ async fn exports(
         latest.and_then(|s| s.span_id).is_some(),
         "the latest LLM turn"
     );
+    // The recording predates the JSON-lines export, so the walk still reads
+    // the buffered form.
+    #[allow(deprecated)]
     let exported = sa
         .conversations()
         .export_json(conversation_id, &export)

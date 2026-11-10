@@ -2,7 +2,8 @@
 //! query, an export in a representation the SDK does not type, and an events
 //! read over several families.
 
-use introspection_sdk::api::telemetry::{ATIF_ACCEPT, REPLAY_V1_ACCEPT};
+use futures::TryStreamExt;
+use introspection_sdk::api::telemetry::{ATIF_ACCEPT, JSON_LINES_ACCEPT, REPLAY_V1_ACCEPT};
 use introspection_sdk::{
     AdvancedOptions, ClientConfig, ConversationExportFormat, ConversationExportParams,
     EventListParams, IntrospectionAPIError, IntrospectionClient, IntrospectionEventName,
@@ -95,6 +96,85 @@ async fn export_json_value_negotiates_each_json_representation() {
             .unwrap();
         assert_eq!(body["accept"], format.accept());
     }
+}
+
+#[tokio::test]
+async fn export_spans_reads_the_json_lines_export_a_span_at_a_time() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv%2F1/export"))
+        .and(header("accept", JSON_LINES_ACCEPT))
+        .and(query_param("agent", "root"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            concat!(
+                r#"{"trace_id":"t","span_id":"a","start_time":"2026-01-01T00:00:00Z"}"#,
+                "\n",
+                r#"{"trace_id":"t","span_id":"b","start_time":"2026-01-01T00:00:00Z"}"#,
+                "\n",
+            ),
+            JSON_LINES_ACCEPT,
+        ))
+        .expect(1)
+        .mount(&dp)
+        .await;
+    let params = ConversationExportParams {
+        agent: Some("root".into()),
+        ..Default::default()
+    };
+
+    let spans: Vec<_> = client(&dp)
+        .conversations()
+        .export_spans("conv/1", &params)
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+
+    let ids: Vec<_> = spans.iter().map(|s| s.span_id.as_deref()).collect();
+    assert_eq!(ids, [Some("a"), Some("b")]);
+    assert_eq!(
+        ConversationExportFormat::JsonLines.accept(),
+        JSON_LINES_ACCEPT
+    );
+}
+
+#[tokio::test]
+async fn export_spans_surfaces_the_406_of_an_older_data_plane() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv/export"))
+        .respond_with(ResponseTemplate::new(406))
+        .expect(1)
+        .mount(&dp)
+        .await;
+
+    let result = client(&dp)
+        .conversations()
+        .export_spans("conv", &ConversationExportParams::default())
+        .await;
+
+    let err = result.err().expect("the 406 is an error");
+    assert_eq!(err.status(), Some(406), "{err}");
+}
+
+#[tokio::test]
+async fn export_json_value_refuses_json_lines_without_a_request() {
+    let dp = MockServer::start().await;
+    let err = client(&dp)
+        .conversations()
+        .export_json_value(
+            "conv",
+            ConversationExportFormat::JsonLines,
+            &ConversationExportParams::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, IntrospectionAPIError::InvalidConfig(_)),
+        "{err}"
+    );
+    assert!(dp.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

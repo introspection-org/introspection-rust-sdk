@@ -2201,6 +2201,7 @@ async fn events_get_surfaces_an_unrecognised_family_as_unknown() {
 // --- conversations export ---------------------------------------------------
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn conversations_export_json_types_the_span_list() {
     let server = MockServer::start().await;
     let http = build_http(&server);
@@ -2273,6 +2274,7 @@ async fn conversations_export_stream_preserves_bytes_headers_and_filters() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn conversations_export_repeats_operation_names_on_the_wire() {
     let server = MockServer::start().await;
     let conversations = Conversations::new(build_http(&server));
