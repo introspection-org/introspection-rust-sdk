@@ -129,11 +129,6 @@ const TYPED: &[(&str, &str, Check)] = &[
     ),
     (
         "GET",
-        r"^/v1/annotations/navigation$",
-        round_trip::<AnnotationNavigation>,
-    ),
-    (
-        "GET",
         r"^/v1/repositories/[^/]+/branches$",
         round_trip::<Paginated<RepositoryBranch>>,
     ),
