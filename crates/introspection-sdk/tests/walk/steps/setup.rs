@@ -24,7 +24,7 @@ use crate::support::{
 use crate::{set, Walk};
 
 /// Every scope a service-account application may hold that the walk uses.
-pub const APPLICATION_SCOPES: [&str; 54] = [
+pub const APPLICATION_SCOPES: [&str; 57] = [
     "projects:read",
     "repositories:read",
     "repositories:write",
@@ -56,6 +56,9 @@ pub const APPLICATION_SCOPES: [&str; 54] = [
     "connections:delete",
     "automations:read",
     "automations:write",
+    "issues:read",
+    "issues:write",
+    "issues:delete",
     "annotations:read",
     "approvals:read",
     "approvals:write",

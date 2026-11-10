@@ -12,8 +12,9 @@ use introspection_sdk::{
     ConversationItemGetParams, ConversationItemListParams, ConversationListParams, DecidedBy,
     EventListParams, File, FileCreateText, FileListParams, FileUpdate, FileUpload,
     FileVersionCreateText, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
-    Lane, MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter,
-    MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
+    Issue, IssueCreateParams, IssueFile, IssueListParams, IssuePriority, IssueStatus,
+    IssueUpdateParams, Lane, MemberConnectionCreate, MemberConnectionListParams, MemberListParams,
+    MetricFilter, MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
     ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams,
     TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate,
     TaskStatus, TaskUpdate,
@@ -593,6 +594,106 @@ pub async fn evidence(w: &mut Walk) {
     assert!(conversation.metrics.trace_count >= 2);
     assert!(conversation.usage.total_tokens > 0);
     conversation_reads(&sa, &conversation_id, w).await;
+    let output = set(&w.output_file, "the output file").id;
+    issues(&sa, task, output).await;
+}
+
+/// What an issue says, without what the server stamps on it.
+fn issue_brief(issue: &Issue) -> Value {
+    json!({
+        "title": issue.title,
+        "description": issue.description,
+        "status": issue.status,
+        "priority": issue.priority,
+        "task_id": issue.task_id,
+        "tags": issue.tags,
+        "files": issue.files.iter().map(|f| f.file_id).collect::<Vec<_>>(),
+    })
+}
+
+/// An issue owned by the walk's task, with its output as evidence: open,
+/// read, list, edit under its etag, close, delete.
+async fn issues(sa: &IntrospectionClient, task: Uuid, output: Uuid) {
+    let issue = sa
+        .issues()
+        .create(&IssueCreateParams {
+            priority: Some(IssuePriority::High),
+            tags: Some(vec![format!("suite:{}", walk::TAG_NAME)]),
+            files: Some(vec![IssueFile::new(output)]),
+            ..IssueCreateParams::new(
+                "The walk's issue",
+                "The greeting the walk's task wrote.",
+                task,
+            )
+        })
+        .await
+        .expect("open the issue");
+    assert_stable!(issue_brief(&issue), @r#"
+    {
+      "description": "The greeting the walk's task wrote.",
+      "files": [
+        "[uuid]"
+      ],
+      "priority": "high",
+      "status": "open",
+      "tags": [
+        "suite:walk"
+      ],
+      "task_id": "[uuid]",
+      "title": "The walk's issue"
+    }
+    "#);
+    assert_eq!(issue.task_id, Some(task));
+    assert_eq!(issue.files.first().map(|f| f.file_id), Some(output));
+
+    let read = sa.issues().get(issue.id).await.expect("read the issue");
+    assert_eq!(read.id, issue.id);
+    let listed = sa
+        .issues()
+        .list(&IssueListParams {
+            tag: Some(format!("suite:{}", walk::TAG_NAME)),
+            ..Default::default()
+        })
+        .collect_all(0)
+        .await
+        .expect("list issues");
+    assert!(listed.iter().any(|i| i.id == issue.id));
+
+    let closed = sa
+        .issues()
+        .update(
+            issue.id,
+            IssueUpdateParams {
+                status: Some(IssueStatus::Closed),
+                description: Some("The greeting the walk's task wrote, checked.".into()),
+                ..Default::default()
+            },
+            Some(&read.etag()),
+        )
+        .await
+        .expect("close the issue");
+    assert_eq!(closed.status, IssueStatus::Closed);
+    assert!(closed.closed_at.is_some());
+    // The etag it was read under is stale now, so a second edit is refused.
+    expect_refused(
+        sa.issues()
+            .update(
+                issue.id,
+                IssueUpdateParams {
+                    priority: Some(IssuePriority::Low),
+                    ..Default::default()
+                },
+                Some(&read.etag()),
+            )
+            .await,
+        412,
+    );
+
+    sa.issues()
+        .delete(issue.id, Some(&closed.etag()))
+        .await
+        .expect("delete the issue");
+    expect_not_found(sa.issues().get(issue.id).await);
 }
 
 async fn first_items(
