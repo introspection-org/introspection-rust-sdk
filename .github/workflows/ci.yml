@@ -81,56 +81,6 @@ jobs:
       - name: Run clippy (aauth-protocol without HTTP)
         run: cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
 
-  lint-test:
-    name: Lint, test and build the walk
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo test --all-features
-
-      # introspection-cloud's SDK walk job downloads this instead of compiling
-      # the walk. Never released or published.
-      - name: Build the walk binary
-        if: github.event_name == 'push'
-        # Debug info is most of its size (321 MB, 54 MB zipped); stripped it is 68 MB, 12 MB zipped,
-        # and keeps the symbols a backtrace names.
-        run: |
-          cargo build --locked --features walk --bin introspection-walk
-          mkdir -p walk
-          strip --strip-debug -o walk/introspection-walk target/debug/introspection-walk
-
-      - name: Upload the walk binary
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@v7
-        with:
-          name: introspection-walk-linux-x64
-          path: walk/introspection-walk
-          retention-days: 30
-          if-no-files-found: error
-
   # Fails when the duplicated-line share of crates/**/*.rs exceeds the
   # threshold in .jscpd.json. The threshold is a ratchet: lower it when a
   # refactor removes duplication; never raise it.
@@ -207,6 +157,26 @@ jobs:
       - name: Build (otel only)
         run: cargo build --locked --features otel
 
+      # introspection-cloud's SDK walk job downloads this instead of compiling
+      # the walk. Never released or published.
+      - name: Build the walk binary
+        if: github.event_name == 'push'
+        # Debug info is most of its size (321 MB, 54 MB zipped); stripped it is 68 MB, 12 MB zipped,
+        # and keeps the symbols a backtrace names.
+        run: |
+          cargo build --locked --features walk --bin introspection-walk
+          mkdir -p walk
+          strip --strip-debug -o walk/introspection-walk target/debug/introspection-walk
+
+      - name: Upload the walk binary
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: introspection-walk-linux-x64
+          path: walk/introspection-walk
+          retention-days: 30
+          if-no-files-found: error
+
   semver-checks:
     name: Semver Checks
     # Compares each published crate's public API with its latest crates.io
@@ -272,7 +242,6 @@ jobs:
       - secrets-scan
       - lint-actions
       - lint
-      - lint-test
       - duplication
       - unused-deps
       - test
