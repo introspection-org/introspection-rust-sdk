@@ -1,0 +1,22 @@
+name: Prune walk binaries
+
+# GHCR has no retention limit like ECR's, so this keeps the newest 10 versions;
+# :latest is always the newest.
+on:
+  schedule:
+    - cron: "0 3 * * 0" # weekly
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: introspection-rust-walk
+          package-type: container
+          min-versions-to-keep: 10
