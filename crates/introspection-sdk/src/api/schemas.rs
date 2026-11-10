@@ -7437,6 +7437,23 @@ pub struct AnnotationPayload {
     pub assignee_member_ids: Option<Vec<Uuid>>,
 }
 
+open_wire_enum! {
+    /// How a judge was authored. Absent on historical judgements.
+    pub enum JudgeType {
+        Online => "online",
+        Offline => "offline",
+        Mission => "mission",
+    }
+}
+
+open_wire_enum! {
+    /// The versioned shape of a judgement's result.
+    pub enum JudgementResultSchema {
+        VerdictV1 => "verdict.v1",
+        QuestionScoresV1 => "question_scores.v1",
+    }
+}
+
 /// `introspection.judgement` payload — mirrors the runtime-agent judges
 /// emitter (`introspection.judgement.*` / `introspection.judge.*` attributes).
 #[serde_with::skip_serializing_none]
@@ -7445,16 +7462,77 @@ pub struct JudgementPayload {
     pub judgement_id: String,
     #[serde(default)]
     pub judge_id: Option<String>,
+    /// The Recipe judge's slug.
+    #[serde(default)]
+    pub judge_slug: Option<String>,
+    #[serde(default)]
+    pub judge_type: Option<JudgeType>,
+    #[serde(default)]
+    pub result_schema: Option<JudgementResultSchema>,
+    /// The runtime that owns the judge.
+    #[serde(default)]
+    pub runtime_slug: Option<String>,
+    /// The verdict.
     #[serde(default)]
     pub result: Option<String>,
+    /// Whether the judgement ran (`ok`/`error`), distinct from the verdict.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// The failing layer when `status` is `error`.
+    #[serde(default)]
+    pub error_class: Option<String>,
+    /// Why it failed, in the upstream's words; for reading, not grouping.
+    #[serde(default)]
+    pub error_message: Option<String>,
+    /// The component that emitted it, such as `introspection-judge`.
+    #[serde(default)]
+    pub source_component: Option<String>,
+    /// The grader's rationale for the verdict.
+    #[serde(default)]
+    pub reasoning: Option<String>,
     #[serde(default)]
     pub definition_hash: Option<String>,
+    /// The judge engine build that produced the verdict.
+    #[serde(default)]
+    pub engine_version: Option<String>,
+    #[serde(default)]
+    pub judge_provider: Option<String>,
+    #[serde(default)]
+    pub judge_model: Option<String>,
     #[serde(default)]
     pub contract_version: Option<String>,
     #[serde(default)]
     pub sequence_hash: Option<String>,
     #[serde(default)]
+    pub input_tokens: Option<i64>,
+    #[serde(default)]
+    pub output_tokens: Option<i64>,
+    #[serde(default)]
+    pub total_tokens: Option<i64>,
+    #[serde(default)]
     pub experiment_arm_id: Option<Uuid>,
+    /// Each answered question's probability of true, 0-100.
+    #[serde(default)]
+    pub scores: Option<BTreeMap<String, i64>>,
+    /// An egress judgement's questions, by name.
+    #[serde(default)]
+    pub questions: Option<BTreeMap<String, String>>,
+    /// The `@id` of the Recipe Cedar rule that denied.
+    #[serde(default)]
+    pub policy_id: Option<String>,
+    /// The Cedar action the egress judged.
+    #[serde(default)]
+    pub policy_action: Option<String>,
+    /// The `@reason` of the Recipe Cedar rule that denied.
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub request_host: Option<String>,
+    #[serde(default)]
+    pub request_method: Option<String>,
+    /// The judged request's path, without its query.
+    #[serde(default)]
+    pub request_path: Option<String>,
 }
 
 /// `introspection.automation.triggered` payload — one automation trigger
@@ -7517,6 +7595,9 @@ pub type AutomationSkippedEvent = TypedEvent<AutomationSkippedPayload>;
 /// [`Event::Unknown`] fallback tolerates a family this SDK build doesn't know
 /// yet (a family added server-side must not fail the whole page);
 /// match on it to skip or hand-parse such rows.
+// Boxing the judgement variant would change a public type for a page of
+// homogeneous rows; the size difference costs nothing there.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "event_name")]
 pub enum Event {
