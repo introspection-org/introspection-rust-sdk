@@ -7422,6 +7422,9 @@ pub struct FeedbackPayload {
     /// Remaining `properties.*` extras.
     #[serde(default)]
     pub properties: Option<BTreeMap<String, serde_json::Value>>,
+    /// The member who gave the feedback.
+    #[serde(default)]
+    pub author_member_id: Option<Uuid>,
 }
 
 /// `introspection.annotation` payload — one member-authored mutation.
@@ -7429,6 +7432,12 @@ pub struct FeedbackPayload {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnotationPayload {
     pub member_id: Uuid,
+    /// Who made the mutation, when not `member_id` itself.
+    #[serde(default)]
+    pub actor_member_id: Option<Uuid>,
+    /// The acting member's type (`human`, `agent`, …).
+    #[serde(default)]
+    pub actor_member_type: Option<String>,
     #[serde(default)]
     pub labels: Option<Vec<String>>,
     #[serde(default)]
@@ -7455,6 +7464,69 @@ pub struct JudgementPayload {
     pub sequence_hash: Option<String>,
     #[serde(default)]
     pub experiment_arm_id: Option<Uuid>,
+    #[serde(default)]
+    pub judge_slug: Option<String>,
+    #[serde(default)]
+    pub judge_type: Option<JudgeType>,
+    #[serde(default)]
+    pub result_schema: Option<JudgementResultSchema>,
+    #[serde(default)]
+    pub runtime_slug: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub error_class: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub source_component: Option<String>,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub engine_version: Option<String>,
+    #[serde(default)]
+    pub judge_provider: Option<String>,
+    #[serde(default)]
+    pub judge_model: Option<String>,
+    #[serde(default)]
+    pub input_tokens: Option<i64>,
+    #[serde(default)]
+    pub output_tokens: Option<i64>,
+    #[serde(default)]
+    pub total_tokens: Option<i64>,
+    #[serde(default)]
+    pub scores: Option<BTreeMap<String, i64>>,
+    #[serde(default)]
+    pub questions: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub policy_id: Option<String>,
+    #[serde(default)]
+    pub policy_action: Option<String>,
+    #[serde(default)]
+    pub request_host: Option<String>,
+    #[serde(default)]
+    pub request_method: Option<String>,
+    #[serde(default)]
+    pub request_path: Option<String>,
+}
+
+open_wire_enum! {
+    /// Where a judge runs: on live traffic, on a dataset, or on a mission.
+    pub enum JudgeType {
+        Online => "online",
+        Offline => "offline",
+        Mission => "mission",
+    }
+}
+
+open_wire_enum! {
+    /// The shape of a judgement's `result`.
+    pub enum JudgementResultSchema {
+        VerdictV1 => "verdict.v1",
+        QuestionScoresV1 => "question_scores.v1",
+    }
 }
 
 /// `introspection.automation.triggered` payload — one automation trigger

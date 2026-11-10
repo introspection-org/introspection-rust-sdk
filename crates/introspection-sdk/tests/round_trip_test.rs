@@ -542,3 +542,61 @@ fn an_unmodelled_field_fails_the_round_trip() {
 
     assert!(err.contains("$.unmodelled: lost"), "{err}");
 }
+
+/// The annotation, feedback and judgement payloads in the shape the Data Plane
+/// API returns them, every field set.
+#[test]
+fn event_payloads_model_every_field_the_api_returns() {
+    let event = |name: &str, payload: Value| {
+        serde_json::json!({
+            "id": "0199a1b2-0000-5000-8000-000000000001",
+            "timestamp": "2026-11-10T05:00:00Z",
+            "event_name": name,
+            "conversation_id": "conversation-1",
+            "payload": payload,
+        })
+    };
+    let member = "00000000-0000-0000-0000-0000000000cc";
+    let agent = "00000000-0000-0000-0000-0000000000dd";
+    let body = serde_json::json!({"count": 3, "records": [
+        event("introspection.annotation", serde_json::json!({
+            "member_id": member, "actor_member_id": agent, "actor_member_type": "agent",
+            "labels": ["walk"], "comment": "looks right", "assignee_member_ids": [member],
+        })),
+        event("introspection.feedback", serde_json::json!({
+            "name": "thumbs", "value": 1.0, "author_member_id": member,
+        })),
+        event("introspection.judgement", serde_json::json!({
+            "judgement_id": "judgement-1", "judge_id": "judge-1", "judge_slug": "helpful",
+            "judge_type": "online", "result": "pass", "result_schema": "question_scores.v1",
+            "runtime_slug": "hello-mcp", "status": "completed", "error_class": "Timeout",
+            "error_message": "slow", "source_component": "judge-engine", "reasoning": "fine",
+            "reason": "policy", "definition_hash": "d1", "engine_version": "1.2.3",
+            "judge_provider": "anthropic", "judge_model": "claude", "contract_version": "1",
+            "sequence_hash": "s1", "input_tokens": 120, "output_tokens": 30, "total_tokens": 150,
+            "scores": {"q1": 1}, "questions": {"q1": "Is it helpful?"}, "policy_id": "p1",
+            "policy_action": "block", "request_host": "api.example.com", "request_method": "POST",
+            "request_path": "/v1/chat",
+        })),
+    ]});
+
+    round_trip::<Paginated<Event>>(&body).unwrap();
+}
+
+/// The annotation state with its comment-actor fields.
+#[test]
+fn annotation_state_models_the_comment_actor_fields() {
+    let member = "00000000-0000-0000-0000-0000000000cc";
+    let body = serde_json::json!({"count": 1, "records": [{
+        "trace_id": "0af7651916cd43dd8448eb211c80319c", "span_id": "b7ad6b7169203331",
+        "conversation_id": "conversation-1", "labels": ["walk"], "assignee_member_ids": [],
+        "annotator_member_ids": [member], "has_comment": true, "comment_count": 1,
+        "latest_comment": "looks right", "latest_comment_member_id": member,
+        "commenter_member_ids": [member], "human_commenter_member_ids": [member],
+        "has_human_comment": true, "latest_comment_actor_member_id": member,
+        "latest_comment_actor_type": "human", "updated_at": "2026-11-10T05:00:00Z",
+        "updated_by_member_id": member,
+    }]});
+
+    round_trip::<Paginated<AnnotationState>>(&body).unwrap();
+}
