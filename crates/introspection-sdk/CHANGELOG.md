@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.43.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.42.0...v0.43.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop annotations.navigation; GET /v1/annotations/navigation is gone ([#223](https://github.com/introspection-org/introspection-rust-sdk/issues/223))
+
+### Bug Fixes
+
+* drop annotations.navigation; GET /v1/annotations/navigation is gone ([#223](https://github.com/introspection-org/introspection-rust-sdk/issues/223)) ([a5e3d16](https://github.com/introspection-org/introspection-rust-sdk/commit/a5e3d1676f4babcd1f546ec8b93e5a8ddd0e8c44))
+
 ## [0.42.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.41.0...v0.42.0) (2026-11-10)
 
 
