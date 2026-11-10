@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::otel::messages::{InputMessage, OutputMessage};
+use crate::resources::annotations::AnnotationState;
 
 /// A `{ "name": … }` attribute node — `gen_ai.operation`, `gen_ai.provider`.
 #[serde_with::skip_serializing_none]
@@ -566,6 +567,11 @@ pub struct GenAiSpan {
     pub events: Option<Vec<serde_json::Value>>,
     #[serde(default, skip_serializing_if = "SpanAttributes::is_empty")]
     pub attributes: SpanAttributes,
+    /// The span's current annotation state, on an export that asks for
+    /// `ConversationExportInclude::Annotations` and only when the span has
+    /// been annotated.
+    #[serde(default)]
+    pub annotation: Option<AnnotationState>,
 }
 
 impl SpanAttributes {

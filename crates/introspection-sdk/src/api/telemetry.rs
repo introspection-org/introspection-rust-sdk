@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
-use crate::api::genai_span::{GenAiSpan, GenAiSpanList};
+use crate::api::genai_span::GenAiSpan;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
@@ -58,29 +58,84 @@ pub const REPLAY_V1_ACCEPT: &str =
 /// the body names it in `schema_version`.
 pub const ATIF_ACCEPT: &str = "application/vnd.harbor.atif+json";
 
+/// Accept header selecting the JSON-lines export: one GenAI span per line,
+/// with no envelope.
+pub const JSON_LINES_ACCEPT: &str = "application/x-ndjson";
+
 /// Wire representation selected for a complete conversation export — one of
 /// the representations `GET /v1/conversations/{id}/export` negotiates.
+///
+/// The span export is [`Self::JsonLines`]: `application/x-ndjson`, one GenAI
+/// span per line, each line a complete JSON object, so it can be read as it
+/// streams. The JSON-envelope export (`application/json`, the whole span list
+/// in one document) was removed from this SDK.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConversationExportFormat {
-    Json,
     Trajectory,
     Arrow,
     /// The turn-aware replay export ([`REPLAY_V1_ACCEPT`]).
     Replay,
     /// Harbor's ATIF trajectory ([`ATIF_ACCEPT`]).
     Atif,
+    /// JSON lines ([`JSON_LINES_ACCEPT`]): one GenAI span per line, each line
+    /// a complete JSON object.
+    JsonLines,
 }
 
 impl ConversationExportFormat {
     /// The `Accept` header that negotiates this representation.
     pub fn accept(self) -> &'static str {
         match self {
-            Self::Json => "application/json",
             Self::Trajectory => TRAJECTORY_V1_ACCEPT,
             Self::Arrow => "application/vnd.apache.arrow.stream",
             Self::Replay => REPLAY_V1_ACCEPT,
             Self::Atif => ATIF_ACCEPT,
+            Self::JsonLines => JSON_LINES_ACCEPT,
+        }
+    }
+}
+
+/// Decode a JSON-lines body read from `route`: one `T` per line, each
+/// yielded once its newline arrives, wherever the chunk boundaries fall.
+pub(crate) fn parse_json_lines<S, T>(stream: S, route: String) -> impl Stream<Item = ApiResult<T>>
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>>,
+    T: crate::api::http::ResponseBody,
+{
+    async_stream::stream! {
+        // The bytes of the line still waiting for its newline.
+        let mut pending: Vec<u8> = Vec::new();
+        let mut stream = Box::pin(stream);
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = match chunk {
+                Ok(b) => b,
+                Err(e) => {
+                    yield Err(IntrospectionAPIError::from(e));
+                    return;
+                }
+            };
+            let mut rest = &bytes[..];
+            while let Some(newline) = rest.iter().position(|b| *b == b'\n') {
+                pending.extend_from_slice(&rest[..newline]);
+                rest = &rest[newline + 1..];
+                let line = std::mem::take(&mut pending);
+                if line.iter().all(u8::is_ascii_whitespace) {
+                    continue;
+                }
+                let decoded = crate::api::http::decode_slice(&line, &route);
+                let failed = decoded.is_err();
+                yield decoded;
+                if failed {
+                    return;
+                }
+            }
+            pending.extend_from_slice(rest);
+        }
+        // A body cut off mid-line fails here rather than ending early.
+        if !pending.iter().all(u8::is_ascii_whitespace) {
+            yield crate::api::http::decode_slice(&pending, &route);
         }
     }
 }
@@ -144,32 +199,37 @@ impl Conversations {
         )
     }
 
-    /// `GET /v1/conversations/{id}/export` — one complete conversation as
-    /// the standard GenAI-span list.
-    pub async fn export_json(
+    /// `GET /v1/conversations/{id}/export` as JSON lines
+    /// (`application/x-ndjson`) — one complete conversation, a GenAI span at
+    /// a time.
+    ///
+    /// The body is one span per line, each line a complete JSON object. Each
+    /// span is decoded as its line arrives, so the export is never held
+    /// whole. This replaces `export_json`, the JSON-envelope export, which
+    /// was removed.
+    pub async fn export_spans(
         &self,
         conversation_id: &str,
         params: &ConversationExportParams,
-    ) -> ApiResult<GenAiSpanList> {
+    ) -> ApiResult<impl Stream<Item = ApiResult<GenAiSpan>>> {
+        let path = Self::export_path(conversation_id);
         let response = self
             .http
-            .get_raw(
-                &Self::export_path(conversation_id),
-                &params.to_wire(),
-                Some("application/json"),
-            )
+            .get_raw(&path, &params.to_wire(), Some(JSON_LINES_ACCEPT))
             .await?;
-        crate::api::http::decode_json(response).await
+        Ok(parse_json_lines(response.bytes_stream(), path))
     }
 
-    /// `GET /v1/conversations/{id}/export` in any JSON representation,
-    /// returned as the server sent it.
+    /// `GET /v1/conversations/{id}/export` in a representation that is one
+    /// JSON document, returned as the server sent it.
     ///
     /// For the representations this SDK does not model — the replay and ATIF
     /// exports — and for callers that forward an export unchanged. The typed
-    /// reads are [`Self::export_json`] and [`Self::export_trajectory`].
-    /// [`ConversationExportFormat::Arrow`] is not JSON, so it is refused
-    /// with [`IntrospectionAPIError::InvalidConfig`] before any request.
+    /// reads are [`Self::export_spans`] and [`Self::export_trajectory`].
+    /// [`ConversationExportFormat::Arrow`] and
+    /// [`ConversationExportFormat::JsonLines`] are not one JSON document, so
+    /// they are refused with [`IntrospectionAPIError::InvalidConfig`] before
+    /// any request.
     pub async fn export_json_value(
         &self,
         conversation_id: &str,
@@ -179,6 +239,12 @@ impl Conversations {
         if format == ConversationExportFormat::Arrow {
             return Err(IntrospectionAPIError::InvalidConfig(
                 "the Arrow export is not JSON; use export_arrow or export_stream".to_string(),
+            ));
+        }
+        if format == ConversationExportFormat::JsonLines {
+            return Err(IntrospectionAPIError::InvalidConfig(
+                "the JSON-lines export is not one JSON document; use export_spans or export_stream"
+                    .to_string(),
             ));
         }
         let response = self
@@ -192,8 +258,10 @@ impl Conversations {
         crate::api::http::decode_json(response).await
     }
 
-    /// Stream a complete export's response bytes without buffering them in
-    /// the SDK. The server walks storage in bounded pages; this stream passes
+    /// Stream a complete export's response bytes, in any `format`, without
+    /// buffering them in the SDK. With
+    /// [`ConversationExportFormat::JsonLines`] the bytes are JSON lines: one
+    /// GenAI span per line, each line a complete JSON object. The server walks storage in bounded pages; this stream passes
     /// each response chunk through as it arrives.
     pub async fn export_stream(
         &self,
@@ -447,5 +515,71 @@ impl Metrics {
             ));
         }
         self.http.post_json("/v1/metrics", request).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::TryStreamExt;
+
+    fn line(span_id: &str) -> String {
+        format!(r#"{{"trace_id":"t","span_id":"{span_id}","start_time":"2026-01-01T00:00:00Z"}}"#)
+    }
+
+    async fn spans(chunks: &[&str]) -> ApiResult<Vec<GenAiSpan>> {
+        let chunks: Vec<_> = chunks
+            .iter()
+            .map(|c| Ok::<_, reqwest::Error>(Bytes::copy_from_slice(c.as_bytes())))
+            .collect();
+        parse_json_lines(futures::stream::iter(chunks), "/v1/x".to_string())
+            .try_collect()
+            .await
+    }
+
+    fn ids(spans: &[GenAiSpan]) -> Vec<&str> {
+        spans.iter().filter_map(|s| s.span_id.as_deref()).collect()
+    }
+
+    #[tokio::test]
+    async fn json_lines_join_a_line_split_across_chunks() {
+        // The second line is cut twice, once inside a two-byte character.
+        let body = format!("{}\n{}\n\n{}\n", line("a"), line("\u{e9}b"), line("c"));
+        let first = body.find('\u{e9}').unwrap() + 1;
+        let bytes = body.as_bytes();
+        let chunks: Vec<_> = [
+            &bytes[..first - 20],
+            &bytes[first - 20..first],
+            &bytes[first..],
+        ]
+        .into_iter()
+        .map(|c| Ok::<_, reqwest::Error>(Bytes::copy_from_slice(c)))
+        .collect();
+
+        let read: Vec<GenAiSpan> =
+            parse_json_lines(futures::stream::iter(chunks), "/v1/x".to_string())
+                .try_collect()
+                .await
+                .unwrap();
+
+        assert_eq!(ids(&read), ["a", "\u{e9}b", "c"]);
+    }
+
+    #[tokio::test]
+    async fn json_lines_read_a_last_line_without_its_newline() {
+        let read = spans(&[&format!("{}\r\n{}", line("a"), line("b"))])
+            .await
+            .unwrap();
+
+        assert_eq!(ids(&read), ["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn json_lines_fail_on_a_body_cut_off_mid_line() {
+        let error = spans(&[&format!("{}\n{{\"span_id\":", line("a"))])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, IntrospectionAPIError::Decode(_)), "{error}");
     }
 }

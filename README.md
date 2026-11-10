@@ -485,6 +485,40 @@ are Data Plane routes gated on `connections:read`, `connections:write` and
 `connections:delete`. They are distinct from `client.connectors()`, whose
 connections an integrator administers for the project.
 
+## Issues
+
+An issue is a brief with people on it (a creator, an assignee, a reviewer and
+followers), evidence, comments and a change history. To ask a person
+something, assign the issue to them, set it `waiting`, and comment:
+
+```rust
+use introspection_sdk::{IssueInclude, IssueStatus, IssueUpdateParams};
+
+let issues = client.issues();
+issues.update(
+    issue_id,
+    &IssueUpdateParams {
+        assignee_member_id: Some(Some(member_id)), // Some(None) unassigns
+        status: Some(IssueStatus::Waiting),
+        ..Default::default()
+    },
+    &[],
+    None,
+).await?;
+issues.comments.create(issue_id, "Is a missing salary allowed?").await?;
+
+// A read returns the brief; each related list comes with an include.
+let issue = issues.get(issue_id, &[IssueInclude::Members, IssueInclude::Comments]).await?;
+for comment in issue.comments.unwrap_or_default() {
+    println!("{}: {}", comment.created_at, comment.comment);
+}
+```
+
+`IssueInclude::Attachments` adds `links`, `files`, `events` and `spans`;
+`Comments` is for `get` only. `IssueListParams` filters by `relation` and
+`member_id`. The history is the `introspection.issue` events of the issue
+(`created`, `updated`, `commented`, `deleted`).
+
 ## Curate traces with human review
 
 Annotations are append-only events on an OTel trace/span. Each write changes
@@ -521,6 +555,35 @@ server accepted the write but it is not readable yet. Reviewers by email
 resolve through the Control Plane member list; `AnnotationMutation::ReviewerIds`
 sends member ids as they are, so `Annotations::data_plane(dp_http)` over a Data
 Plane client alone can assign them.
+
+`list` pages the current row of each annotated span. Set
+`include: vec![AnnotationInclude::Comments]` on `AnnotationListParams` to get
+each row's `comments`, oldest first; without it a row has `comments: None`.
+
+### Export a conversation's spans
+
+The span export is JSON lines (`application/x-ndjson`): one GenAI span per
+line, each line a complete JSON object. `export_spans` decodes each line as it
+arrives; `export_stream` with `ConversationExportFormat::JsonLines` gives the
+same bytes undecoded. The JSON-envelope export (`export_json`) was removed.
+
+```rust
+use futures::TryStreamExt;
+use introspection_sdk::{ConversationExportInclude, ConversationExportParams};
+
+let params = ConversationExportParams {
+    include: vec![ConversationExportInclude::Annotations],
+    ..Default::default()
+};
+let mut spans = Box::pin(client.conversations().export_spans(conversation_id, &params).await?);
+while let Some(span) = spans.try_next().await? {
+    println!("{:?} annotated={}", span.span_id, span.annotation.is_some());
+}
+```
+
+With `ConversationExportInclude::Annotations` each annotated span carries its
+annotation row in `GenAiSpan::annotation`; add `Comments` for that row's
+`comments`. Only the JSON-lines export takes `include`.
 
 The tag catalogue lives under `client.tags()`, keyed by `TagKind::Access` or
 `TagKind::Annotation`. `TagCreate` is an enum per kind, so an access tag has no

@@ -17,43 +17,53 @@ pub struct AnnotationTarget {
     pub span_id: String,
 }
 
+/// One comment on an annotated span.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AnnotationComment {
+    pub event_id: Uuid,
+    pub comment: String,
+    /// The author.
+    pub member_id: Uuid,
+    #[serde(default)]
+    pub actor_member_id: Option<Uuid>,
+    /// What wrote it on the author's behalf (`agent`, ...).
+    #[serde(default)]
+    pub actor_member_type: Option<String>,
+    pub created_at: String,
+}
+
+/// One span's current annotation state.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AnnotationState {
     pub trace_id: String,
     pub span_id: String,
     #[serde(default)]
     pub conversation_id: Option<String>,
-    #[serde(default)]
     pub labels: Vec<String>,
-    #[serde(default)]
     pub assignee_member_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub annotator_member_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub commenter_member_ids: Vec<Uuid>,
-    /// The commenters who are people, not agents.
-    #[serde(default)]
-    pub human_commenter_member_ids: Vec<Uuid>,
-    #[serde(default)]
-    pub has_comment: bool,
-    #[serde(default)]
-    pub has_human_comment: bool,
-    #[serde(default)]
+    /// The members whose comment completed a review.
+    pub reviewer_member_ids: Vec<Uuid>,
     pub comment_count: u64,
-    #[serde(default)]
-    pub latest_comment: Option<String>,
-    #[serde(default)]
-    pub latest_comment_member_id: Option<Uuid>,
-    #[serde(default)]
-    pub latest_comment_actor_member_id: Option<Uuid>,
-    /// Who wrote the latest comment (`human`, `agent`, ...).
-    #[serde(default)]
-    pub latest_comment_actor_type: Option<String>,
     pub updated_at: String,
     pub updated_by_member_id: Uuid,
     #[serde(default)]
     pub assignment_event_id: Option<Uuid>,
+    /// Every comment on the span, oldest first, when the list asked for
+    /// [`AnnotationInclude::Comments`], or the conversation export for its
+    /// comments; `None` otherwise and on navigation.
+    #[serde(default)]
+    pub comments: Option<Vec<AnnotationComment>>,
+}
+
+/// An optional expansion of a listed row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum AnnotationInclude {
+    /// Fill each row's `comments`.
+    Comments,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -74,6 +84,16 @@ pub struct AnnotationListParams {
     pub conversation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// `backlog`, `assigned` or `reviewed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// Row expansions, sent as a repeated `include`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<AnnotationInclude>,
+    /// How many days of annotation events the read reaches back (1-90; the
+    /// server's default is 90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookback_days: Option<u16>,
     /// The annotator as an active Business member's email, resolved to
     /// `annotated_by_member_id` on the Control Plane before the read; never
     /// on the wire. Setting both is refused.
@@ -89,16 +109,6 @@ pub struct AnnotationListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
-}
-
-/// One filter bucket of `GET /v1/annotations/facets`: how many annotated
-/// spans currently carry `value` along `dimension` (`annotator`,
-/// `assignee`, `label` or `status`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct AnnotationFacet {
-    pub dimension: String,
-    pub value: String,
-    pub count: u64,
 }
 
 /// What `GET /v1/annotations/navigation` answers: the annotation at the
@@ -133,6 +143,10 @@ pub struct AnnotationNavigationParams {
     /// `backlog`, `assigned` or `reviewed`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// How many days of annotation events the read reaches back (1-90; the
+    /// server's default is 90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookback_days: Option<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,28 +224,43 @@ impl Annotations {
         params: &AnnotationListParams,
     ) -> ApiResult<Paginator<AnnotationState>> {
         let mut params = params.clone();
-        if params.annotated_by_member_id.is_some() && params.annotated_by_email.is_some() {
-            return Err(validation(
+        params.annotated_by_member_id = self
+            .member_filter(
+                params.annotated_by_member_id,
+                params.annotated_by_email.take(),
                 "Use annotated_by_member_id or annotated_by_email, not both",
                 "conflicting_annotation_annotator_filters",
-            ));
-        }
-        if params.assignee_member_id.is_some() && params.assigned_to_email.is_some() {
-            return Err(validation(
+            )
+            .await?;
+        params.assignee_member_id = self
+            .member_filter(
+                params.assignee_member_id,
+                params.assigned_to_email.take(),
                 "Use assignee_member_id or assigned_to_email, not both",
                 "conflicting_annotation_assignee_filters",
-            ));
-        }
-        if let Some(email) = params.annotated_by_email.take() {
-            params.annotated_by_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
-        }
-        if let Some(email) = params.assigned_to_email.take() {
-            params.assignee_member_id = Some(self.resolve_reviewer_ids(vec![email]).await?[0]);
-        }
+            )
+            .await?;
         Ok(
             Paginator::new(self.dp_http.clone(), "/v1/annotations", &params)
                 .expect("AnnotationListParams must serialize to an object"),
         )
+    }
+
+    /// A member filter given as an id or as an email, as the id.
+    async fn member_filter(
+        &self,
+        id: Option<Uuid>,
+        email: Option<String>,
+        conflict: &str,
+        code: &str,
+    ) -> ApiResult<Option<Uuid>> {
+        let Some(email) = email else {
+            return Ok(id);
+        };
+        if id.is_some() {
+            return Err(validation(conflict, code));
+        }
+        Ok(Some(self.resolve_reviewer_ids(vec![email]).await?[0]))
     }
 
     /// `POST /v1/annotations` — append one event: a mutation, plus
@@ -303,12 +332,6 @@ impl Annotations {
             });
         }
         decode_json(res).await
-    }
-
-    /// `GET /v1/annotations/facets` — the current annotator, assignee,
-    /// label and status counts a review screen offers as filters.
-    pub async fn facets(&self) -> ApiResult<Vec<AnnotationFacet>> {
-        self.dp_http.get_json("/v1/annotations/facets", &()).await
     }
 
     /// `GET /v1/annotations/navigation` — the annotation on `target` with the

@@ -5,10 +5,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationListParams,
-    AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations, ClientConfig, Event,
-    EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate, TagKind, TagUpdate,
-    Tags,
+    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationInclude,
+    AnnotationListParams, AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations,
+    ClientConfig, Event, EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate,
+    TagKind, TagUpdate, Tags,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -55,6 +55,10 @@ fn target() -> AnnotationTarget {
     }
 }
 
+fn member() -> Uuid {
+    MEMBER_ID.parse().unwrap()
+}
+
 fn annotation() -> serde_json::Value {
     json!({
         "trace_id": TRACE_ID,
@@ -62,14 +66,12 @@ fn annotation() -> serde_json::Value {
         "conversation_id": "conversation-1",
         "labels": ["needs-review"],
         "assignee_member_ids": [MEMBER_ID],
-        "annotator_member_ids": [],
-        "has_comment": false,
-        "comment_count": 0,
-        "latest_comment": null,
-        "latest_comment_member_id": null,
+        "reviewer_member_ids": [MEMBER_ID],
+        "comment_count": 1,
         "updated_at": "2026-08-25T12:00:00Z",
         "updated_by_member_id": MEMBER_ID,
-        "assignment_event_id": EVENT_ID
+        "assignment_event_id": EVENT_ID,
+        "comments": null
     })
 }
 
@@ -103,10 +105,93 @@ async fn lists_folded_annotation_state_with_filters() {
         })
         .await
         .unwrap();
-    assert_eq!(
-        stream.next().await.unwrap().unwrap().labels,
-        vec!["needs-review"]
-    );
+    let state = stream.next().await.unwrap().unwrap();
+    assert_eq!(state.labels, vec!["needs-review"]);
+    assert_eq!(state.reviewer_member_ids, vec![member()]);
+    assert_eq!(state.comment_count, 1);
+    assert_eq!(state.updated_by_member_id, member());
+    assert_eq!(state.comments, None);
+}
+
+#[tokio::test]
+async fn include_comments_reaches_the_query_and_fills_each_row() {
+    let dp = MockServer::start().await;
+    let mut row = annotation();
+    row["comment_count"] = json!(2);
+    row["comments"] = json!([
+        {
+            "event_id": EVENT_ID,
+            "comment": "Wrong tool picked",
+            "member_id": MEMBER_ID,
+            "actor_member_id": null,
+            "actor_member_type": null,
+            "created_at": "2026-08-25T11:00:00Z"
+        },
+        {
+            "event_id": "019fc000-0000-7000-8000-000000000002",
+            "comment": "Confirmed against the trace",
+            "member_id": MEMBER_ID,
+            "actor_member_id": "00000000-0000-0000-0000-0000000000dd",
+            "actor_member_type": "agent",
+            "created_at": "2026-08-25T12:00:00Z"
+        }
+    ]);
+    let mut bare = annotation();
+    bare["comment_count"] = json!(0);
+    bare["comments"] = json!([]);
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations"))
+        .and(query_param("include", "comments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [row, bare], "count": 2, "total_count": null, "next": null
+        })))
+        .expect(1)
+        .mount(&dp)
+        .await;
+
+    let rows = Annotations::data_plane(http(&dp))
+        .list(&AnnotationListParams {
+            include: vec![AnnotationInclude::Comments],
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .collect_all(0)
+        .await
+        .unwrap();
+
+    let comments = rows[0].comments.as_deref().expect("the row's comments");
+    let texts: Vec<_> = comments.iter().map(|c| c.comment.as_str()).collect();
+    assert_eq!(texts, ["Wrong tool picked", "Confirmed against the trace"]);
+    assert_eq!(comments[0].member_id, member());
+    assert_eq!(comments[0].actor_member_type, None);
+    assert_eq!(comments[1].actor_member_type.as_deref(), Some("agent"));
+    assert!(comments[1].actor_member_id.is_some());
+    assert_eq!(rows[1].comments.as_deref(), Some(&[][..]));
+}
+
+#[tokio::test]
+async fn a_list_without_an_include_sends_none() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [annotation()], "count": 1, "total_count": null, "next": null
+        })))
+        .mount(&dp)
+        .await;
+
+    let rows = Annotations::data_plane(http(&dp))
+        .list(&AnnotationListParams::default())
+        .await
+        .unwrap()
+        .collect_all(0)
+        .await
+        .unwrap();
+
+    assert_eq!(rows[0].comments, None);
+    let requests = dp.received_requests().await.unwrap();
+    assert!(!requests[0].url.query().unwrap_or("").contains("include"));
 }
 
 #[tokio::test]
@@ -126,6 +211,7 @@ async fn resolves_email_list_filter_and_requests_total() {
         .and(path("/v1/annotations"))
         .and(query_param("assignee_member_id", MEMBER_ID))
         .and(query_param("include_total", "true"))
+        .and(query_param("lookback_days", "30"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [annotation()], "count": 1, "total_count": 1, "next": null
         })))
@@ -136,6 +222,7 @@ async fn resolves_email_list_filter_and_requests_total() {
     let mut page = annotations
         .list(&AnnotationListParams {
             include_total: Some(true),
+            lookback_days: Some(30),
             assigned_to_email: Some("expert@example.com".into()),
             ..Default::default()
         })

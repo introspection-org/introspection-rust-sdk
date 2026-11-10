@@ -129,11 +129,6 @@ const TYPED: &[(&str, &str, Check)] = &[
     ),
     (
         "GET",
-        r"^/v1/annotations/facets$",
-        round_trip::<Vec<AnnotationFacet>>,
-    ),
-    (
-        "GET",
         r"^/v1/annotations/navigation$",
         round_trip::<AnnotationNavigation>,
     ),
@@ -413,7 +408,11 @@ const TYPED: &[(&str, &str, Check)] = &[
 ];
 
 /// JSON responses no SDK type decodes: `(method, path regex, reason)`.
-const UNTYPED: &[(&str, &str, &str)] = &[];
+const UNTYPED: &[(&str, &str, &str)] = &[(
+    "GET",
+    r"^/v1/annotations/facets$",
+    "the route is retired; the recording still holds the call until it is re-recorded",
+)];
 
 /// The SDK type for a JSON export, picked by its media type. The replay and
 /// ATIF exports have none: `Conversations::export_json_value` returns them
@@ -541,4 +540,212 @@ fn an_unmodelled_field_fails_the_round_trip() {
     let err = round_trip::<Paginated<Tag>>(&body).unwrap_err();
 
     assert!(err.contains("$.unmodelled: lost"), "{err}");
+}
+
+fn event(name: &str, payload: Value) -> Value {
+    serde_json::json!({
+        "id": "0199a1b2-0000-5000-8000-000000000001",
+        "timestamp": "2026-11-10T05:00:00Z",
+        "event_name": name,
+        "conversation_id": "conversation-1",
+        "payload": payload,
+    })
+}
+
+fn judgement_base() -> Value {
+    serde_json::json!({
+        "judgement_id": "judgement-1", "judge_id": "judge-1", "judge_slug": "helpful",
+        "judge_type": "online", "runtime_slug": "hello-mcp", "result": "pass",
+        "status": "error", "error_class": "Timeout", "error_message": "slow",
+        "source_component": "introspection-judge", "judge_model": "grader-1",
+        "experiment_arm_id": "00000000-0000-0000-0000-0000000000ee",
+    })
+}
+
+fn with(mut base: Value, extra: Value) -> Value {
+    let fields = base.as_object_mut().unwrap();
+    fields.extend(extra.as_object().unwrap().clone());
+    base
+}
+
+fn verdict_fields() -> Value {
+    serde_json::json!({
+        "reasoning": "fine", "definition_hash": "d1", "engine_version": "1.2.3",
+        "judge_provider": "provider", "contract_version": "1", "sequence_hash": "s1",
+        "input_tokens": 120, "output_tokens": 30, "total_tokens": 150,
+    })
+}
+
+fn egress_fields() -> Value {
+    serde_json::json!({
+        "scores": {"q1": 90}, "questions": {"q1": "Is it safe?"}, "policy_id": "p1",
+        "policy_action": "http", "reason": "policy", "request_host": "api.example.com",
+        "request_method": "POST", "request_path": "/v1/chat",
+    })
+}
+
+/// The annotation, feedback and judgement payloads in the shape the Data Plane
+/// API returns them, every field set.
+#[test]
+fn event_payloads_model_every_field_the_api_returns() {
+    let member = "00000000-0000-0000-0000-0000000000cc";
+    let agent = "00000000-0000-0000-0000-0000000000dd";
+    let verdict = with(
+        with(judgement_base(), verdict_fields()),
+        serde_json::json!({"kind": "verdict"}),
+    );
+    let egress = with(
+        with(judgement_base(), egress_fields()),
+        serde_json::json!({"kind": "egress"}),
+    );
+    let body = serde_json::json!({"count": 4, "records": [
+        event("introspection.annotation", serde_json::json!({
+            "member_id": member, "actor_member_id": agent, "actor_member_type": "agent",
+            "labels": ["walk"], "comment": "looks right", "assignee_member_ids": [member],
+        })),
+        event("introspection.feedback", serde_json::json!({
+            "name": "thumbs", "value": 1.0, "author_member_id": member,
+        })),
+        event("introspection.judgement", verdict),
+        event("introspection.judgement", egress),
+    ]});
+
+    round_trip::<Paginated<Event>>(&body).unwrap();
+
+    let page: Paginated<Event> = serde_json::from_value(body).unwrap();
+    let kinds: Vec<_> = page.records[2..]
+        .iter()
+        .map(|record| match record {
+            Event::Judgement(judgement) => match &judgement.payload {
+                JudgementPayload::Verdict(payload) => {
+                    assert_eq!(payload.total_tokens, Some(150));
+                    "verdict"
+                }
+                JudgementPayload::Egress(payload) => {
+                    assert_eq!(payload.scores.as_ref().unwrap()["q1"], 90);
+                    "egress"
+                }
+                JudgementPayload::Unknown(_) => "unknown",
+            },
+            _ => "not a judgement",
+        })
+        .collect();
+    assert_eq!(kinds, ["verdict", "egress"]);
+    let Event::Judgement(first) = &page.records[2] else {
+        panic!("a judgement");
+    };
+    assert_eq!(first.payload.base().unwrap().judgement_id, "judgement-1");
+}
+
+/// A `kind` this build does not know keeps its payload, and the page decodes.
+#[test]
+fn a_judgement_of_an_unknown_kind_is_kept_whole() {
+    let payload = serde_json::json!({"kind": "replay", "judgement_id": "judgement-1", "new": 1});
+    let body = serde_json::json!({"count": 1, "records": [
+        event("introspection.judgement", payload.clone()),
+    ]});
+
+    round_trip::<Paginated<Event>>(&body).unwrap();
+
+    let page: Paginated<Event> = serde_json::from_value(body).unwrap();
+    let Event::Judgement(judgement) = &page.records[0] else {
+        panic!("a judgement: {:?}", page.records[0]);
+    };
+    let JudgementPayload::Unknown(raw) = &judgement.payload else {
+        panic!("an unknown kind: {:?}", judgement.payload);
+    };
+    assert_eq!(raw, &payload);
+    assert!(judgement.payload.base().is_none());
+}
+
+fn issue_payload(action: &str, extra: Value) -> Value {
+    with(
+        serde_json::json!({
+            "action": action, "issue_id": "00000000-0000-0000-0000-0000000000a1", "revision": 2,
+            "member_id": "00000000-0000-0000-0000-0000000000cc",
+            "actor_member_id": "00000000-0000-0000-0000-0000000000dd",
+            "actor_member_type": "agent",
+        }),
+        extra,
+    )
+}
+
+fn issue_events(payloads: &[Value]) -> Vec<IssueActivityPayload> {
+    let records: Vec<_> = payloads
+        .iter()
+        .map(|payload| event("introspection.issue", payload.clone()))
+        .collect();
+    let body = serde_json::json!({"count": records.len(), "records": records});
+    round_trip::<Paginated<Event>>(&body).unwrap();
+    let page: Paginated<Event> = serde_json::from_value(body).unwrap();
+    page.records
+        .into_iter()
+        .map(|record| {
+            assert_eq!(record.event_name(), Some(IntrospectionEventName::Issue));
+            let Event::Issue(issue) = record else {
+                panic!("an issue event: {record:?}");
+            };
+            issue.payload
+        })
+        .collect()
+}
+
+#[test]
+fn an_issue_created_event_carries_the_authored_fields() {
+    let data = serde_json::json!({"data": {"title": "Flaky", "priority": "high"}});
+    let read = issue_events(&[issue_payload("created", data)]);
+    let IssueActivityPayload::Created(created) = &read[0] else {
+        panic!("created: {:?}", read[0]);
+    };
+    assert_eq!(created.data["title"], "Flaky");
+    assert_eq!(created.base.revision, Some(2));
+    assert_eq!(created.base.actor_member_type.as_deref(), Some("agent"));
+}
+
+#[test]
+fn an_issue_updated_event_carries_each_change_without_its_null_side() {
+    let changes = serde_json::json!({"changes": {
+        "status": {"before": "open", "after": "waiting"},
+        "assignee_member_id": {"after": "00000000-0000-0000-0000-0000000000cc"},
+    }});
+    let read = issue_events(&[issue_payload("updated", changes)]);
+    let IssueActivityPayload::Updated(updated) = &read[0] else {
+        panic!("updated: {:?}", read[0]);
+    };
+    assert_eq!(updated.changes["status"].after, Some("waiting".into()));
+    assert_eq!(updated.changes["assignee_member_id"].before, None);
+    assert!(read[0].base().is_some());
+}
+
+#[test]
+fn an_issue_commented_event_carries_the_comment() {
+    let comment = serde_json::json!({"comment": "Ship it?"});
+    let read = issue_events(&[issue_payload("commented", comment)]);
+    let IssueActivityPayload::Commented(commented) = &read[0] else {
+        panic!("commented: {:?}", read[0]);
+    };
+    assert_eq!(commented.comment, "Ship it?");
+    assert!(commented.base.member_id.is_some());
+}
+
+#[test]
+fn an_issue_deleted_event_carries_the_shared_fields_alone() {
+    let read = issue_events(&[issue_payload("deleted", serde_json::json!({}))]);
+    assert!(
+        matches!(read[0], IssueActivityPayload::Deleted(_)),
+        "{:?}",
+        read[0]
+    );
+}
+
+/// An action this build does not know is kept whole, and the page decodes.
+#[test]
+fn an_issue_event_of_an_unknown_action_is_kept_whole() {
+    let read = issue_events(&[issue_payload("reopened", serde_json::json!({"new": 1}))]);
+    assert!(
+        matches!(read[0], IssueActivityPayload::Unknown(_)),
+        "{:?}",
+        read[0]
+    );
+    assert!(read[0].base().is_none());
 }
