@@ -23,6 +23,15 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - An example that reads a TaskRuns stream (`run.stream()`) must match `Ok(AgUiEvent::RunError(_))` explicitly. The stream yields a run error as `Ok` and then ends, so `event?` alone misses it. Codex flags this in review.
 - A docs region (`// #region docs:...`) must show every helper it calls that the example file defines. Put SDK-work helpers (stream parsing, snapshot recovery, text accumulation) inside the region, before the code that uses them. Stand in for the reader's own code (rendering, sending events to the browser, storing records) with a minimal stub inside the region, with a one-line comment saying it is your app's code.
 
+## Decoding never fails on what the server adds
+
+The API grows without asking the SDK first, so a response that gains something still decodes for every user:
+
+- **A new field is ignored.** Never `#[serde(deny_unknown_fields)]` on a response type; keep extras in a `#[serde(flatten)]` map only where callers read them.
+- **A new enum value decodes.** Every enum in a response is an `open_wire_enum!`, whose unknown value keeps the raw string.
+- **A new variant of a tagged union decodes.** It ends in `#[serde(untagged)] Unknown(serde_json::Value)`, as `Event` does.
+- `strict-schema` (the walk and the tests) is the only place an unmodelled field fails, so drift is found before a release; model it rather than loosen that check.
+
 ## The end-to-end walk
 
 - `crates/introspection-sdk/tests/walk` is the SDK end-to-end walk (introspection-cloud `docs/design/sdk-end-to-end-walk.md`): the design doc's steps, in its order, replaying `tests/recordings/walk/recording.har` through a local forward proxy every SDK client reaches via `HTTP_PROXY`. It needs the `arrow` feature, so it runs under CI's `cargo test --all-features`.
