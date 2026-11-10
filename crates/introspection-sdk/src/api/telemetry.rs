@@ -79,7 +79,7 @@ pub enum ConversationExportFormat {
     /// Harbor's ATIF trajectory ([`ATIF_ACCEPT`]).
     Atif,
     /// JSON lines ([`JSON_LINES_ACCEPT`]): one GenAI span per line, each line
-    /// a complete JSON object. A Data Plane that predates it answers `406`.
+    /// a complete JSON object.
     JsonLines,
 }
 
@@ -206,8 +206,7 @@ impl Conversations {
     /// The body is one span per line, each line a complete JSON object. Each
     /// span is decoded as its line arrives, so the export is never held
     /// whole. This replaces `export_json`, the JSON-envelope export, which
-    /// was removed. A Data Plane that predates the JSON-lines form answers `406`,
-    /// which is returned as the error it is.
+    /// was removed.
     pub async fn export_spans(
         &self,
         conversation_id: &str,

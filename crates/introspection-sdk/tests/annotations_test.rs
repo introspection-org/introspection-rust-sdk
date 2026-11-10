@@ -195,57 +195,6 @@ async fn a_list_without_an_include_sends_none() {
 }
 
 #[tokio::test]
-async fn reads_the_row_an_older_data_plane_sends() {
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/annotations"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "records": [{
-                "trace_id": TRACE_ID,
-                "span_id": SPAN_ID,
-                "conversation_id": "conversation-1",
-                "labels": ["needs-review"],
-                "assignee_member_ids": [MEMBER_ID],
-                "annotator_member_ids": [MEMBER_ID],
-                "commenter_member_ids": [MEMBER_ID],
-                "human_commenter_member_ids": [MEMBER_ID],
-                "has_comment": true,
-                "has_human_comment": true,
-                "comment_count": 2,
-                "latest_comment": "looks wrong",
-                "latest_comment_member_id": MEMBER_ID,
-                "latest_comment_actor_member_id": MEMBER_ID,
-                "latest_comment_actor_type": "human",
-                "updated_at": "2026-08-25T12:00:00Z",
-                "updated_by_member_id": MEMBER_ID,
-                "assignment_event_id": EVENT_ID
-            }],
-            "count": 1, "total_count": null, "next": null
-        })))
-        .mount(&dp)
-        .await;
-    let result = Annotations::new(http(&dp), http(&dp))
-        .list(&AnnotationListParams::default())
-        .await
-        .unwrap()
-        .next()
-        .await
-        .unwrap();
-
-    // With `strict-schema` the retired fields are reported, not dropped; the
-    // renamed one is read either way.
-    if cfg!(feature = "strict-schema") {
-        let error = result.unwrap_err().to_string();
-        assert!(error.contains("latest_comment"), "{error}");
-        assert!(!error.contains("human_commenter_member_ids"), "{error}");
-        return;
-    }
-    let state = result.unwrap();
-    assert_eq!(state.reviewer_member_ids, vec![member()]);
-    assert_eq!(state.comment_count, 2);
-}
-
-#[tokio::test]
 async fn resolves_email_list_filter_and_requests_total() {
     let cp = MockServer::start().await;
     let dp = MockServer::start().await;

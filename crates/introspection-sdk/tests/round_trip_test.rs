@@ -637,33 +637,6 @@ fn event_payloads_model_every_field_the_api_returns() {
     assert_eq!(first.payload.base().unwrap().judgement_id, "judgement-1");
 }
 
-/// A Data Plane that predates `kind` sends one flat payload; `result_schema`
-/// tells the two kinds apart.
-#[test]
-fn a_judgement_without_a_kind_reads_by_its_result_schema() {
-    let read = |payload: Value| -> JudgementPayload { serde_json::from_value(payload).unwrap() };
-
-    let scored = read(with(
-        with(judgement_base(), egress_fields()),
-        serde_json::json!({"result_schema": "question_scores.v1"}),
-    ));
-    let JudgementPayload::Egress(egress) = scored else {
-        panic!("question scores are an egress judgement: {scored:?}");
-    };
-    assert_eq!(egress.request_host.as_deref(), Some("api.example.com"));
-
-    let verdict = read(with(
-        with(judgement_base(), verdict_fields()),
-        serde_json::json!({"result_schema": "verdict.v1"}),
-    ));
-    assert!(
-        matches!(verdict, JudgementPayload::Verdict(_)),
-        "{verdict:?}"
-    );
-    let bare = read(serde_json::json!({"judgement_id": "judgement-1"}));
-    assert!(matches!(bare, JudgementPayload::Verdict(_)), "{bare:?}");
-}
-
 /// A `kind` this build does not know keeps its payload, and the page decodes.
 #[test]
 fn a_judgement_of_an_unknown_kind_is_kept_whole() {
@@ -683,4 +656,108 @@ fn a_judgement_of_an_unknown_kind_is_kept_whole() {
     };
     assert_eq!(raw, &payload);
     assert!(judgement.payload.base().is_none());
+}
+
+fn issue_request() -> Value {
+    serde_json::json!({
+        "id": "00000000-0000-0000-0000-0000000000a2",
+        "created_at": "2026-11-10T05:00:00Z", "updated_at": "2026-11-10T05:01:00Z",
+        "issue_id": "00000000-0000-0000-0000-0000000000a1",
+        "task_id": "00000000-0000-0000-0000-0000000000a3",
+        "question": "Ship it?", "assignee_id": "00000000-0000-0000-0000-0000000000cc",
+        "status": "resolved", "resolution": "yes", "revision": 2, "issue_revision": 3,
+        "issue_member_id": "00000000-0000-0000-0000-0000000000cc",
+        "files": [{"file_id": "00000000-0000-0000-0000-0000000000a4", "name": "plan.md"}],
+        "links": [{"url": "https://example.com/pr/1"}],
+        "events": [{"event_id": "00000000-0000-0000-0000-0000000000a5"}],
+        "spans": [{"trace_id": "0af7651916cd43dd8448eb211c80319c", "span_id": "b7ad6b7169203331"}],
+    })
+}
+
+fn issue_payload(action: &str, extra: Value) -> Value {
+    with(
+        serde_json::json!({
+            "action": action, "issue_id": "00000000-0000-0000-0000-0000000000a1",
+            "resource_id": "00000000-0000-0000-0000-0000000000a2", "revision": 2,
+        }),
+        extra,
+    )
+}
+
+/// Each action of an `introspection.issue` event, every field set.
+#[test]
+fn issue_events_decode_by_action() {
+    let changes = serde_json::json!({"status": {"before": "open", "after": "resolved"}});
+    let payloads = [
+        issue_payload(
+            "created",
+            serde_json::json!({"data": {"title": "Flaky", "priority": "high"}}),
+        ),
+        issue_payload(
+            "updated",
+            serde_json::json!({"changes": {"title": {"before": "Flaky", "after": null}}}),
+        ),
+        issue_payload("deleted", serde_json::json!({})),
+        issue_payload(
+            "request.created",
+            serde_json::json!({"request": issue_request()}),
+        ),
+        issue_payload(
+            "request.updated",
+            serde_json::json!({"request": issue_request(), "changes": changes}),
+        ),
+        issue_payload("request.reopened", serde_json::json!({"new": 1})),
+    ];
+    let records: Vec<_> = payloads
+        .iter()
+        .map(|payload| event("introspection.issue", payload.clone()))
+        .collect();
+    let body = serde_json::json!({"count": records.len(), "records": records});
+
+    round_trip::<Paginated<Event>>(&body).unwrap();
+
+    let page: Paginated<Event> = serde_json::from_value(body).unwrap();
+    let read: Vec<_> = page
+        .records
+        .iter()
+        .map(|record| {
+            let Event::Issue(issue) = record else {
+                panic!("an issue event: {record:?}");
+            };
+            assert_eq!(record.event_name(), Some(IntrospectionEventName::Issue));
+            &issue.payload
+        })
+        .collect();
+    let IssueActivityPayload::Created(created) = read[0] else {
+        panic!("created: {:?}", read[0]);
+    };
+    assert_eq!(created.data["title"], "Flaky");
+    assert_eq!(created.base.revision, Some(2));
+    let IssueActivityPayload::Updated(updated) = read[1] else {
+        panic!("updated: {:?}", read[1]);
+    };
+    assert_eq!(updated.changes["title"].before, "Flaky");
+    assert!(updated.changes["title"].after.is_null());
+    assert!(
+        matches!(read[2], IssueActivityPayload::Deleted(_)),
+        "{:?}",
+        read[2]
+    );
+    let IssueActivityPayload::RequestCreated(asked) = read[3] else {
+        panic!("request.created: {:?}", read[3]);
+    };
+    assert_eq!(asked.request.question, "Ship it?");
+    let IssueActivityPayload::RequestUpdated(answered) = read[4] else {
+        panic!("request.updated: {:?}", read[4]);
+    };
+    assert_eq!(answered.request.status, IssueRequestStatus::Resolved);
+    assert_eq!(answered.changes["status"].after, "resolved");
+    assert!(read[4].base().is_some());
+    // An action this build does not know is kept whole.
+    assert!(
+        matches!(read[5], IssueActivityPayload::Unknown(_)),
+        "{:?}",
+        read[5]
+    );
+    assert!(read[5].base().is_none());
 }

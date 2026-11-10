@@ -7161,8 +7161,7 @@ impl ConversationListParams {
 /// rows are not returned and remain aggregable via `POST /v1/metrics`.
 ///
 /// The platform serves further families this SDK build does not type yet
-/// (`introspection.track`, `introspection.issue`,
-/// `introspection.repository.*`): request one with [`Self::Unknown`] and read
+/// (`introspection.track`, `introspection.repository.*`): request one with [`Self::Unknown`] and read
 /// its rows as [`Event::Unknown`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntrospectionEventName {
@@ -7171,6 +7170,8 @@ pub enum IntrospectionEventName {
     Observation,
     ObservationClusteringRun,
     Judgement,
+    /// One recorded action on an issue or on one of its human requests.
+    Issue,
     Pattern,
     PatternAssignment,
     /// One automation trigger that ran.
@@ -7192,6 +7193,7 @@ impl IntrospectionEventName {
             Self::Observation => "introspection.observation",
             Self::ObservationClusteringRun => "introspection.observation_clustering.run",
             Self::Judgement => "introspection.judgement",
+            Self::Issue => "introspection.issue",
             Self::Pattern => "introspection.pattern",
             Self::PatternAssignment => "introspection.pattern.assignment",
             Self::AutomationTriggered => "introspection.automation.triggered",
@@ -7216,6 +7218,7 @@ impl<'de> Deserialize<'de> for IntrospectionEventName {
             "introspection.observation" => Self::Observation,
             "introspection.observation_clustering.run" => Self::ObservationClusteringRun,
             "introspection.judgement" => Self::Judgement,
+            "introspection.issue" => Self::Issue,
             "introspection.pattern" => Self::Pattern,
             "introspection.pattern.assignment" => Self::PatternAssignment,
             "introspection.automation.triggered" => Self::AutomationTriggered,
@@ -7531,13 +7534,9 @@ pub struct JudgementEgressPayload {
     pub request_path: Option<String>,
 }
 
-/// `introspection.judgement` payload, by its `kind`.
-///
-/// A Data Plane that predates `kind` sends neither it nor the split: such a
-/// payload reads as [`Self::Egress`] when its `result_schema` is
-/// `question_scores.v1` and as [`Self::Verdict`] otherwise. A `kind` this SDK
+/// `introspection.judgement` payload, by its `kind`. A `kind` this SDK
 /// build does not know is kept whole in [`Self::Unknown`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JudgementPayload {
     Verdict(JudgementVerdictPayload),
@@ -7557,29 +7556,121 @@ impl JudgementPayload {
     }
 }
 
-impl<'de> Deserialize<'de> for JudgementPayload {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(d)?;
-        let kind = match value.get("kind").and_then(serde_json::Value::as_str) {
-            Some(kind) => kind,
-            None if value.get("kind").is_some_and(|kind| !kind.is_null()) => {
-                return Ok(Self::Unknown(value))
-            }
-            None if value
-                .get("result_schema")
-                .and_then(serde_json::Value::as_str)
-                == Some("question_scores.v1") =>
-            {
-                "egress"
-            }
-            None => "verdict",
-        };
-        match kind {
-            "verdict" => serde_json::from_value(value).map(Self::Verdict),
-            "egress" => serde_json::from_value(value).map(Self::Egress),
-            _ => return Ok(Self::Unknown(value)),
+/// One authored field's value on either side of an update.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct IssueFieldChange {
+    pub before: serde_json::Value,
+    pub after: serde_json::Value,
+}
+
+/// A human request as an issue event recorded it.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueRequestPayload {
+    pub id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub issue_id: Uuid,
+    pub task_id: Uuid,
+    pub question: String,
+    pub assignee_id: Uuid,
+    pub status: IssueRequestStatus,
+    #[serde(default)]
+    pub resolution: Option<String>,
+    pub revision: u64,
+    pub issue_revision: u64,
+    /// The owning member of the parent issue; `None` on a project-owned one.
+    #[serde(default)]
+    pub issue_member_id: Option<Uuid>,
+    pub files: Vec<IssueFile>,
+    pub links: Vec<IssueLink>,
+    pub events: Vec<IssueEventReference>,
+    pub spans: Vec<IssueSpanReference>,
+}
+
+/// What every issue event carries, whichever action it records.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueActivityBasePayload {
+    pub issue_id: Uuid,
+    /// The issue for an issue action, the request for a `request.*` one.
+    #[serde(default)]
+    pub resource_id: Option<Uuid>,
+    /// The revision of the resource the action wrote.
+    #[serde(default)]
+    pub revision: Option<u64>,
+}
+
+/// `created`: the issue, with the authored fields it was created with.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueCreatedPayload {
+    #[serde(flatten)]
+    pub base: IssueActivityBasePayload,
+    pub data: BTreeMap<String, serde_json::Value>,
+}
+
+/// `updated`: each changed field of the issue, by name.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueUpdatedPayload {
+    #[serde(flatten)]
+    pub base: IssueActivityBasePayload,
+    pub changes: BTreeMap<String, IssueFieldChange>,
+}
+
+/// `deleted`: the issue is gone.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueDeletedPayload {
+    #[serde(flatten)]
+    pub base: IssueActivityBasePayload,
+}
+
+/// `request.created`: the request as created.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueRequestCreatedPayload {
+    #[serde(flatten)]
+    pub base: IssueActivityBasePayload,
+    pub request: IssueRequestPayload,
+}
+
+/// `request.updated`: the request after the update, and what changed.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueRequestUpdatedPayload {
+    #[serde(flatten)]
+    pub base: IssueActivityBasePayload,
+    pub request: IssueRequestPayload,
+    pub changes: BTreeMap<String, IssueFieldChange>,
+}
+
+/// `introspection.issue` payload, by its `action`. An `action` this SDK
+/// build does not know is kept whole in [`Self::Unknown`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "action")]
+pub enum IssueActivityPayload {
+    #[serde(rename = "created")]
+    Created(IssueCreatedPayload),
+    #[serde(rename = "updated")]
+    Updated(IssueUpdatedPayload),
+    #[serde(rename = "deleted")]
+    Deleted(IssueDeletedPayload),
+    #[serde(rename = "request.created")]
+    RequestCreated(IssueRequestCreatedPayload),
+    #[serde(rename = "request.updated")]
+    RequestUpdated(IssueRequestUpdatedPayload),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+impl IssueActivityPayload {
+    /// The fields every action carries; `None` for [`Self::Unknown`].
+    pub fn base(&self) -> Option<&IssueActivityBasePayload> {
+        match self {
+            Self::Created(payload) => Some(&payload.base),
+            Self::Updated(payload) => Some(&payload.base),
+            Self::Deleted(payload) => Some(&payload.base),
+            Self::RequestCreated(payload) => Some(&payload.base),
+            Self::RequestUpdated(payload) => Some(&payload.base),
+            Self::Unknown(_) => None,
         }
-        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -7632,6 +7723,7 @@ pub type ClusteringRunEvent = TypedEvent<ClusteringRunPayload>;
 pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
 pub type AnnotationEvent = TypedEvent<AnnotationPayload>;
 pub type JudgementEvent = TypedEvent<JudgementPayload>;
+pub type IssueActivityEvent = TypedEvent<IssueActivityPayload>;
 pub type AutomationTriggeredEvent = TypedEvent<AutomationTriggeredPayload>;
 pub type AutomationSkippedEvent = TypedEvent<AutomationSkippedPayload>;
 
@@ -7656,6 +7748,8 @@ pub enum Event {
     ObservationClusteringRun(ClusteringRunEvent),
     #[serde(rename = "introspection.judgement")]
     Judgement(JudgementEvent),
+    #[serde(rename = "introspection.issue")]
+    Issue(IssueActivityEvent),
     #[serde(rename = "introspection.pattern")]
     Pattern(PatternEvent),
     #[serde(rename = "introspection.pattern.assignment")]
@@ -7681,6 +7775,7 @@ impl Event {
                 Some(IntrospectionEventName::ObservationClusteringRun)
             }
             Self::Judgement(_) => Some(IntrospectionEventName::Judgement),
+            Self::Issue(_) => Some(IntrospectionEventName::Issue),
             Self::Pattern(_) => Some(IntrospectionEventName::Pattern),
             Self::PatternAssignment(_) => Some(IntrospectionEventName::PatternAssignment),
             Self::AutomationTriggered(_) => Some(IntrospectionEventName::AutomationTriggered),
@@ -8958,7 +9053,7 @@ mod tests {
         let wire = EventListParams {
             extra_event_names: Some(vec![
                 IntrospectionEventName::AutomationSkipped,
-                IntrospectionEventName::Unknown("introspection.issue".into()),
+                IntrospectionEventName::Issue,
             ]),
             ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
         }
@@ -9225,6 +9320,7 @@ mod tests {
             "timestamp": "2026-07-01T00:00:00Z",
             "event_name": "introspection.judgement",
             "payload": {
+                "kind": "verdict",
                 "judgement_id": "jm_1",
                 "judge_id": "judge_1",
                 "result": "pass",
@@ -9239,7 +9335,7 @@ mod tests {
             panic!("expected Judgement, got {event:?}");
         };
         let JudgementPayload::Verdict(verdict) = &j.payload else {
-            panic!("a payload without a kind is a verdict: {:?}", j.payload);
+            panic!("expected a verdict, got {:?}", j.payload);
         };
         assert_eq!(verdict.sequence_hash.as_deref(), Some("def456"));
         let base = j.payload.base().unwrap();

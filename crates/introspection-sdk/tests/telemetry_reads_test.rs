@@ -210,7 +210,7 @@ async fn export_spans_asks_for_annotations_and_reads_them_on_the_span() {
 }
 
 #[tokio::test]
-async fn export_spans_surfaces_the_406_of_an_older_data_plane() {
+async fn export_spans_surfaces_a_406() {
     let dp = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/conversations/conv/export"))

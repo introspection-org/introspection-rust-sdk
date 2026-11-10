@@ -41,15 +41,10 @@ pub struct AnnotationState {
     pub span_id: String,
     #[serde(default)]
     pub conversation_id: Option<String>,
-    #[serde(default)]
     pub labels: Vec<String>,
-    #[serde(default)]
     pub assignee_member_ids: Vec<Uuid>,
-    /// The members whose comment completed a review. A Data Plane that
-    /// predates the rename sends it as `human_commenter_member_ids`.
-    #[serde(default, alias = "human_commenter_member_ids")]
+    /// The members whose comment completed a review.
     pub reviewer_member_ids: Vec<Uuid>,
-    #[serde(default)]
     pub comment_count: u64,
     pub updated_at: String,
     pub updated_by_member_id: Uuid,
@@ -89,6 +84,9 @@ pub struct AnnotationListParams {
     pub conversation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// `backlog`, `assigned` or `reviewed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
     /// Row expansions, sent as a repeated `include`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<AnnotationInclude>,
