@@ -186,15 +186,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Tagged by commit; publish.yml adds the release tag to the same image.
+      # Tagged by commit and latest, as the platform images are; the SDK walks pull :latest.
       - name: Push the walk binary to GHCR
         if: github.event_name == 'push'
         working-directory: walk
         run: |
-          oras push "${WALK_IMAGE}:${GITHUB_SHA}" \
+          oras push "${WALK_IMAGE}:${GITHUB_SHA},latest" \
             --artifact-type application/vnd.introspection.walk.v1 \
             introspection-walk:application/octet-stream
-          oras tag "${WALK_IMAGE}:${GITHUB_SHA}" latest
 
   semver-checks:
     name: Semver Checks

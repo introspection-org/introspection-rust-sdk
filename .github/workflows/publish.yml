@@ -155,50 +155,6 @@ jobs:
         run: |
           cargo publish -p "${PACKAGE}" --allow-dirty
 
-  # ── Tag the walk binary ────────────────────────────────────────────
-  # ci.yml pushes the walk binary for every main commit; a release adds its
-  # tag to that image rather than rebuilding. ci.yml may still be running.
-  tag-walk:
-    name: Tag the walk binary ${{ needs.resolve-version.outputs.tag }}
-    needs: resolve-version
-    if: needs.resolve-version.outputs.package == 'introspection-sdk'
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-    permissions:
-      contents: read
-      packages: write
-    env:
-      WALK_IMAGE: ghcr.io/introspection-org/introspection-rust-walk
-    steps:
-      - name: Install oras
-        uses: oras-project/setup-oras@v1
-        with:
-          version: 1.3.0
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Wait for the release commit's image, then tag it
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.resolve-version.outputs.tag }}
-        run: |
-          set -euo pipefail
-          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
-          deadline=$(( $(date +%s) + 45 * 60 ))
-          until oras manifest fetch --descriptor "${WALK_IMAGE}:${SHA}" >/dev/null 2>&1; do
-            if [ "$(date +%s)" -ge "${deadline}" ]; then
-              echo "::error::${WALK_IMAGE}:${SHA} did not appear within 45 minutes; did ci.yml's Tests job fail on ${SHA}?"
-              exit 1
-            fi
-            echo "Waiting for ${WALK_IMAGE}:${SHA}"
-            sleep 30
-          done
-          oras tag "${WALK_IMAGE}:${SHA}" "${TAG}"
-
   # ── GitHub Release ─────────────────────────────────────────────────
   github-release:
     name: Create GitHub Release
