@@ -193,28 +193,6 @@ jobs:
             introspection-walk:application/octet-stream
           oras tag "${WALK_IMAGE}:${GITHUB_SHA}" latest
 
-      # GHCR has no retention policy. Keeps the newest versions plus any
-      # tagged latest or v*, since a release shares its commit's version.
-      - name: Prune old walk binaries
-        if: github.event_name == 'push'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEEP: "10"
-          VERSIONS: /orgs/introspection-org/packages/container/introspection-rust-walk/versions
-        run: |
-          set -euo pipefail
-          trap 'echo "::warning::Pruning introspection-rust-walk failed; the binary is published."' ERR
-          gh api --paginate "${VERSIONS}" \
-            | jq -s --argjson keep "${KEEP}" -r '
-                add
-                | sort_by(.created_at) | reverse | .[$keep:][]
-                | select((.metadata.container.tags // []) | any(. == "latest" or startswith("v")) | not)
-                | .id' \
-            | while read -r id; do
-                gh api -X DELETE "${VERSIONS}/${id}"
-              done
-
   semver-checks:
     name: Semver Checks
     # Compares each published crate's public API with its latest crates.io

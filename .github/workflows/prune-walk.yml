@@ -1,0 +1,34 @@
+name: Prune walk binaries
+
+# GHCR has no retention limit like ECR's, so this keeps the introspection-rust-walk package to
+# its newest versions. A release tag shares its commit's version, so versions
+# tagged latest or with a release are always kept; actions/delete-package-versions
+# counts versions and would eventually delete releases.
+on:
+  schedule:
+    - cron: "0 3 * * 0" # weekly
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSIONS_URL: /orgs/introspection-org/packages/container/introspection-rust-walk/versions
+      KEEP: 10
+    steps:
+      - name: Delete all but the newest versions, keeping latest and releases
+        run: |
+          set -euo pipefail
+          gh api --paginate "$VERSIONS_URL" --jq '.[]' \
+            | jq -rs --argjson keep "$KEEP" '
+                sort_by(.created_at) | reverse | .[$keep:][]
+                | select((.metadata.container.tags // []) | any(. == "latest" or test("^v[0-9]+\\.[0-9]+\\.[0-9]+")) | not)
+                | .id' \
+            | while read -r id; do
+                gh api -X DELETE "$VERSIONS_URL/$id"
+              done
