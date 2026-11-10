@@ -114,14 +114,19 @@ jobs:
       # the walk. Never released or published.
       - name: Build the walk binary
         if: github.event_name == 'push'
-        run: cargo build --locked --features walk --bin introspection-walk
+        # Debug info is most of its size (321 MB, 54 MB zipped); stripped it is 68 MB, 12 MB zipped,
+        # and keeps the symbols a backtrace names.
+        run: |
+          cargo build --locked --features walk --bin introspection-walk
+          mkdir -p walk
+          strip --strip-debug -o walk/introspection-walk target/debug/introspection-walk
 
       - name: Upload the walk binary
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: introspection-walk-linux-x64
-          path: target/debug/introspection-walk
+          path: walk/introspection-walk
           retention-days: 30
           if-no-files-found: error
 
