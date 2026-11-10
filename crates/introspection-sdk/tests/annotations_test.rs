@@ -70,6 +70,7 @@ fn annotation() -> serde_json::Value {
         "reviewer_member_ids": [MEMBER_ID],
         "comment_count": 1,
         "updated_at": "2026-08-25T12:00:00Z",
+        "updated_by_member_id": MEMBER_ID,
         "assignment_event_id": EVENT_ID
     })
 }
@@ -108,6 +109,7 @@ async fn lists_folded_annotation_state_with_filters() {
     assert_eq!(state.labels, vec!["needs-review"]);
     assert_eq!(state.reviewer_member_ids, vec![member()]);
     assert_eq!(state.comment_count, 1);
+    assert_eq!(state.updated_by_member_id, member());
 }
 
 const JSON_LINES: &str = "application/x-ndjson";
@@ -117,7 +119,8 @@ fn export_body() -> String {
         "trace_id": TRACE_ID,
         "span_id": "00f067aa0ba902b7",
         "human_commenter_member_ids": [MEMBER_ID],
-        "updated_at": "2026-08-25T12:00:00Z"
+        "updated_at": "2026-08-25T12:00:00Z",
+        "updated_by_member_id": MEMBER_ID
     });
     format!("{}\n{older}\n", annotation())
 }

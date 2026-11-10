@@ -42,6 +42,7 @@ pub struct AnnotationState {
     #[serde(default)]
     pub comment_count: u64,
     pub updated_at: String,
+    pub updated_by_member_id: Uuid,
     #[serde(default)]
     pub assignment_event_id: Option<Uuid>,
 }
@@ -552,9 +553,9 @@ mod tests {
     #[tokio::test]
     async fn export_rows_join_a_line_split_across_chunks() {
         let chunks = [
-            "{\"trace_id\":\"t\",\"span_id\":\"a\",\"updated_at\":\"2026-08-25T12:00:00Z\"}\n{\"trace_id\":\"t\",\"span",
+            "{\"trace_id\":\"t\",\"span_id\":\"a\",\"updated_at\":\"2026-08-25T12:00:00Z\",\"updated_by_member_id\":\"00000000-0000-0000-0000-0000000000cc\"}\n{\"trace_id\":\"t\",\"span",
             "_id\":\"b\",\"labels\":[\"x\"],\"updated_",
-            "at\":\"2026-08-25T12:00:00Z\"}\n",
+            "at\":\"2026-08-25T12:00:00Z\",\"updated_by_member_id\":\"00000000-0000-0000-0000-0000000000cc\"}\n",
         ]
         .map(|chunk| Ok::<_, reqwest::Error>(Bytes::from_static(chunk.as_bytes())));
 
