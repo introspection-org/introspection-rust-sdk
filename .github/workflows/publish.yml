@@ -175,16 +175,19 @@ jobs:
         with:
           version: 1.3.0
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Wait for the release commit's image, then tag it
         env:
           GH_TOKEN: ${{ github.token }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ACTOR: ${{ github.actor }}
           TAG: ${{ needs.resolve-version.outputs.tag }}
         run: |
           set -euo pipefail
           SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
-          printf '%s' "${GITHUB_TOKEN}" | oras login ghcr.io -u "${ACTOR}" --password-stdin
           deadline=$(( $(date +%s) + 45 * 60 ))
           until oras manifest fetch --descriptor "${WALK_IMAGE}:${SHA}" >/dev/null 2>&1; do
             if [ "$(date +%s)" -ge "${deadline}" ]; then
