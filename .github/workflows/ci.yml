@@ -81,7 +81,8 @@ jobs:
       - name: Run clippy (aauth-protocol without HTTP)
         run: cargo clippy -p aauth-protocol --no-default-features --all-targets -- -D warnings
 
-  lint-and-format:
+  lint-test:
+    name: Lint, test and build the walk
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -271,7 +272,7 @@ jobs:
       - secrets-scan
       - lint-actions
       - lint
-      - lint-and-format
+      - lint-test
       - duplication
       - unused-deps
       - test
