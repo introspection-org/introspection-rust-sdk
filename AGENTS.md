@@ -17,6 +17,13 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - CI runs `cargo clippy --all-targets --all-features -- -D warnings` at the workspace root. That compiles every member's examples, so a broken example fails CI.
 - CI never runs the examples. They need a live server.
 
+## Forward compatibility
+
+- An SDK built today must still read a response after the API adds a field or an enum value. `tests/forward_compat_test.rs` holds it to that.
+- A type decoded from a response, or nested in one, never takes `#[serde(deny_unknown_fields)]`. Only request params may (`ConnectorCreateParams`, `MemberUpdateParams`, ...), so a typo in a body read from a document fails locally.
+- A string enum the server sends is an `open_wire_enum!` (an `Other(String)` fallback). A `Copy` one takes a `#[serde(other)] Unknown` variant instead, a tagged enum takes a `#[serde(untagged)] Unknown(serde_json::Value)` tail, as `Event` does, and an untagged one ends in a `serde_json::Value` variant.
+- `strict-schema` is opt-in drift detection for CI (`--all-features`): it fails a decode on a field the SDK does not model. Never enable it by default or rely on it for behaviour; a test that sends an unknown field through a client is `#[cfg(not(feature = "strict-schema"))]`.
+
 ## Examples
 
 - Cargo auto-discovers examples only at `crates/introspection-sdk/examples/*.rs`. A file under `examples/api/` needs an `[[example]]` entry in `crates/introspection-sdk/Cargo.toml`.
