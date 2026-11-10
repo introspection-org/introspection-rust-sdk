@@ -108,7 +108,7 @@ pub use endpoints::Endpoints;
 pub use experiments::{ExperimentHandle, Experiments};
 pub use images::Images;
 pub use integrations::Integrations;
-pub use issues::Issues;
+pub use issues::{IssueComments, Issues};
 pub use judges::Judges;
 pub use members::Members;
 pub use oidc::Oidc;

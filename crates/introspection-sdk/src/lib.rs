@@ -162,11 +162,10 @@ pub use api::{
     IntrospectionEventName, IntrospectionHistory, IntrospectionIngest, IntrospectionInvocation,
     IntrospectionNewMessages, IntrospectionProxy, IntrospectionRecipe, IntrospectionRun,
     IntrospectionRuntime, IntrospectionStoredHistory, IntrospectionTask, Issue,
-    IssueActivityBasePayload, IssueActivityEvent, IssueActivityPayload, IssueCreateParams,
-    IssueCreatedPayload, IssueDeletedPayload, IssueEventReference, IssueFieldChange, IssueFile,
-    IssueLink, IssueListParams, IssueMutation, IssueOpenRequest, IssueOwner, IssuePatch,
-    IssuePriority, IssueRequestCreatedPayload, IssueRequestMutation, IssueRequestPayload,
-    IssueRequestStatus, IssueRequestUpdatedPayload, IssueSpanReference, IssueStatus,
+    IssueActivityBasePayload, IssueActivityEvent, IssueActivityPayload, IssueComment,
+    IssueCommentedPayload, IssueCreateParams, IssueCreatedPayload, IssueDeletedPayload,
+    IssueEventReference, IssueFieldChange, IssueFile, IssueInclude, IssueLink, IssueListParams,
+    IssueMember, IssueMemberRelation, IssueOwner, IssuePriority, IssueSpanReference, IssueStatus,
     IssueUpdateParams, IssueUpdatedPayload, Judge, JudgeGoalComponent, JudgeListParams,
     JudgeUpdateParams, JudgementBasePayload, JudgementEgressPayload, JudgementEvent,
     JudgementPayload, JudgementVerdictPayload, Lane, LaneRef, McpCheckStatus, Me, Member,
@@ -235,9 +234,9 @@ pub use resources::tags::{
 pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
     Applications, Approvals, Automations, Connections, Connectors, Credentials, Endpoints,
-    ExperimentHandle, Experiments, Images, Integrations, Issues, Judges, MemberConnections,
-    Members, Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes,
-    Repositories, RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
+    ExperimentHandle, Experiments, Images, Integrations, IssueComments, Issues, Judges,
+    MemberConnections, Members, Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes,
+    Remotes, Repositories, RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

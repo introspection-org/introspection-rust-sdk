@@ -4645,7 +4645,7 @@ open_wire_enum! {
     /// [`IssueUpdateParams`] after creation.
     pub enum IssueStatus {
         Open => "open",
-        /// Paused for a human request's answer.
+        /// Paused for a person's answer.
         Waiting => "waiting",
         Closed => "closed",
         Cancelled => "cancelled",
@@ -4668,15 +4668,6 @@ open_wire_enum! {
     pub enum IssueOwner {
         Project => "project",
         Me => "me",
-    }
-}
-
-open_wire_enum! {
-    /// Where one human request on an issue stands.
-    pub enum IssueRequestStatus {
-        Open => "open",
-        Resolved => "resolved",
-        Cancelled => "cancelled",
     }
 }
 
@@ -4730,13 +4721,70 @@ pub struct IssueSpanReference {
     pub span_id: String,
 }
 
-/// One open human request, projected onto its issue.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IssueOpenRequest {
+/// How a member stands to an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueMemberRelation {
+    Creator,
+    Assignee,
+    Reviewer,
+    Follower,
+    /// A relation this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// One person on an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueMember {
+    pub member_id: Uuid,
+    pub relation: IssueMemberRelation,
+}
+
+/// One comment on an issue. Comments are append-only: none is edited or
+/// deleted.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueComment {
+    /// The comment's id, which is its event's id.
     pub id: Uuid,
-    pub question: String,
-    pub assignee_id: Uuid,
+    pub issue_id: Uuid,
+    pub comment: String,
+    /// The member who commented.
+    #[serde(default)]
+    pub member_id: Option<Uuid>,
+    /// The member acting for `member_id`, when delegated.
+    #[serde(default)]
+    pub actor_member_id: Option<Uuid>,
+    /// The actor's capacity (`agent`, `dev`, `impersonation`).
+    #[serde(default)]
+    pub actor_member_type: Option<String>,
     pub created_at: String,
+}
+
+/// A related list to return with an issue's brief. A list that was not
+/// included is `None` on the [`Issue`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum IssueInclude {
+    /// `members`.
+    Members,
+    /// `links`, `files`, `events` and `spans`.
+    Attachments,
+    /// `comments`, oldest first, at most 500. On `Issues::get` only: the
+    /// list, create and update answer `422`.
+    Comments,
+}
+
+impl IssueInclude {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Members => "members",
+            Self::Attachments => "attachments",
+            Self::Comments => "comments",
+        }
+    }
 }
 
 /// A project pursuit with a living brief and one fixed worker Task. The read
@@ -4769,24 +4817,36 @@ pub struct Issue {
     /// (Operator) issue.
     #[serde(default)]
     pub member_id: Option<Uuid>,
+    /// The member who created the issue; `None` when its creator is not a
+    /// member.
+    #[serde(default)]
+    pub created_by_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub assignee_member_id: Option<Uuid>,
+    #[serde(default)]
+    pub reviewer_member_id: Option<Uuid>,
     /// When the issue last entered `closed` or `cancelled`.
     #[serde(default)]
     pub closed_at: Option<String>,
-    #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
     pub metadata: BTreeMap<String, serde_json::Value>,
+    /// The creator, the assignee, the reviewer, then the followers in the
+    /// order they were added; with [`IssueInclude::Members`].
     #[serde(default)]
-    pub files: Vec<IssueFile>,
+    pub members: Option<Vec<IssueMember>>,
+    /// With [`IssueInclude::Attachments`], as are `files`, `events` and
+    /// `spans`.
     #[serde(default)]
-    pub links: Vec<IssueLink>,
+    pub links: Option<Vec<IssueLink>>,
     #[serde(default)]
-    pub events: Vec<IssueEventReference>,
+    pub files: Option<Vec<IssueFile>>,
     #[serde(default)]
-    pub spans: Vec<IssueSpanReference>,
-    /// Open human requests, oldest first.
-    #[serde(default, deserialize_with = "null_as_default")]
-    pub open_requests: Vec<IssueOpenRequest>,
+    pub events: Option<Vec<IssueEventReference>>,
+    #[serde(default)]
+    pub spans: Option<Vec<IssueSpanReference>>,
+    /// With [`IssueInclude::Comments`].
+    #[serde(default)]
+    pub comments: Option<Vec<IssueComment>>,
 }
 
 impl Issue {
@@ -4824,6 +4884,13 @@ pub struct IssueCreateParams {
     pub events: Option<Vec<IssueEventReference>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spans: Option<Vec<IssueSpanReference>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee_member_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewer_member_id: Option<Uuid>,
+    /// At most 50, each once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follower_member_ids: Option<Vec<Uuid>>,
 }
 
 impl IssueCreateParams {
@@ -4841,11 +4908,14 @@ impl IssueCreateParams {
             links: None,
             events: None,
             spans: None,
+            assignee_member_id: None,
+            reviewer_member_id: None,
+            follower_member_ids: None,
         }
     }
 }
 
-/// `PATCH /v1/issues/{id}` body that edits the brief. `None` leaves a field
+/// `PATCH /v1/issues/{id}` body. `None` leaves a field
 /// as it is; each list (and `metadata`) replaces the stored one wholesale, so
 /// `Some(vec![])` clears it. Pass the issue's [`Issue::etag`] as `If-Match` to
 /// refuse the edit when the issue has changed since it was read.
@@ -4871,86 +4941,24 @@ pub struct IssueUpdateParams {
     pub events: Option<Vec<IssueEventReference>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spans: Option<Vec<IssueSpanReference>>,
-}
-
-/// Create one human request on an issue, or change one. An `id` the issue does
-/// not have yet creates the request (with a `question` and an `assignee_id`);
-/// an existing one changes it, and the last write wins.
-#[derive(Debug, Clone, Serialize)]
-pub struct IssueRequestMutation {
-    /// The request's id. A new request's id is minted by the client, as a
-    /// UUID7.
-    pub id: Uuid,
+    /// `Some(Some(id))` assigns the issue, replacing its assignee;
+    /// `Some(None)` sends `null`, which unassigns it; `None` leaves it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    pub assignee_member_id: Option<Option<Uuid>>,
+    /// The reviewer, set and cleared like `assignee_member_id`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    pub reviewer_member_id: Option<Option<Uuid>>,
+    /// Replaces the followers wholesale (at most 50).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub question: Option<String>,
-    /// Who the request is assigned to; set it again to reassign.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub assignee_id: Option<Uuid>,
-    /// `resolved` and `cancelled` need a `resolution`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<IssueRequestStatus>,
-    /// The decision and its basis, when closing the request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolution: Option<String>,
-}
-
-impl IssueRequestMutation {
-    /// A new request: a fresh UUID7 id, the question and its assignee.
-    pub fn create(question: impl Into<String>, assignee_id: Uuid) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            question: Some(question.into()),
-            assignee_id: Some(assignee_id),
-            status: None,
-            resolution: None,
-        }
-    }
-
-    /// A change to request `id` that changes nothing yet. Combine with
-    /// struct-update syntax.
-    pub fn change(id: Uuid) -> Self {
-        Self {
-            id,
-            question: None,
-            assignee_id: None,
-            status: None,
-            resolution: None,
-        }
-    }
-}
-
-/// `PATCH /v1/issues/{id}` body that creates or changes one human request:
-/// `{"request": {...}}`.
-#[derive(Debug, Clone, Serialize)]
-pub struct IssueMutation {
-    pub request: IssueRequestMutation,
-}
-
-/// The two bodies `PATCH /v1/issues/{id}` takes: an edit to the brief, or a
-/// change to one human request.
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-pub enum IssuePatch {
-    Update(IssueUpdateParams),
-    Mutation(IssueMutation),
-}
-
-impl From<IssueUpdateParams> for IssuePatch {
-    fn from(update: IssueUpdateParams) -> Self {
-        Self::Update(update)
-    }
-}
-
-impl From<IssueMutation> for IssuePatch {
-    fn from(mutation: IssueMutation) -> Self {
-        Self::Mutation(mutation)
-    }
-}
-
-impl From<IssueRequestMutation> for IssuePatch {
-    fn from(request: IssueRequestMutation) -> Self {
-        Self::Mutation(IssueMutation { request })
-    }
+    pub follower_member_ids: Option<Vec<Uuid>>,
 }
 
 /// Filters supported by `GET /v1/issues`. Rows come newest activity first.
@@ -4965,11 +4973,16 @@ pub struct IssueListParams {
     /// Any of these owners; omit for every issue the caller may read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<Vec<IssueOwner>>,
-    /// `true`: has an open request assigned to the caller; `false`: has none.
+    /// Issues a member is on in any of these relations: `member_id`, or
+    /// the caller when that is unset.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub assigned_to_me: Option<bool>,
+    pub relation: Option<Vec<IssueMemberRelation>>,
+    /// Issues this member is on.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_open_requests: Option<bool>,
+    pub member_id: Option<Uuid>,
+    /// [`IssueInclude::Members`] and [`IssueInclude::Attachments`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<IssueInclude>>,
     /// Any of these worker Task statuses.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_status: Option<Vec<TaskStatus>>,
@@ -7556,36 +7569,15 @@ impl JudgementPayload {
     }
 }
 
-/// One authored field's value on either side of an update.
+/// One authored field's value on either side of an update. A side that was
+/// null is `None`.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct IssueFieldChange {
-    pub before: serde_json::Value,
-    pub after: serde_json::Value,
-}
-
-/// A human request as an issue event recorded it.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IssueRequestPayload {
-    pub id: Uuid,
-    pub created_at: String,
-    pub updated_at: String,
-    pub issue_id: Uuid,
-    pub task_id: Uuid,
-    pub question: String,
-    pub assignee_id: Uuid,
-    pub status: IssueRequestStatus,
     #[serde(default)]
-    pub resolution: Option<String>,
-    pub revision: u64,
-    pub issue_revision: u64,
-    /// The owning member of the parent issue; `None` on a project-owned one.
+    pub before: Option<serde_json::Value>,
     #[serde(default)]
-    pub issue_member_id: Option<Uuid>,
-    pub files: Vec<IssueFile>,
-    pub links: Vec<IssueLink>,
-    pub events: Vec<IssueEventReference>,
-    pub spans: Vec<IssueSpanReference>,
+    pub after: Option<serde_json::Value>,
 }
 
 /// What every issue event carries, whichever action it records.
@@ -7593,12 +7585,18 @@ pub struct IssueRequestPayload {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IssueActivityBasePayload {
     pub issue_id: Uuid,
-    /// The issue for an issue action, the request for a `request.*` one.
-    #[serde(default)]
-    pub resource_id: Option<Uuid>,
-    /// The revision of the resource the action wrote.
+    /// The revision of the issue the action wrote.
     #[serde(default)]
     pub revision: Option<u64>,
+    /// The member who made the change or comment.
+    #[serde(default)]
+    pub member_id: Option<Uuid>,
+    /// The member acting for `member_id`, when delegated.
+    #[serde(default)]
+    pub actor_member_id: Option<Uuid>,
+    /// The actor's capacity (`agent`, `dev`, `impersonation`).
+    #[serde(default)]
+    pub actor_member_type: Option<String>,
 }
 
 /// `created`: the issue, with the authored fields it was created with.
@@ -7609,7 +7607,8 @@ pub struct IssueCreatedPayload {
     pub data: BTreeMap<String, serde_json::Value>,
 }
 
-/// `updated`: each changed field of the issue, by name.
+/// `updated`: each changed field of the issue, by name; `members` holds the
+/// people on the issue before and after.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IssueUpdatedPayload {
     #[serde(flatten)]
@@ -7624,21 +7623,13 @@ pub struct IssueDeletedPayload {
     pub base: IssueActivityBasePayload,
 }
 
-/// `request.created`: the request as created.
+/// `commented`: one comment. Its author is `base.member_id` and its time is
+/// the event's timestamp.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IssueRequestCreatedPayload {
+pub struct IssueCommentedPayload {
     #[serde(flatten)]
     pub base: IssueActivityBasePayload,
-    pub request: IssueRequestPayload,
-}
-
-/// `request.updated`: the request after the update, and what changed.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IssueRequestUpdatedPayload {
-    #[serde(flatten)]
-    pub base: IssueActivityBasePayload,
-    pub request: IssueRequestPayload,
-    pub changes: BTreeMap<String, IssueFieldChange>,
+    pub comment: String,
 }
 
 /// `introspection.issue` payload, by its `action`. An `action` this SDK
@@ -7650,12 +7641,10 @@ pub enum IssueActivityPayload {
     Created(IssueCreatedPayload),
     #[serde(rename = "updated")]
     Updated(IssueUpdatedPayload),
+    #[serde(rename = "commented")]
+    Commented(IssueCommentedPayload),
     #[serde(rename = "deleted")]
     Deleted(IssueDeletedPayload),
-    #[serde(rename = "request.created")]
-    RequestCreated(IssueRequestCreatedPayload),
-    #[serde(rename = "request.updated")]
-    RequestUpdated(IssueRequestUpdatedPayload),
     #[serde(untagged)]
     Unknown(serde_json::Value),
 }
@@ -7666,9 +7655,8 @@ impl IssueActivityPayload {
         match self {
             Self::Created(payload) => Some(&payload.base),
             Self::Updated(payload) => Some(&payload.base),
+            Self::Commented(payload) => Some(&payload.base),
             Self::Deleted(payload) => Some(&payload.base),
-            Self::RequestCreated(payload) => Some(&payload.base),
-            Self::RequestUpdated(payload) => Some(&payload.base),
             Self::Unknown(_) => None,
         }
     }
@@ -7833,17 +7821,10 @@ pub struct EventListParams {
     /// `introspection.track` events by exact stored event name (wire
     /// `name`, repeatable, at most 20).
     pub track_names: Option<Vec<String>>,
-    /// The latest event per human request (wire `request`). Requires a
-    /// descending order.
-    pub latest_requests: Option<bool>,
     /// `introspection.track` only: the newest event per record in one
     /// conversation (wire `latest`). Requires `conversation_id` and
     /// [`Self::track_names`].
     pub latest_records: Option<bool>,
-    /// One current human request; requires [`Self::latest_requests`].
-    pub request_id: Option<Uuid>,
-    /// The current request assignee; requires [`Self::latest_requests`].
-    pub assignee_id: Option<Uuid>,
     /// Escape hatch for a filter this SDK build predates: merged verbatim
     /// onto the query
     /// string. A filter outside the requested family's allow-map is a 422.
@@ -7885,10 +7866,7 @@ impl EventListParams {
             judge_id: None,
             issue_id: None,
             track_names: None,
-            latest_requests: None,
             latest_records: None,
-            request_id: None,
-            assignee_id: None,
             filters: None,
         }
     }
@@ -7944,10 +7922,7 @@ impl EventListParams {
         put_uuid(&mut obj, "judge_id", self.judge_id);
         put_uuid(&mut obj, "issue_id", self.issue_id);
         put_list(&mut obj, "name", self.track_names.as_ref());
-        put_bool(&mut obj, "request", self.latest_requests);
         put_bool(&mut obj, "latest", self.latest_records);
-        put_uuid(&mut obj, "request_id", self.request_id);
-        put_uuid(&mut obj, "assignee_id", self.assignee_id);
         if self
             .filters
             .as_ref()
@@ -9087,10 +9062,7 @@ mod tests {
             judge_id: Some(id),
             issue_id: Some(id),
             track_names: Some(vec!["order.placed".into(), "order.paid".into()]),
-            latest_requests: Some(true),
             latest_records: Some(false),
-            request_id: Some(id),
-            assignee_id: Some(id),
             ..EventListParams::new(IntrospectionEventName::Unknown(
                 "introspection.track".into(),
             ))
@@ -9100,10 +9072,7 @@ mod tests {
         assert_eq!(wire["judge_id"], id.to_string());
         assert_eq!(wire["issue_id"], id.to_string());
         assert_eq!(wire["name"], json!(["order.placed", "order.paid"]));
-        assert_eq!(wire["request"], true);
         assert_eq!(wire["latest"], false);
-        assert_eq!(wire["request_id"], id.to_string());
-        assert_eq!(wire["assignee_id"], id.to_string());
         assert!(wire.get("track_names").is_none());
     }
 

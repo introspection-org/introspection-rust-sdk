@@ -485,6 +485,40 @@ are Data Plane routes gated on `connections:read`, `connections:write` and
 `connections:delete`. They are distinct from `client.connectors()`, whose
 connections an integrator administers for the project.
 
+## Issues
+
+An issue is a brief with people on it (a creator, an assignee, a reviewer and
+followers), evidence, comments and a change history. To ask a person
+something, assign the issue to them, set it `waiting`, and comment:
+
+```rust
+use introspection_sdk::{IssueInclude, IssueStatus, IssueUpdateParams};
+
+let issues = client.issues();
+issues.update(
+    issue_id,
+    &IssueUpdateParams {
+        assignee_member_id: Some(Some(member_id)), // Some(None) unassigns
+        status: Some(IssueStatus::Waiting),
+        ..Default::default()
+    },
+    &[],
+    None,
+).await?;
+issues.comments.create(issue_id, "Is a missing salary allowed?").await?;
+
+// A read returns the brief; each related list comes with an include.
+let issue = issues.get(issue_id, &[IssueInclude::Members, IssueInclude::Comments]).await?;
+for comment in issue.comments.unwrap_or_default() {
+    println!("{}: {}", comment.created_at, comment.comment);
+}
+```
+
+`IssueInclude::Attachments` adds `links`, `files`, `events` and `spans`;
+`Comments` is for `get` only. `IssueListParams` filters by `relation` and
+`member_id`. The history is the `introspection.issue` events of the issue
+(`created`, `updated`, `commented`, `deleted`).
+
 ## Curate traces with human review
 
 Annotations are append-only events on an OTel trace/span. Each write changes
