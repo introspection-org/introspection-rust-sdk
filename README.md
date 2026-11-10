@@ -526,10 +526,30 @@ Plane client alone can assign them.
 `include: vec![AnnotationInclude::Comments]` on `AnnotationListParams` to get
 each row's `comments`, oldest first; without it a row has `comments: None`.
 
-A conversation export can carry the same row on each annotated span: set
-`include` on `ConversationExportParams` to `ConversationExportInclude::Annotations`
-(and `Comments` for the comments) and read `GenAiSpan::annotation`. The JSON and
-JSON-lines exports take it.
+### Export a conversation's spans
+
+The span export is JSON lines (`application/x-ndjson`): one GenAI span per
+line, each line a complete JSON object. `export_spans` decodes each line as it
+arrives; `export_stream` with `ConversationExportFormat::JsonLines` gives the
+same bytes undecoded. The JSON-envelope export (`export_json`) was removed.
+
+```rust
+use futures::TryStreamExt;
+use introspection_sdk::{ConversationExportInclude, ConversationExportParams};
+
+let params = ConversationExportParams {
+    include: vec![ConversationExportInclude::Annotations],
+    ..Default::default()
+};
+let mut spans = Box::pin(client.conversations().export_spans(conversation_id, &params).await?);
+while let Some(span) = spans.try_next().await? {
+    println!("{:?} annotated={}", span.span_id, span.annotation.is_some());
+}
+```
+
+With `ConversationExportInclude::Annotations` each annotated span carries its
+annotation row in `GenAiSpan::annotation`; add `Comments` for that row's
+`comments`. Only the JSON-lines export takes `include`.
 
 The tag catalogue lives under `client.tags()`, keyed by `TagKind::Access` or
 `TagKind::Annotation`. `TagCreate` is an enum per kind, so an access tag has no

@@ -671,15 +671,7 @@ async fn exports(
         latest.and_then(|s| s.span_id).is_some(),
         "the latest LLM turn"
     );
-    // The recording predates the JSON-lines export, so the walk still reads
-    // the buffered form.
-    #[allow(deprecated)]
-    let exported = sa
-        .conversations()
-        .export_json(conversation_id, &export)
-        .await
-        .expect("export JSON");
-    assert!(exported.data.len() >= items);
+    span_export_bytes(sa, conversation_id, &export).await;
     let table = sa
         .conversations()
         .export_arrow(conversation_id, &export)
@@ -689,18 +681,7 @@ async fn exports(
     // the items the step already read rather than to the other.
     let rows: usize = table.batches.iter().map(|b| b.num_rows()).sum();
     assert!(rows >= items);
-    let mut stream = Box::pin(
-        sa.conversations()
-            .export_stream(conversation_id, ConversationExportFormat::Json, &export)
-            .await
-            .expect("export as a stream"),
-    );
-    let mut streamed = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        streamed.extend_from_slice(&chunk.expect("a chunk"));
-    }
-    let streamed: Value = serde_json::from_slice(&streamed).expect("the streamed export is JSON");
-    assert!(streamed["data"].as_array().map_or(0, Vec::len) >= items);
+    span_export_bytes(sa, conversation_id, &export).await;
     // The representations the SDK does not model come back as the server's
     // JSON.
     for format in [
@@ -1000,6 +981,28 @@ async fn annotations(
             .is_some_and(|a| a.labels.contains(&"walk".to_string())));
     }
     annotation_reads(w, sa, &conversation_id, &target).await;
+}
+
+/// The span export as the bytes the server sent. The replay answers a request
+/// by its place among those to one URL, and the recording holds the retired
+/// JSON-envelope export at this call's two places, so until it is re-recorded
+/// the bytes are read without decoding them as JSON lines.
+async fn span_export_bytes(
+    sa: &IntrospectionClient,
+    conversation_id: &str,
+    export: &ConversationExportParams,
+) {
+    let mut stream = Box::pin(
+        sa.conversations()
+            .export_stream(conversation_id, ConversationExportFormat::JsonLines, export)
+            .await
+            .expect("export as a stream"),
+    );
+    let mut streamed = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        streamed.extend_from_slice(&chunk.expect("a chunk"));
+    }
+    assert!(!streamed.is_empty(), "the span export has a body");
 }
 
 /// The annotation as events (JSON and Arrow) and its navigation.

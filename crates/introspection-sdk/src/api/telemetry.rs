@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use crate::api::conversation_items::ConversationItems;
 use crate::api::error::{ApiResult, IntrospectionAPIError};
-use crate::api::genai_span::{GenAiSpan, GenAiSpanList};
+use crate::api::genai_span::GenAiSpan;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
@@ -64,19 +64,22 @@ pub const JSON_LINES_ACCEPT: &str = "application/x-ndjson";
 
 /// Wire representation selected for a complete conversation export — one of
 /// the representations `GET /v1/conversations/{id}/export` negotiates.
+///
+/// The span export is [`Self::JsonLines`]: `application/x-ndjson`, one GenAI
+/// span per line, each line a complete JSON object, so it can be read as it
+/// streams. The JSON-envelope export (`application/json`, the whole span list
+/// in one document) was removed from this SDK.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConversationExportFormat {
-    Json,
     Trajectory,
     Arrow,
     /// The turn-aware replay export ([`REPLAY_V1_ACCEPT`]).
     Replay,
     /// Harbor's ATIF trajectory ([`ATIF_ACCEPT`]).
     Atif,
-    /// One GenAI span per line ([`JSON_LINES_ACCEPT`]): the spans of
-    /// [`Self::Json`] without the envelope, and the preferred raw form. A
-    /// Data Plane that predates it answers `406`.
+    /// JSON lines ([`JSON_LINES_ACCEPT`]): one GenAI span per line, each line
+    /// a complete JSON object. A Data Plane that predates it answers `406`.
     JsonLines,
 }
 
@@ -84,7 +87,6 @@ impl ConversationExportFormat {
     /// The `Accept` header that negotiates this representation.
     pub fn accept(self) -> &'static str {
         match self {
-            Self::Json => "application/json",
             Self::Trajectory => TRAJECTORY_V1_ACCEPT,
             Self::Arrow => "application/vnd.apache.arrow.stream",
             Self::Replay => REPLAY_V1_ACCEPT,
@@ -197,30 +199,14 @@ impl Conversations {
         )
     }
 
-    /// `GET /v1/conversations/{id}/export` — one complete conversation as
-    /// the standard GenAI-span list, buffered whole.
-    #[deprecated(note = "use `export_spans`, which reads the export a span at a time")]
-    pub async fn export_json(
-        &self,
-        conversation_id: &str,
-        params: &ConversationExportParams,
-    ) -> ApiResult<GenAiSpanList> {
-        let response = self
-            .http
-            .get_raw(
-                &Self::export_path(conversation_id),
-                &params.to_wire(),
-                Some("application/json"),
-            )
-            .await?;
-        crate::api::http::decode_json(response).await
-    }
-
-    /// `GET /v1/conversations/{id}/export` as JSON lines — one complete
-    /// conversation, a GenAI span at a time.
+    /// `GET /v1/conversations/{id}/export` as JSON lines
+    /// (`application/x-ndjson`) — one complete conversation, a GenAI span at
+    /// a time.
     ///
-    /// Each span is decoded as its line arrives, so the export is never held
-    /// whole. A Data Plane that predates the JSON-lines form answers `406`,
+    /// The body is one span per line, each line a complete JSON object. Each
+    /// span is decoded as its line arrives, so the export is never held
+    /// whole. This replaces `export_json`, the JSON-envelope export, which
+    /// was removed. A Data Plane that predates the JSON-lines form answers `406`,
     /// which is returned as the error it is.
     pub async fn export_spans(
         &self,
@@ -235,8 +221,8 @@ impl Conversations {
         Ok(parse_json_lines(response.bytes_stream(), path))
     }
 
-    /// `GET /v1/conversations/{id}/export` in any JSON representation,
-    /// returned as the server sent it.
+    /// `GET /v1/conversations/{id}/export` in a representation that is one
+    /// JSON document, returned as the server sent it.
     ///
     /// For the representations this SDK does not model — the replay and ATIF
     /// exports — and for callers that forward an export unchanged. The typed
@@ -273,8 +259,10 @@ impl Conversations {
         crate::api::http::decode_json(response).await
     }
 
-    /// Stream a complete export's response bytes without buffering them in
-    /// the SDK. The server walks storage in bounded pages; this stream passes
+    /// Stream a complete export's response bytes, in any `format`, without
+    /// buffering them in the SDK. With
+    /// [`ConversationExportFormat::JsonLines`] the bytes are JSON lines: one
+    /// GenAI span per line, each line a complete JSON object. The server walks storage in bounded pages; this stream passes
     /// each response chunk through as it arrives.
     pub async fn export_stream(
         &self,

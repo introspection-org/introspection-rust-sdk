@@ -2201,42 +2201,6 @@ async fn events_get_surfaces_an_unrecognised_family_as_unknown() {
 // --- conversations export ---------------------------------------------------
 
 #[tokio::test]
-#[allow(deprecated)]
-async fn conversations_export_json_types_the_span_list() {
-    let server = MockServer::start().await;
-    let http = build_http(&server);
-
-    Mock::given(method("GET"))
-        .and(path("/v1/conversations/conv-1/export"))
-        .and(wiremock::matchers::header("accept", "application/json"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "object": "list",
-            "data": [{
-                "trace_id": "trace-1",
-                "span_id": "span-1",
-                "start_time": "2025-01-01T00:00:00Z",
-                "name": "chat",
-                "kind": "CLIENT",
-                "attributes": {"gen_ai": {"input": {"messages": []}}}
-            }],
-            "first_id": "span-1",
-            "last_id": "span-1",
-            "has_more": false,
-            "next": null
-        })))
-        .mount(&server)
-        .await;
-
-    let page = Conversations::new(http)
-        .export_json("conv-1", &ConversationExportParams::default())
-        .await
-        .unwrap();
-
-    assert_eq!(page.data.len(), 1);
-    assert_eq!(page.data[0].span_id.as_deref(), Some("span-1"));
-}
-
-#[tokio::test]
 async fn conversations_export_stream_preserves_bytes_headers_and_filters() {
     use futures::TryStreamExt;
 
@@ -2274,31 +2238,29 @@ async fn conversations_export_stream_preserves_bytes_headers_and_filters() {
 }
 
 #[tokio::test]
-#[allow(deprecated)]
 async fn conversations_export_repeats_operation_names_on_the_wire() {
+    use futures::TryStreamExt;
+
     let server = MockServer::start().await;
     let conversations = Conversations::new(build_http(&server));
 
     Mock::given(method("GET"))
         .and(path("/v1/conversations/conv-1/export"))
+        .and(header("accept", "application/x-ndjson"))
         .and(query_param("agent", "root"))
         .and(query_param("operation_name", "chat"))
         .and(query_param("operation_name", "execute_tool"))
         .and(query_param("lookback_days", "7"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "object": "list",
-            "data": [conversation_item("span-1")],
-            "first_id": "span-1",
-            "last_id": "span-1",
-            "has_more": false,
-            "next": null
-        })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!("{}\n", conversation_item("span-1")),
+            "application/x-ndjson",
+        ))
         .expect(1)
         .mount(&server)
         .await;
 
-    let page = conversations
-        .export_json(
+    let spans: Vec<_> = conversations
+        .export_spans(
             "conv-1",
             &ConversationExportParams {
                 agent: Some("root".into()),
@@ -2309,8 +2271,12 @@ async fn conversations_export_repeats_operation_names_on_the_wire() {
             },
         )
         .await
+        .unwrap()
+        .try_collect()
+        .await
         .unwrap();
-    assert_eq!(page.data.len(), 1);
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].span_id.as_deref(), Some("span-1"));
 }
 
 #[tokio::test]

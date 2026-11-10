@@ -71,7 +71,7 @@ async fn query_raw_refuses_a_non_object_without_a_request() {
 #[tokio::test]
 async fn export_json_value_negotiates_each_json_representation() {
     let dp = MockServer::start().await;
-    for accept in [REPLAY_V1_ACCEPT, ATIF_ACCEPT, "application/json"] {
+    for accept in [REPLAY_V1_ACCEPT, ATIF_ACCEPT] {
         Mock::given(method("GET"))
             .and(path("/v1/conversations/conv%2F1/export"))
             .and(header("accept", accept))
@@ -89,7 +89,6 @@ async fn export_json_value_negotiates_each_json_representation() {
     for format in [
         ConversationExportFormat::Replay,
         ConversationExportFormat::Atif,
-        ConversationExportFormat::Json,
     ] {
         let body = conversations
             .export_json_value("conv/1", format, &params)
