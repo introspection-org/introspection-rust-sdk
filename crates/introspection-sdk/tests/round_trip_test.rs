@@ -248,6 +248,7 @@ const TYPED: &[(&str, &str, Check)] = &[
         round_trip::<Endpoint>,
     ),
     ("GET", r"^/v1/events$", round_trip::<Paginated<Event>>),
+    ("GET", r"^/v1/events/[^/]+$", round_trip::<Event>),
     (
         "GET",
         r"^/v1/experiments$",
@@ -487,8 +488,19 @@ fn every_recorded_response_round_trips() {
         if !(200..300).contains(&status) || text.is_empty() || !mime.contains("json") {
             continue;
         }
-        let body: Value = serde_json::from_str(text).unwrap();
         let label = format!("{method} {url}");
+        // A JSON-lines export is one GenAI span per line.
+        if mime.starts_with("application/x-ndjson") {
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                checked += 1;
+                let span: Value = serde_json::from_str(line).unwrap();
+                if let Err(e) = round_trip::<GenAiSpan>(&span) {
+                    failures.push(format!("{label}\n    {e}"));
+                }
+            }
+            continue;
+        }
+        let body: Value = serde_json::from_str(text).unwrap();
 
         let check = if path.ends_with("/export") && method == "GET" {
             match export_check(mime) {
