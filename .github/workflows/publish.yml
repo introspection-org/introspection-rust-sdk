@@ -184,3 +184,23 @@ jobs:
           gh release create "${TAG}" \
             --title "${TAG}" \
             --generate-notes
+
+  # The walk at this release, for introspection-cloud's release walk.
+  walk-binary:
+    name: Attach the walk binary
+    needs: [resolve-version, github-release]
+    if: needs.resolve-version.outputs.package == 'introspection-sdk'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: scripts/build-walk.sh walk-linux-x64
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve-version.outputs.tag }}
+        run: gh release upload "$TAG" walk-linux-x64 --clobber
