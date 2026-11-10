@@ -118,11 +118,6 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     needs: lint
-    permissions:
-      contents: read
-      packages: write
-    env:
-      WALK_IMAGE: ghcr.io/introspection-org/introspection-rust-walk
     steps:
       - uses: actions/checkout@v7
 
@@ -161,39 +156,6 @@ jobs:
 
       - name: Build (otel only)
         run: cargo build --locked --features otel
-
-      # introspection-cloud's SDK walk job pulls this from GHCR instead of
-      # compiling the walk. Never attached to a release or crates.io.
-      - name: Build the walk binary
-        if: github.event_name == 'push'
-        # Debug info is most of its size (321 MB); stripped it is 68 MB and
-        # keeps the symbols a backtrace names.
-        run: |
-          cargo build --locked --features walk --bin introspection-walk
-          mkdir -p walk
-          strip --strip-debug -o walk/introspection-walk target/debug/introspection-walk
-
-      - name: Install oras
-        if: github.event_name == 'push'
-        uses: oras-project/setup-oras@v2
-        with:
-          version: 1.3.6
-
-      - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      # Tagged by commit and latest, as the platform images are; the SDK walks pull :latest.
-      - name: Push the walk binary to GHCR
-        if: github.event_name == 'push'
-        working-directory: walk
-        run: |
-          oras push "${WALK_IMAGE}:${GITHUB_SHA},latest" \
-            --artifact-type application/vnd.introspection.walk.v1 \
-            introspection-walk:application/octet-stream
 
   semver-checks:
     name: Semver Checks
