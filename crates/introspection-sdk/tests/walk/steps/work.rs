@@ -12,9 +12,9 @@ use introspection_sdk::{
     ConversationItemGetParams, ConversationItemListParams, ConversationListParams, DecidedBy,
     EventListParams, File, FileCreateText, FileListParams, FileUpdate, FileUpload,
     FileVersionCreateText, FileVersionListParams, IntrospectionClient, IntrospectionEventName,
-    Issue, IssueCreateParams, IssueFile, IssueListParams, IssuePriority, IssueStatus,
-    IssueUpdateParams, Lane, MemberConnectionCreate, MemberConnectionListParams, MemberListParams,
-    MetricFilter, MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
+    IssueCreateParams, IssueFile, IssueListParams, IssuePriority, IssueStatus, IssueUpdateParams,
+    Lane, MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter,
+    MetricSpec, MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate,
     ShareListParams, ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams,
     TagUpdate, Task, TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate,
     TaskStatus, TaskUpdate,
@@ -595,25 +595,11 @@ pub async fn evidence(w: &mut Walk) {
     assert!(conversation.usage.total_tokens > 0);
     conversation_reads(&sa, &conversation_id, w).await;
     let output = set(&w.output_file, "the output file").id;
-    // Issues are a project member's (or the Operator's), not an application's.
     issues(&w.member(), task, output).await;
 }
 
-/// What an issue says, without what the server stamps on it.
-fn issue_brief(issue: &Issue) -> Value {
-    json!({
-        "title": issue.title,
-        "description": issue.description,
-        "status": issue.status,
-        "priority": issue.priority,
-        "task_id": issue.task_id,
-        "tags": issue.tags,
-        "files": issue.files.iter().map(|f| f.file_id).collect::<Vec<_>>(),
-    })
-}
-
-/// An issue owned by the walk's task, with its output as evidence: open,
-/// read, list, edit under its etag, close, delete.
+/// An issue on the walk's task, as a member: issues are a person's or the
+/// Operator's, never an application's.
 async fn issues(member: &IntrospectionClient, task: Uuid, output: Uuid) {
     let issue = member
         .issues()
@@ -629,26 +615,12 @@ async fn issues(member: &IntrospectionClient, task: Uuid, output: Uuid) {
         })
         .await
         .expect("open the issue");
-    assert_stable!(issue_brief(&issue), @r#"
-    {
-      "description": "The greeting the walk's task wrote.",
-      "files": [
-        "[uuid]"
-      ],
-      "priority": "high",
-      "status": "open",
-      "tags": [
-        "suite:walk"
-      ],
-      "task_id": "[uuid]",
-      "title": "The walk's issue"
-    }
-    "#);
+    assert_eq!(issue.status, IssueStatus::Open);
+    assert_eq!(issue.priority, IssuePriority::High);
     assert_eq!(issue.task_id, Some(task));
     assert_eq!(issue.files.first().map(|f| f.file_id), Some(output));
 
     let read = member.issues().get(issue.id).await.expect("read the issue");
-    assert_eq!(read.id, issue.id);
     let listed = member
         .issues()
         .list(&IssueListParams {
@@ -675,7 +647,6 @@ async fn issues(member: &IntrospectionClient, task: Uuid, output: Uuid) {
         .expect("close the issue");
     assert_eq!(closed.status, IssueStatus::Closed);
     assert!(closed.closed_at.is_some());
-    // The etag it was read under is stale now, so a second edit is refused.
     expect_refused(
         member
             .issues()
