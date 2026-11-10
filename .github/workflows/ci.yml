@@ -118,6 +118,11 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     needs: lint
+    permissions:
+      contents: read
+      packages: write
+    env:
+      WALK_IMAGE: ghcr.io/introspection-org/introspection-rust-walk
     steps:
       - uses: actions/checkout@v7
 
@@ -157,25 +162,58 @@ jobs:
       - name: Build (otel only)
         run: cargo build --locked --features otel
 
-      # introspection-cloud's SDK walk job downloads this instead of compiling
-      # the walk. Never released or published.
+      # introspection-cloud's SDK walk job pulls this from GHCR instead of
+      # compiling the walk. Never attached to a release or crates.io.
       - name: Build the walk binary
         if: github.event_name == 'push'
-        # Debug info is most of its size (321 MB, 54 MB zipped); stripped it is 68 MB, 12 MB zipped,
-        # and keeps the symbols a backtrace names.
+        # Debug info is most of its size (321 MB); stripped it is 68 MB and
+        # keeps the symbols a backtrace names.
         run: |
           cargo build --locked --features walk --bin introspection-walk
           mkdir -p walk
           strip --strip-debug -o walk/introspection-walk target/debug/introspection-walk
 
-      - name: Upload the walk binary
+      - name: Install oras
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v7
+        uses: oras-project/setup-oras@v1
         with:
-          name: introspection-walk-linux-x64
-          path: walk/introspection-walk
-          retention-days: 30
-          if-no-files-found: error
+          version: 1.3.0
+
+      # Tagged by commit; publish.yml adds the release tag to the same image.
+      - name: Push the walk binary to GHCR
+        if: github.event_name == 'push'
+        working-directory: walk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s' "${GITHUB_TOKEN}" | oras login ghcr.io -u "${ACTOR}" --password-stdin
+          oras push "${WALK_IMAGE}:${GITHUB_SHA}" \
+            --artifact-type application/vnd.introspection.walk.v1 \
+            introspection-walk:application/octet-stream
+          oras tag "${WALK_IMAGE}:${GITHUB_SHA}" latest
+
+      # GHCR has no retention policy. Keeps the newest versions plus any
+      # tagged latest or v*, since a release shares its commit's version.
+      - name: Prune old walk binaries
+        if: github.event_name == 'push'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP: "10"
+          VERSIONS: /orgs/introspection-org/packages/container/introspection-rust-walk/versions
+        run: |
+          set -euo pipefail
+          trap 'echo "::warning::Pruning introspection-rust-walk failed; the binary is published."' ERR
+          gh api --paginate "${VERSIONS}" \
+            | jq -s --argjson keep "${KEEP}" -r '
+                add
+                | sort_by(.created_at) | reverse | .[$keep:][]
+                | select((.metadata.container.tags // []) | any(. == "latest" or startswith("v")) | not)
+                | .id' \
+            | while read -r id; do
+                gh api -X DELETE "${VERSIONS}/${id}"
+              done
 
   semver-checks:
     name: Semver Checks
