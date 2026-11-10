@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.42.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.41.0...v0.42.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* ShareResourceType, TagKind, ExperimentGoalDirection, ExperimentGoalComponent, RepositoryContent and FeatureFlagValue gain a fallback variant, so an exhaustive match on them needs a new arm. ShareResourceType also gains PartialEq, Eq, Hash, Display and as_str().
+
+### Bug Fixes
+
+* tolerate unknown fields and enum values in responses ([#215](https://github.com/introspection-org/introspection-rust-sdk/issues/215)) ([a2fa737](https://github.com/introspection-org/introspection-rust-sdk/commit/a2fa737583d59f2c4f78951e47308c779c54859f))
+
 ## [0.41.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.40.0...v0.41.0) (2026-11-10)
 
 
