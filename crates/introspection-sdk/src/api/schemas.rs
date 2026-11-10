@@ -7451,8 +7451,6 @@ pub struct JudgementPayload {
     pub judge_type: Option<String>,
     #[serde(default)]
     pub result_schema: Option<String>,
-    #[serde(default)]
-    pub runtime_slug: Option<String>,
     /// The verdict.
     #[serde(default)]
     pub result: Option<String>,
@@ -7466,8 +7464,6 @@ pub struct JudgementPayload {
     #[serde(default)]
     pub source_component: Option<String>,
     #[serde(default)]
-    pub reasoning: Option<String>,
-    #[serde(default)]
     pub definition_hash: Option<String>,
     #[serde(default)]
     pub engine_version: Option<String>,
@@ -7480,29 +7476,7 @@ pub struct JudgementPayload {
     #[serde(default)]
     pub sequence_hash: Option<String>,
     #[serde(default)]
-    pub input_tokens: Option<i64>,
-    #[serde(default)]
-    pub output_tokens: Option<i64>,
-    #[serde(default)]
-    pub total_tokens: Option<i64>,
-    #[serde(default)]
     pub experiment_arm_id: Option<Uuid>,
-    #[serde(default)]
-    pub scores: Option<BTreeMap<String, i64>>,
-    #[serde(default)]
-    pub questions: Option<BTreeMap<String, String>>,
-    #[serde(default)]
-    pub policy_id: Option<String>,
-    #[serde(default)]
-    pub policy_action: Option<String>,
-    #[serde(default)]
-    pub reason: Option<String>,
-    #[serde(default)]
-    pub request_host: Option<String>,
-    #[serde(default)]
-    pub request_method: Option<String>,
-    #[serde(default)]
-    pub request_path: Option<String>,
 }
 
 /// `introspection.automation.triggered` payload — one automation trigger
@@ -7565,7 +7539,6 @@ pub type AutomationSkippedEvent = TypedEvent<AutomationSkippedPayload>;
 /// [`Event::Unknown`] fallback tolerates a family this SDK build doesn't know
 /// yet (a family added server-side must not fail the whole page);
 /// match on it to skip or hand-parse such rows.
-#[allow(clippy::large_enum_variant)] // boxing a variant would change a public type
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "event_name")]
 pub enum Event {
