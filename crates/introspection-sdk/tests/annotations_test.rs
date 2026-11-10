@@ -71,7 +71,8 @@ fn annotation() -> serde_json::Value {
         "comment_count": 1,
         "updated_at": "2026-08-25T12:00:00Z",
         "updated_by_member_id": MEMBER_ID,
-        "assignment_event_id": EVENT_ID
+        "assignment_event_id": EVENT_ID,
+        "comments": null
     })
 }
 
@@ -110,6 +111,7 @@ async fn lists_folded_annotation_state_with_filters() {
     assert_eq!(state.reviewer_member_ids, vec![member()]);
     assert_eq!(state.comment_count, 1);
     assert_eq!(state.updated_by_member_id, member());
+    assert_eq!(state.comments, None);
 }
 
 const JSON_LINES: &str = "application/x-ndjson";
@@ -171,6 +173,59 @@ async fn export_reads_every_row_with_the_filters_on_the_query() {
     assert_eq!(rows[0].labels, vec!["needs-review"]);
     // The second row names its reviewers the way an older Data Plane does.
     assert_eq!(rows[1].reviewer_member_ids, vec![member()]);
+}
+
+#[tokio::test]
+async fn export_rows_carry_their_comments_oldest_first() {
+    let dp = MockServer::start().await;
+    let mut row = annotation();
+    row["comment_count"] = json!(2);
+    row["comments"] = json!([
+        {
+            "event_id": EVENT_ID,
+            "comment": "Wrong tool picked",
+            "member_id": MEMBER_ID,
+            "actor_member_id": null,
+            "actor_member_type": null,
+            "created_at": "2026-08-25T11:00:00Z"
+        },
+        {
+            "event_id": "019fc000-0000-7000-8000-000000000002",
+            "comment": "Confirmed against the trace",
+            "member_id": MEMBER_ID,
+            "actor_member_id": "00000000-0000-0000-0000-0000000000dd",
+            "actor_member_type": "agent",
+            "created_at": "2026-08-25T12:00:00Z"
+        }
+    ]);
+    let mut bare = annotation();
+    bare["comment_count"] = json!(0);
+    bare["comments"] = json!([]);
+    Mock::given(method("GET"))
+        .and(path("/v1/annotations/export"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(format!("{row}\n{bare}\n"), JSON_LINES),
+        )
+        .mount(&dp)
+        .await;
+
+    let rows: Vec<_> = Annotations::data_plane(http(&dp))
+        .export(&AnnotationExportParams::default())
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+
+    let comments = rows[0].comments.as_deref().expect("the export's comments");
+    let texts: Vec<_> = comments.iter().map(|c| c.comment.as_str()).collect();
+    assert_eq!(texts, ["Wrong tool picked", "Confirmed against the trace"]);
+    assert_eq!(comments[0].member_id, member());
+    assert_eq!(comments[0].actor_member_type, None);
+    assert_eq!(comments[1].actor_member_type.as_deref(), Some("agent"));
+    assert!(comments[1].actor_member_id.is_some());
+    assert_eq!(comments[1].created_at, "2026-08-25T12:00:00Z");
+    assert_eq!(rows[1].comments.as_deref(), Some(&[][..]));
 }
 
 #[tokio::test]

@@ -22,8 +22,23 @@ pub struct AnnotationTarget {
     pub span_id: String,
 }
 
-/// One span's current annotation state. The comment text is not on it: read
-/// the span's `introspection.annotation` events for that.
+/// One comment on an annotated span.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AnnotationComment {
+    pub event_id: Uuid,
+    pub comment: String,
+    /// The author.
+    pub member_id: Uuid,
+    #[serde(default)]
+    pub actor_member_id: Option<Uuid>,
+    /// What wrote it on the author's behalf (`agent`, ...).
+    #[serde(default)]
+    pub actor_member_type: Option<String>,
+    pub created_at: String,
+}
+
+/// One span's current annotation state.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnotationState {
@@ -45,6 +60,10 @@ pub struct AnnotationState {
     pub updated_by_member_id: Uuid,
     #[serde(default)]
     pub assignment_event_id: Option<Uuid>,
+    /// Every comment on the span, oldest first, on a row of
+    /// [`Annotations::export`]; `None` on the list and on navigation.
+    #[serde(default)]
+    pub comments: Option<Vec<AnnotationComment>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

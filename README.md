@@ -522,6 +522,10 @@ resolve through the Control Plane member list; `AnnotationMutation::ReviewerIds`
 sends member ids as they are, so `Annotations::data_plane(dp_http)` over a Data
 Plane client alone can assign them.
 
+`list` pages the current row of each annotated span. `export` streams every
+row for the same filters (`AnnotationExportParams`) a line at a time, each
+with its `comments`, oldest first; a list row has `comments: None`.
+
 The tag catalogue lives under `client.tags()`, keyed by `TagKind::Access` or
 `TagKind::Annotation`. `TagCreate` is an enum per kind, so an access tag has no
 colour to set and an annotation tag cannot omit one.
