@@ -29,6 +29,9 @@ const MAX_DESCRIPTION: usize = 2000;
 pub enum TagKind {
     Access,
     Annotation,
+    /// A kind this SDK build predates.
+    #[serde(other)]
+    Unknown,
 }
 
 impl TagKind {
@@ -36,6 +39,7 @@ impl TagKind {
         match self {
             Self::Access => "access",
             Self::Annotation => "annotation",
+            Self::Unknown => "unknown",
         }
     }
 }
