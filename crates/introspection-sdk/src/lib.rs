@@ -190,7 +190,7 @@ pub use api::{
     TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind,
     TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
     TelemetryGoalComponent, TimeDimension, TokenCount, TokenCreateParams, Trajectory, TypedEvent,
-    UploadSource, Variable, VariableCreateParams, VariableKind, VariableUpdateParams,
+    UploadSource, Variable, VariableCreateParams, VariableKind, VariableUpdateParams, WireEnum,
     WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs, MAX_COMMAND_WAIT_SECONDS,
 };
 // jscpd:ignore-end

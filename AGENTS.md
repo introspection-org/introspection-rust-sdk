@@ -28,7 +28,7 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 The API grows without asking the SDK first, so a response that gains something still decodes for every user:
 
 - **A new field is ignored.** Never `#[serde(deny_unknown_fields)]` on a response type; keep extras in a `#[serde(flatten)]` map only where callers read them.
-- **A new enum value or union variant decodes.** An enum in a response, a plain string enum or a tagged union alike, ends in `#[serde(untagged)] Unknown(serde_json::Value)`, as `Event` does: what the server sent is kept and serialises back unchanged. Don't add an `open_wire_enum!`; the ones that exist stay until they are next touched.
+- **A new enum value or union variant decodes.** An enum in a response, a plain string enum or a tagged union alike, ends in `#[serde(untagged)] Unknown(serde_json::Value)`, as `Event` does: what the server sent is kept and serialises back unchanged. It is a plain derived enum; there is no macro for it. A string enum callers read or build by its wire value also gets `impl WireEnum for X {}`, which gives `wire()` and `from_wire()` through serde.
 - `strict-schema` (the walk and the tests) is the only place an unmodelled field fails, so drift is found before a release; model it rather than loosen that check.
 
 ## The end-to-end walk

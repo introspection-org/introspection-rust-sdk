@@ -10,7 +10,7 @@ use introspection_sdk::{
     AutomationUpdateParams, EventListParams, ExperimentListParams, ImageCreate, ImageListParams,
     ImageSource, IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams,
     RunRequest, RunnerIdentity, Task, TaskCommand, TaskCommandListParams, TaskCommandSpec,
-    TaskCommandStatus, TaskCreate, TaskKind, TaskStatus,
+    TaskCommandStatus, TaskCreate, TaskKind, TaskStatus, WireEnum,
 };
 use serde_json::{json, Value};
 
@@ -382,7 +382,7 @@ fn finished(c: &TaskCommand) -> bool {
     matches!(
         c.status,
         TaskCommandStatus::Completed | TaskCommandStatus::Failed
-    ) || matches!(c.status.as_str(), "succeeded" | "cancelled")
+    ) || matches!(c.status.wire().as_str(), "succeeded" | "cancelled")
 }
 
 async fn command(w: &Walk, spec: TaskCommandSpec) -> TaskCommand {

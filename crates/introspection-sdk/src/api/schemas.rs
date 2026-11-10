@@ -12,6 +12,7 @@
 //! `Other`/`Unknown` fallback variant so callers can still read the rest of
 //! the record.
 
+use serde::de::DeserializeOwned;
 use serde::de::Deserializer;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
@@ -608,6 +609,9 @@ pub enum ShareResourceType {
     /// A channel's audience. Written only by the control plane, so it appears
     /// on reads but `POST /v1/shares` refuses it.
     Channel,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
 #[serde_with::skip_serializing_none]
@@ -4260,135 +4264,130 @@ fn default_bearer() -> String {
 
 // ----- automations (DP) ------------------------------------------------------
 
-/// A string-backed wire enum with an `Other(String)` fallback, so a value the
-/// Data Plane adds after this SDK was built still decodes.
-macro_rules! open_wire_enum {
-    (
-        $(#[$meta:meta])*
-        pub enum $name:ident {
-            $( $(#[$vmeta:meta])* $variant:ident => $wire:literal, )+
+/// A string enum in a response, read and built by its wire value. Its last
+/// variant, `Unknown(serde_json::Value)`, holds a value the server added after
+/// this SDK was built.
+pub trait WireEnum: Serialize + DeserializeOwned {
+    /// The value as it goes on the wire, such as `"project_check_in"`.
+    fn wire(&self) -> String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(value)) => value,
+            Ok(other) => other.to_string(),
+            Err(error) => unreachable!("a wire enum serialises to JSON: {error}"),
         }
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        pub enum $name {
-            $( $(#[$vmeta])* $variant, )+
-            /// Forward-compatible escape hatch.
-            Other(String),
-        }
+    }
 
-        impl $name {
-            /// The on-the-wire value.
-            pub fn as_str(&self) -> &str {
-                match self {
-                    $( Self::$variant => $wire, )+
-                    Self::Other(value) => value,
-                }
-            }
+    /// The variant `value` names, or `Unknown` holding it.
+    fn from_wire(value: &str) -> Self {
+        match serde_json::from_value(serde_json::Value::String(value.to_owned())) {
+            Ok(decoded) => decoded,
+            Err(error) => unreachable!("a wire enum decodes any string: {error}"),
         }
-
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
-                match value {
-                    $( $wire => Self::$variant, )+
-                    other => Self::Other(other.to_string()),
-                }
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-
-        impl Serialize for $name {
-            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                s.serialize_str(self.as_str())
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                let value = String::deserialize(d)?;
-                Ok(Self::from(value.as_str()))
-            }
-        }
-    };
-}
-
-open_wire_enum! {
-    /// Where an MCP endpoint's tool discovery stands.
-    pub enum McpCheckStatus {
-        Pending => "pending",
-        Ok => "ok",
-        Failed => "failed",
-        Skipped => "skipped",
     }
 }
 
-open_wire_enum! {
-    /// How an automation is triggered. Immutable after create.
-    pub enum AutomationTriggerType {
-        /// Fires on `cron_schedule` (or `metadata.cron_schedules`).
-        Cron => "cron",
-        /// Runs by hand, or once at a client-set `next_trigger_at` (a one-off
-        /// reminder).
-        Manual => "manual",
-    }
+/// Where an MCP endpoint's tool discovery stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpCheckStatus {
+    Pending,
+    Ok,
+    Failed,
+    Skipped,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// A platform automation kind. An automation a person created has no kind
-    /// (`Automation::kind` is `None`); any value marks a platform automation.
-    /// Immutable after create.
-    pub enum AutomationKind {
-        /// The project's default check-in. Runs as an agent task, so it carries
-        /// a `prompt`.
-        ProjectCheckIn => "project_check_in",
-        /// The project's synthesis job. Project-wide: takes no
-        /// `runtime_group_id`.
-        ObservationSynthesis => "observation_synthesis",
-        /// The clustering job for one runtime group.
-        ObservationClustering => "observation_clustering",
-    }
+impl WireEnum for McpCheckStatus {}
+
+/// How an automation is triggered. Immutable after create.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationTriggerType {
+    /// Fires on `cron_schedule` (or `metadata.cron_schedules`).
+    Cron,
+    /// Runs by hand, or once at a client-set `next_trigger_at` (a one-off
+    /// reminder).
+    Manual,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// A built-in condition evaluated before an automation runs.
-    pub enum AutomationConditionType {
-        HasNewTasksSinceLastRun => "has_new_tasks_since_last_run",
-        LastRunIssuesResolved => "last_run_issues_resolved",
-        NoLiveTaskForAutomation => "no_live_task_for_automation",
-    }
+impl WireEnum for AutomationTriggerType {}
+
+/// A platform automation kind. An automation a person created has no kind
+/// (`Automation::kind` is `None`); any value marks a platform automation.
+/// Immutable after create.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationKind {
+    /// The project's default check-in. Runs as an agent task, so it carries
+    /// a `prompt`.
+    ProjectCheckIn,
+    /// The project's synthesis job. Project-wide: takes no
+    /// `runtime_group_id`.
+    ObservationSynthesis,
+    /// The clustering job for one runtime group.
+    ObservationClustering,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// Outcome of one automation execution attempt.
-    pub enum AutomationExecutionStatus {
-        Triggered => "triggered",
-        Cancelled => "cancelled",
-        Failed => "failed",
-        Skipped => "skipped",
-    }
+impl WireEnum for AutomationKind {}
+
+/// A built-in condition evaluated before an automation runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationConditionType {
+    HasNewTasksSinceLastRun,
+    LastRunIssuesResolved,
+    NoLiveTaskForAutomation,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// Why a trigger ran nothing (`introspection.automation.skipped`).
-    pub enum AutomationSkipReason {
-        AutomationDeleted => "automation_deleted",
-        ExecutionBlocked => "execution_blocked",
-        ConditionsNotMet => "conditions_not_met",
-        NoProductionRuntime => "no_production_runtime",
-        SlackNotConfigured => "slack_not_configured",
-        TargetTaskDeleted => "target_task_deleted",
-        TargetTaskArchived => "target_task_archived",
-        TargetTaskUnavailable => "target_task_unavailable",
-        TargetTaskRefused => "target_task_refused",
-        /// The target task stayed mid-turn through every retry.
-        TargetBusy => "target_busy",
-    }
+impl WireEnum for AutomationConditionType {}
+
+/// Outcome of one automation execution attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationExecutionStatus {
+    Triggered,
+    Cancelled,
+    Failed,
+    Skipped,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for AutomationExecutionStatus {}
+
+/// Why a trigger ran nothing (`introspection.automation.skipped`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationSkipReason {
+    AutomationDeleted,
+    ExecutionBlocked,
+    ConditionsNotMet,
+    NoProductionRuntime,
+    SlackNotConfigured,
+    TargetTaskDeleted,
+    TargetTaskArchived,
+    TargetTaskUnavailable,
+    TargetTaskRefused,
+    /// The target task stayed mid-turn through every retry.
+    TargetBusy,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+impl WireEnum for AutomationSkipReason {}
 
 /// One condition stored in an automation's metadata.
 #[serde_with::skip_serializing_none]
@@ -4640,45 +4639,65 @@ pub struct AutomationTriggerResponse {
 
 // ----- issues (DP) ------------------------------------------------------------
 
-open_wire_enum! {
-    /// Where an issue stands. Every issue starts `open`; set the status with
-    /// [`IssueUpdateParams`] after creation.
-    pub enum IssueStatus {
-        Open => "open",
-        /// Paused for a human request's answer.
-        Waiting => "waiting",
-        Closed => "closed",
-        Cancelled => "cancelled",
-    }
+/// Where an issue stands. Every issue starts `open`; set the status with
+/// [`IssueUpdateParams`] after creation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueStatus {
+    Open,
+    /// Paused for a human request's answer.
+    Waiting,
+    Closed,
+    Cancelled,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// How urgent an issue is. Defaults to `medium` server-side.
-    pub enum IssuePriority {
-        Low => "low",
-        Medium => "medium",
-        High => "high",
-        Urgent => "urgent",
-    }
+impl WireEnum for IssueStatus {}
+
+/// How urgent an issue is. Defaults to `medium` server-side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssuePriority {
+    Low,
+    Medium,
+    High,
+    Urgent,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// `GET /v1/issues?owner=`: project-owned (Operator) issues, or the
-    /// caller's own private ones.
-    pub enum IssueOwner {
-        Project => "project",
-        Me => "me",
-    }
+impl WireEnum for IssuePriority {}
+
+/// `GET /v1/issues?owner=`: project-owned (Operator) issues, or the
+/// caller's own private ones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueOwner {
+    Project,
+    Me,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    /// Where one human request on an issue stands.
-    pub enum IssueRequestStatus {
-        Open => "open",
-        Resolved => "resolved",
-        Cancelled => "cancelled",
-    }
+impl WireEnum for IssueOwner {}
+
+/// Where one human request on an issue stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueRequestStatus {
+    Open,
+    Resolved,
+    Cancelled,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for IssueRequestStatus {}
 
 /// A Data Plane file cited as an issue's evidence.
 #[serde_with::skip_serializing_none]
@@ -5040,17 +5059,21 @@ pub struct MemberConnection {
     pub updated_at: Option<String>,
 }
 
-open_wire_enum! {
-    /// Who owns a [`MemberConnection`].
-    #[derive(Default)]
-    pub enum ConnectionOwner {
-        /// A member's own grant.
-        #[default]
-        Member => "member",
-        /// The project's own account on a connector.
-        Project => "project",
-    }
+/// Who owns a [`MemberConnection`].
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionOwner {
+    /// A member's own grant.
+    #[default]
+    Member,
+    /// The project's own account on a connector.
+    Project,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for ConnectionOwner {}
 
 /// The connector a [`MemberConnection`] is on, as the project sees it.
 #[serde_with::skip_serializing_none]
@@ -5175,23 +5198,33 @@ impl ProjectSelector {
 
 // api keys
 
-open_wire_enum! {
-    /// What a project API key may do beyond the runner set.
-    pub enum ApiKeyCapability {
-        Runtimes => "runtimes",
-        Evals => "evals",
-    }
+/// What a project API key may do beyond the runner set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKeyCapability {
+    Runtimes,
+    Evals,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum ApiKeyStatus {
-        Active => "active",
-        /// Deleted with a grace period: still valid until `expires_at`.
-        Rotating => "rotating",
-        Expired => "expired",
-        Revoked => "revoked",
-    }
+impl WireEnum for ApiKeyCapability {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKeyStatus {
+    Active,
+    /// Deleted with a grace period: still valid until `expires_at`.
+    Rotating,
+    Expired,
+    Revoked,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for ApiKeyStatus {}
 
 /// A project API key. The plaintext key is never readable after create; see
 /// [`ApiKeyCreated`].
@@ -5296,24 +5329,34 @@ pub struct ApiKeyAcknowledgement {
 
 // applications
 
-open_wire_enum! {
-    pub enum ApplicationType {
-        Native => "native",
-        Spa => "spa",
-        Jwks => "jwks",
-        ServiceAccount => "service_account",
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationType {
+    Native,
+    Spa,
+    Jwks,
+    ServiceAccount,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum ApplicationGrant {
-        AuthorizationCode => "authorization_code",
-        RefreshToken => "refresh_token",
-        ClientCredentials => "client_credentials",
-        DeviceCode => "device_code",
-        EmailCode => "email_code",
-    }
+impl WireEnum for ApplicationType {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationGrant {
+    AuthorizationCode,
+    RefreshToken,
+    ClientCredentials,
+    DeviceCode,
+    EmailCode,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for ApplicationGrant {}
 
 /// An OAuth client registered in a project.
 #[serde_with::skip_serializing_none]
@@ -5400,24 +5443,34 @@ pub struct ApplicationUpdateParams {
     pub agent_member_id: Option<Uuid>,
 }
 
-open_wire_enum! {
-    pub enum ApplicationIdpProvider {
-        Auth0 => "auth0",
-        Okta => "okta",
-        Supabase => "supabase",
-        Neon => "neon",
-        Generic => "generic",
-        Zitadel => "zitadel",
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationIdpProvider {
+    Auth0,
+    Okta,
+    Supabase,
+    Neon,
+    Generic,
+    Zitadel,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum ApplicationIdpStatus {
-        Pending => "pending",
-        Active => "active",
-        Failed => "failed",
-    }
+impl WireEnum for ApplicationIdpProvider {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationIdpStatus {
+    Pending,
+    Active,
+    Failed,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for ApplicationIdpStatus {}
 
 /// An identity provider brokered into an Application, whose users sign in as
 /// customer members.
@@ -5468,13 +5521,18 @@ pub struct ApplicationIdpCreateParams {
     pub audience_client_id: Option<String>,
 }
 
-open_wire_enum! {
-    pub enum ApplicationSecretStatus {
-        Active => "active",
-        Disabled => "disabled",
-        Expired => "expired",
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationSecretStatus {
+    Active,
+    Disabled,
+    Expired,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for ApplicationSecretStatus {}
 
 /// A client secret of a confidential Application. `secret` is set only on the
 /// create response.
@@ -5614,14 +5672,19 @@ pub struct CredentialUpdateParams {
     pub environment: Option<Option<Lane>>,
 }
 
-open_wire_enum! {
-    pub enum VariableKind {
-        /// A plain value, returned on read.
-        Value => "value",
-        /// A reference to a credential by name.
-        Credential => "credential",
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VariableKind {
+    /// A plain value, returned on read.
+    Value,
+    /// A reference to a credential by name.
+    Credential,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for VariableKind {}
 
 /// A runtime environment variable.
 #[serde_with::skip_serializing_none]
@@ -5697,26 +5760,36 @@ pub struct VariableUpdateParams {
 
 // integrations
 
-open_wire_enum! {
-    pub enum IntegrationType {
-        Github => "github",
-        Slack => "slack",
-        Linear => "linear",
-        Jira => "jira",
-        Notion => "notion",
-        Vercel => "vercel",
-        Custom => "custom",
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationType {
+    Github,
+    Slack,
+    Linear,
+    Jira,
+    Notion,
+    Vercel,
+    Custom,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum IntegrationStatus {
-        Pending => "pending",
-        Active => "active",
-        Error => "error",
-        Disabled => "disabled",
-    }
+impl WireEnum for IntegrationType {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationStatus {
+    Pending,
+    Active,
+    Error,
+    Disabled,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for IntegrationStatus {}
 
 /// The org's own install of a provider (a GitHub App installation, a Slack
 /// workspace). At most one live integration per type per org.
@@ -5785,13 +5858,18 @@ pub struct IntegrationUpdateParams {
     pub slack_interactivity_enabled: Option<bool>,
 }
 
-open_wire_enum! {
-    /// The level of one permission on an integration access token.
-    pub enum IntegrationTokenPermission {
-        Read => "read",
-        Write => "write",
-    }
+/// The level of one permission on an integration access token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationTokenPermission {
+    Read,
+    Write,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for IntegrationTokenPermission {}
 
 /// Body of `POST /v1/integrations/{id}/access-token`. The variant is the
 /// body's `type`, and must match the integration's own type.
@@ -5963,44 +6041,64 @@ pub struct Me {
 
 // ----- images (DP) -----------------------------------------------------------
 
-open_wire_enum! {
-    /// What produced an image.
-    pub enum ImageKind {
-        /// A Recipe bake.
-        Runtime => "runtime",
-        /// A caller's `POST /v1/images`.
-        Service => "service",
-    }
+/// What produced an image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageKind {
+    /// A Recipe bake.
+    Runtime,
+    /// A caller's `POST /v1/images`.
+    Service,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum ImageStatus {
-        Queued => "queued",
-        Building => "building",
-        Ready => "ready",
-        Failed => "failed",
-        Cancelled => "cancelled",
-        Evicted => "evicted",
-    }
+impl WireEnum for ImageKind {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageStatus {
+    Queued,
+    Building,
+    Ready,
+    Failed,
+    Cancelled,
+    Evicted,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum ImageScanStatus {
-        Pending => "pending",
-        Passed => "passed",
-        Findings => "findings",
-        Failed => "failed",
-        Skipped => "skipped",
-    }
+impl WireEnum for ImageStatus {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageScanStatus {
+    Pending,
+    Passed,
+    Findings,
+    Failed,
+    Skipped,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum ImageSourceKind {
-        Context => "context",
-        Mirror => "mirror",
-        Bake => "bake",
-    }
+impl WireEnum for ImageScanStatus {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageSourceKind {
+    Context,
+    Mirror,
+    Bake,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for ImageSourceKind {}
 
 /// An image in the plane's registry, which is what an eval task's compose
 /// services run as.
@@ -6172,22 +6270,32 @@ impl ImageCreate {
 
 // ----- task commands (DP) ----------------------------------------------------
 
-open_wire_enum! {
-    pub enum TaskCommandKind {
-        Exec => "exec",
-        Upload => "upload",
-        Download => "download",
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskCommandKind {
+    Exec,
+    Upload,
+    Download,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-open_wire_enum! {
-    pub enum TaskCommandStatus {
-        Queued => "queued",
-        Running => "running",
-        Completed => "completed",
-        Failed => "failed",
-    }
+impl WireEnum for TaskCommandKind {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskCommandStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    /// A value this SDK does not know yet, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
+
+impl WireEnum for TaskCommandStatus {}
 
 impl TaskCommandStatus {
     /// Whether the command has finished, either way.

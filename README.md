@@ -437,7 +437,7 @@ let fired = client.events().list(&EventListParams {
 
 `Automation::kind` is `None` for an automation a person created. A platform
 automation carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
-`ObservationClustering`. A kind added later decodes as `AutomationKind::Other`.
+`ObservationClustering`. A kind added later decodes as `AutomationKind::Unknown`.
 A scheduled firing that ran nothing is recorded as an
 `introspection.automation.skipped` event with an `AutomationSkipReason`.
 

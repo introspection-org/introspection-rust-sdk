@@ -282,7 +282,7 @@ pub use schemas::{
     TokenCreateParams, Trajectory, TrajectoryAssistantRecord, TrajectoryMetaRecord,
     TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall, TrajectoryToolRecord,
     TrajectoryUserRecord, TypedEvent, Variable, VariableCreateParams, VariableKind,
-    VariableUpdateParams, WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs,
+    VariableUpdateParams, WireEnum, WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs,
 };
 // The project-authoring writes, behind the `authoring` feature.
 #[cfg(feature = "authoring")]

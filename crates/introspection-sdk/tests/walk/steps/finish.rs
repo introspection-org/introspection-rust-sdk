@@ -168,7 +168,7 @@ pub async fn members_and_keys(w: &mut Walk) {
             &ApiKeyCreateParams {
                 name: Some(walk::API_KEY_NAME.into()),
                 environment: Some(Lane::Development),
-                allow: Some(vec![ApiKeyCapability::from("runtimes")]),
+                allow: Some(vec![ApiKeyCapability::Runtimes]),
                 member_id: None,
                 expires_at: None,
             },

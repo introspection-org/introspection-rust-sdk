@@ -12,7 +12,7 @@ use introspection_sdk::{
     AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
     AutomationSkipReason, AutomationTriggerType, AutomationUpdateParams, Automations, ClientConfig,
     Event, EventListParams, Events, IntrospectionClient, IntrospectionEventName, PaginationParams,
-    TaskRepoRequest,
+    TaskRepoRequest, WireEnum,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -159,14 +159,19 @@ async fn kinds_decode_including_project_check_in_and_an_unknown_value() {
             Some(AutomationKind::ProjectCheckIn),
             Some(AutomationKind::ObservationSynthesis),
             Some(AutomationKind::ObservationClustering),
-            Some(AutomationKind::Other("a_kind_from_the_future".into())),
+            Some(AutomationKind::Unknown(json!("a_kind_from_the_future"))),
         ]
     );
     // An unknown kind round-trips to the value it came from.
     assert_eq!(
-        serde_json::to_value(AutomationKind::from("a_kind_from_the_future")).unwrap(),
+        serde_json::to_value(AutomationKind::from_wire("a_kind_from_the_future")).unwrap(),
         json!("a_kind_from_the_future")
     );
+    assert_eq!(
+        AutomationKind::from_wire("a_kind_from_the_future").wire(),
+        "a_kind_from_the_future"
+    );
+    assert_eq!(AutomationKind::ProjectCheckIn.wire(), "project_check_in");
 }
 
 #[tokio::test]
@@ -658,7 +663,7 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
         reasons,
         vec![
             AutomationSkipReason::TargetBusy,
-            AutomationSkipReason::Other("a_reason_from_the_future".into()),
+            AutomationSkipReason::Unknown(json!("a_reason_from_the_future")),
         ]
     );
 }
