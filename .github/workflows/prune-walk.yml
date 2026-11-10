@@ -1,6 +1,6 @@
 name: Prune walk binaries
 
-# GHCR has no retention limit like ECR's, so this keeps the newest 10 versions;
+# GHCR has no retention limit like ECR's, so this keeps the newest 10 releases;
 # :latest is always the newest.
 on:
   schedule:
