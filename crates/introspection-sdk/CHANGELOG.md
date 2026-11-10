@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.40.0...v0.41.0) (2026-11-10)
+
+
+### Features
+
+* **projects:** model the project git_origin ([#203](https://github.com/introspection-org/introspection-rust-sdk/issues/203)) ([b671727](https://github.com/introspection-org/introspection-rust-sdk/commit/b671727954df3a43ed9f52fccbb1ef541e6007c4))
+* the end-to-end walk as an optional introspection-walk binary, built debug-only in CI ([#206](https://github.com/introspection-org/introspection-rust-sdk/issues/206)) ([511281a](https://github.com/introspection-org/introspection-rust-sdk/commit/511281afd20d26f57b8d96ab339f7c346fc43f0d))
+
 ## [0.40.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.39.0...v0.40.0) (2026-11-09)
 
 
