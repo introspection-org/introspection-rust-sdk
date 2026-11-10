@@ -35,7 +35,7 @@ pub struct AnnotationComment {
 
 /// One span's current annotation state.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AnnotationState {
     pub trace_id: String,
     pub span_id: String,
@@ -56,7 +56,8 @@ pub struct AnnotationState {
     #[serde(default)]
     pub assignment_event_id: Option<Uuid>,
     /// Every comment on the span, oldest first, when the list asked for
-    /// [`AnnotationInclude::Comments`]; `None` otherwise and on navigation.
+    /// [`AnnotationInclude::Comments`], or the conversation export for its
+    /// comments; `None` otherwise and on navigation.
     #[serde(default)]
     pub comments: Option<Vec<AnnotationComment>>,
 }

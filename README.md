@@ -526,6 +526,11 @@ Plane client alone can assign them.
 `include: vec![AnnotationInclude::Comments]` on `AnnotationListParams` to get
 each row's `comments`, oldest first; without it a row has `comments: None`.
 
+A conversation export can carry the same row on each annotated span: set
+`include` on `ConversationExportParams` to `ConversationExportInclude::Annotations`
+(and `Comments` for the comments) and read `GenAiSpan::annotation`. The JSON and
+JSON-lines exports take it.
+
 The tag catalogue lives under `client.tags()`, keyed by `TagKind::Access` or
 `TagKind::Annotation`. `TagCreate` is an enum per kind, so an access tag has no
 colour to set and an annotation tag cannot omit one.

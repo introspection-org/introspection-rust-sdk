@@ -9439,6 +9439,27 @@ pub enum TrajectoryRecord {
 /// `TrajectoryCreate`.
 pub type Trajectory = Vec<TrajectoryRecord>;
 
+/// An optional expansion of an exported span. The JSON and JSON-lines
+/// exports take it; the server refuses it on the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ConversationExportInclude {
+    /// Put each annotated span's current state in its `annotation`.
+    Annotations,
+    /// With [`Self::Annotations`], fill that state's `comments`.
+    Comments,
+}
+
+impl ConversationExportInclude {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Annotations => "annotations",
+            Self::Comments => "comments",
+        }
+    }
+}
+
 /// Query params for `GET /v1/conversations/{id}/export`.
 ///
 /// The export is assembled server-side over the whole conversation, so there
@@ -9471,6 +9492,9 @@ pub struct ConversationExportParams {
     /// Upper bound on which records are assembled (ISO 8601).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_date: Option<String>,
+    /// Span expansions, sent as a repeated `include`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<ConversationExportInclude>,
 }
 
 impl ConversationExportParams {
@@ -9496,6 +9520,9 @@ impl ConversationExportParams {
         );
         push("start_date", self.start_date.clone());
         push("end_date", self.end_date.clone());
+        for include in &self.include {
+            push("include", Some(include.as_str().to_string()));
+        }
         query
     }
 }
