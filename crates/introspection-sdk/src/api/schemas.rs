@@ -4070,12 +4070,6 @@ pub struct Project {
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
-    /// Where the project's hosted repositories are served:
-    /// `{git_origin}/v1/git/{slug}.git` clones one. Only
-    /// `GET /v1/projects/{project}` fills it, and only when the project's data
-    /// plane serves hosted Git.
-    #[serde(default)]
-    pub git_origin: Option<String>,
 }
 
 /// Filters supported by `GET /v1/projects`. The route lists the projects of

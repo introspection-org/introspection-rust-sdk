@@ -40,7 +40,6 @@ fn project_json() -> serde_json::Value {
         "description": null,
         "settings": {"theme": "dark"},
         "created_by_member_id": "00000000-0000-0000-0000-0000000000cc",
-        "git_origin": "https://git.example.test",
     })
 }
 
@@ -64,10 +63,6 @@ async fn get_reads_a_project_by_id() {
     assert_eq!(project.name, "Support desk");
     assert!(project.description.is_none());
     assert_eq!(project.settings.unwrap()["theme"], "dark");
-    assert_eq!(
-        project.git_origin.as_deref(),
-        Some("https://git.example.test")
-    );
 }
 
 #[tokio::test]
@@ -76,7 +71,6 @@ async fn get_reads_a_project_by_slug_and_tolerates_a_missing_slug() {
     let mut body = project_json();
     body.as_object_mut().unwrap().remove("slug");
     body.as_object_mut().unwrap().remove("created_by_member_id");
-    body.as_object_mut().unwrap().remove("git_origin");
     Mock::given(method("GET"))
         .and(path("/v1/projects/support%20desk"))
         .respond_with(ResponseTemplate::new(200).set_body_json(body))
@@ -91,7 +85,6 @@ async fn get_reads_a_project_by_slug_and_tolerates_a_missing_slug() {
 
     assert!(project.slug.is_none());
     assert!(project.created_by_member_id.is_none());
-    assert!(project.git_origin.is_none());
 }
 
 #[tokio::test]
