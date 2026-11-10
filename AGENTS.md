@@ -17,13 +17,6 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 - CI runs `cargo clippy --all-targets --all-features -- -D warnings` at the workspace root. That compiles every member's examples, so a broken example fails CI.
 - CI never runs the examples. They need a live server.
 
-## Forward compatibility
-
-- An SDK built today must still read a response after the API adds a field or an enum value. `tests/forward_compat_test.rs` holds it to that.
-- A type decoded from a response, or nested in one, never takes `#[serde(deny_unknown_fields)]`. Only request params may (`ConnectorCreateParams`, `MemberUpdateParams`, ...), so a typo in a body read from a document fails locally.
-- A string enum the server sends is an `open_wire_enum!` (an `Other(String)` fallback). A `Copy` one takes a `#[serde(other)] Unknown` variant instead, a tagged enum takes a `#[serde(untagged)] Unknown(serde_json::Value)` tail, as `Event` does, and an untagged one ends in a `serde_json::Value` variant.
-- `strict-schema` is opt-in drift detection for CI (`--all-features`): it fails a decode on a field the SDK does not model. Never enable it by default or rely on it for behaviour; a test that sends an unknown field through a client is `#[cfg(not(feature = "strict-schema"))]`.
-
 ## Examples
 
 - Cargo auto-discovers examples only at `crates/introspection-sdk/examples/*.rs`. A file under `examples/api/` needs an `[[example]]` entry in `crates/introspection-sdk/Cargo.toml`.
@@ -34,9 +27,10 @@ Notes for contributors and coding agents. For what the SDK does and how to use i
 
 The API grows without asking the SDK first, so a response that gains something still decodes for every user:
 
-- **A new field is ignored.** Never `#[serde(deny_unknown_fields)]` on a response type; keep extras in a `#[serde(flatten)]` map only where callers read them.
+- **A new field is ignored.** Never `#[serde(deny_unknown_fields)]` on a response type or one nested in it; keep extras in a `#[serde(flatten)]` map only where callers read them. Request params may deny them (`ConnectorCreateParams`, `MemberUpdateParams`), so a typo in a body read from a document fails locally.
 - **A new enum value or union variant decodes.** An enum in a response, a plain string enum or a tagged union alike, ends in `#[serde(untagged)] Unknown(serde_json::Value)`, as `Event` does: what the server sent is kept and serialises back unchanged. Don't add an `open_wire_enum!`; the ones that exist stay until they are next touched.
-- `strict-schema` (the walk and the tests) is the only place an unmodelled field fails, so drift is found before a release; model it rather than loosen that check.
+- `strict-schema` (the walk and the tests) is the only place an unmodelled field fails, so drift is found before a release; model it rather than loosen that check. A test that sends an unknown field through a client is `#[cfg(not(feature = "strict-schema"))]`.
+- `tests/forward_compat_test.rs` pins all of this.
 
 ## The end-to-end walk
 
