@@ -258,5 +258,8 @@ fn directory_page(body: serde_json::Value, route: &str) -> ApiResult<Paginated<R
             "{:?} is a file, not a directory; read it with RepositoryContents::get",
             file.path
         ))),
+        RepositoryContent::Unknown(_) => Err(IntrospectionAPIError::Decode(format!(
+            "{route}: a contents type this SDK does not model, not a directory"
+        ))),
     }
 }

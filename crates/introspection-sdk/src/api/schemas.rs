@@ -81,6 +81,63 @@ impl<'de> Deserialize<'de> for StringOrUuid {
 
 // ----- enums -----------------------------------------------------------------
 
+/// A string-backed wire enum with an `Other(String)` fallback, so a value the
+/// Data Plane adds after this SDK was built still decodes.
+macro_rules! open_wire_enum {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident {
+            $( $(#[$vmeta:meta])* $variant:ident => $wire:literal, )+
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub enum $name {
+            $( $(#[$vmeta])* $variant, )+
+            /// Forward-compatible escape hatch.
+            Other(String),
+        }
+
+        impl $name {
+            /// The on-the-wire value.
+            pub fn as_str(&self) -> &str {
+                match self {
+                    $( Self::$variant => $wire, )+
+                    Self::Other(value) => value,
+                }
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                match value {
+                    $( $wire => Self::$variant, )+
+                    other => Self::Other(other.to_string()),
+                }
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let value = String::deserialize(d)?;
+                Ok(Self::from(value.as_str()))
+            }
+        }
+    };
+}
+
 /// Execution shape of a task — mirrors the DP `TaskKind` enum.
 ///
 /// `Agent` boots the runtime-agent image and runs an interactive LLM agent;
@@ -599,15 +656,16 @@ pub enum TaskCancelOptions {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ShareResourceType {
-    File,
-    Conversation,
-    Issue,
-    /// A channel's audience. Written only by the control plane, so it appears
-    /// on reads but `POST /v1/shares` refuses it.
-    Channel,
+open_wire_enum! {
+    /// The kind of resource a share grants.
+    pub enum ShareResourceType {
+        File => "file",
+        Conversation => "conversation",
+        Issue => "issue",
+        /// A channel's audience. Written only by the control plane, so it
+        /// appears on reads but `POST /v1/shares` refuses it.
+        Channel => "channel",
+    }
 }
 
 #[serde_with::skip_serializing_none]
@@ -1538,6 +1596,9 @@ pub struct RepositoryFile {
 pub enum RepositoryContent {
     Dir(RepositoryDirectory),
     File(RepositoryFile),
+    /// A `type` this SDK build predates, as the raw body.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
 /// Query for a repository contents read.
@@ -2306,6 +2367,9 @@ pub enum ExperimentGoalDirection {
     #[default]
     Maximize,
     Minimize,
+    /// A direction this SDK build predates.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Canary bound over one goal component's rate.
@@ -2357,6 +2421,9 @@ pub struct TelemetryGoalComponent {
 pub enum ExperimentGoalComponent {
     Judge(JudgeGoalComponent),
     Telemetry(TelemetryGoalComponent),
+    /// A `source` this SDK build predates, as the raw component.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
 fn default_goal_kind() -> String {
@@ -4260,63 +4327,6 @@ fn default_bearer() -> String {
 
 // ----- automations (DP) ------------------------------------------------------
 
-/// A string-backed wire enum with an `Other(String)` fallback, so a value the
-/// Data Plane adds after this SDK was built still decodes.
-macro_rules! open_wire_enum {
-    (
-        $(#[$meta:meta])*
-        pub enum $name:ident {
-            $( $(#[$vmeta:meta])* $variant:ident => $wire:literal, )+
-        }
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        pub enum $name {
-            $( $(#[$vmeta])* $variant, )+
-            /// Forward-compatible escape hatch.
-            Other(String),
-        }
-
-        impl $name {
-            /// The on-the-wire value.
-            pub fn as_str(&self) -> &str {
-                match self {
-                    $( Self::$variant => $wire, )+
-                    Self::Other(value) => value,
-                }
-            }
-        }
-
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
-                match value {
-                    $( $wire => Self::$variant, )+
-                    other => Self::Other(other.to_string()),
-                }
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-
-        impl Serialize for $name {
-            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                s.serialize_str(self.as_str())
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                let value = String::deserialize(d)?;
-                Ok(Self::from(value.as_str()))
-            }
-        }
-    };
-}
-
 open_wire_enum! {
     /// Where an MCP endpoint's tool discovery stands.
     pub enum McpCheckStatus {
@@ -5845,6 +5855,9 @@ pub enum IntegrationRepositories {
     Github {
         records: Vec<GithubInstallationRepository>,
     },
+    /// A `type` this SDK build predates, as the raw body.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
 impl IntegrationRepositories {
@@ -5852,6 +5865,7 @@ impl IntegrationRepositories {
     pub fn github_records(&self) -> Option<&[GithubInstallationRepository]> {
         match self {
             Self::Github { records } => Some(records),
+            Self::Unknown(_) => None,
         }
     }
 }
@@ -5934,6 +5948,8 @@ pub enum FeatureFlagValue {
     Int(i64),
     Float(f64),
     String(String),
+    /// Any other JSON value, such as an object flag or a `null`.
+    Json(serde_json::Value),
 }
 
 /// Response of `GET /v1/oidc/me`: who the credential is.
@@ -8473,7 +8489,7 @@ mod tests {
         let goal = exp.goal_json.expect("goal parsed");
         match &goal.components[0] {
             ExperimentGoalComponent::Judge(j) => assert_eq!(j.weight, 1.0),
-            ExperimentGoalComponent::Telemetry(_) => panic!("expected judge component"),
+            other => panic!("expected judge component, got {other:?}"),
         }
     }
 
