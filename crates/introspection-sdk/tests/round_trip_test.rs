@@ -542,3 +542,146 @@ fn an_unmodelled_field_fails_the_round_trip() {
 
     assert!(err.contains("$.unmodelled: lost"), "{err}");
 }
+
+fn event(name: &str, payload: Value) -> Value {
+    serde_json::json!({
+        "id": "0199a1b2-0000-5000-8000-000000000001",
+        "timestamp": "2026-11-10T05:00:00Z",
+        "event_name": name,
+        "conversation_id": "conversation-1",
+        "payload": payload,
+    })
+}
+
+fn judgement_base() -> Value {
+    serde_json::json!({
+        "judgement_id": "judgement-1", "judge_id": "judge-1", "judge_slug": "helpful",
+        "judge_type": "online", "runtime_slug": "hello-mcp", "result": "pass",
+        "status": "error", "error_class": "Timeout", "error_message": "slow",
+        "source_component": "introspection-judge", "judge_model": "grader-1",
+        "experiment_arm_id": "00000000-0000-0000-0000-0000000000ee",
+    })
+}
+
+fn with(mut base: Value, extra: Value) -> Value {
+    let fields = base.as_object_mut().unwrap();
+    fields.extend(extra.as_object().unwrap().clone());
+    base
+}
+
+fn verdict_fields() -> Value {
+    serde_json::json!({
+        "reasoning": "fine", "definition_hash": "d1", "engine_version": "1.2.3",
+        "judge_provider": "provider", "contract_version": "1", "sequence_hash": "s1",
+        "input_tokens": 120, "output_tokens": 30, "total_tokens": 150,
+    })
+}
+
+fn egress_fields() -> Value {
+    serde_json::json!({
+        "scores": {"q1": 90}, "questions": {"q1": "Is it safe?"}, "policy_id": "p1",
+        "policy_action": "http", "reason": "policy", "request_host": "api.example.com",
+        "request_method": "POST", "request_path": "/v1/chat",
+    })
+}
+
+/// The annotation, feedback and judgement payloads in the shape the Data Plane
+/// API returns them, every field set.
+#[test]
+fn event_payloads_model_every_field_the_api_returns() {
+    let member = "00000000-0000-0000-0000-0000000000cc";
+    let agent = "00000000-0000-0000-0000-0000000000dd";
+    let verdict = with(
+        with(judgement_base(), verdict_fields()),
+        serde_json::json!({"kind": "verdict"}),
+    );
+    let egress = with(
+        with(judgement_base(), egress_fields()),
+        serde_json::json!({"kind": "egress"}),
+    );
+    let body = serde_json::json!({"count": 4, "records": [
+        event("introspection.annotation", serde_json::json!({
+            "member_id": member, "actor_member_id": agent, "actor_member_type": "agent",
+            "labels": ["walk"], "comment": "looks right", "assignee_member_ids": [member],
+        })),
+        event("introspection.feedback", serde_json::json!({
+            "name": "thumbs", "value": 1.0, "author_member_id": member,
+        })),
+        event("introspection.judgement", verdict),
+        event("introspection.judgement", egress),
+    ]});
+
+    round_trip::<Paginated<Event>>(&body).unwrap();
+
+    let page: Paginated<Event> = serde_json::from_value(body).unwrap();
+    let kinds: Vec<_> = page.records[2..]
+        .iter()
+        .map(|record| match record {
+            Event::Judgement(judgement) => match &judgement.payload {
+                JudgementPayload::Verdict(payload) => {
+                    assert_eq!(payload.total_tokens, Some(150));
+                    "verdict"
+                }
+                JudgementPayload::Egress(payload) => {
+                    assert_eq!(payload.scores.as_ref().unwrap()["q1"], 90);
+                    "egress"
+                }
+                JudgementPayload::Unknown(_) => "unknown",
+            },
+            _ => "not a judgement",
+        })
+        .collect();
+    assert_eq!(kinds, ["verdict", "egress"]);
+    let Event::Judgement(first) = &page.records[2] else {
+        panic!("a judgement");
+    };
+    assert_eq!(first.payload.base().unwrap().judgement_id, "judgement-1");
+}
+
+/// A Data Plane that predates `kind` sends one flat payload; `result_schema`
+/// tells the two kinds apart.
+#[test]
+fn a_judgement_without_a_kind_reads_by_its_result_schema() {
+    let read = |payload: Value| -> JudgementPayload { serde_json::from_value(payload).unwrap() };
+
+    let scored = read(with(
+        with(judgement_base(), egress_fields()),
+        serde_json::json!({"result_schema": "question_scores.v1"}),
+    ));
+    let JudgementPayload::Egress(egress) = scored else {
+        panic!("question scores are an egress judgement: {scored:?}");
+    };
+    assert_eq!(egress.request_host.as_deref(), Some("api.example.com"));
+
+    let verdict = read(with(
+        with(judgement_base(), verdict_fields()),
+        serde_json::json!({"result_schema": "verdict.v1"}),
+    ));
+    assert!(
+        matches!(verdict, JudgementPayload::Verdict(_)),
+        "{verdict:?}"
+    );
+    let bare = read(serde_json::json!({"judgement_id": "judgement-1"}));
+    assert!(matches!(bare, JudgementPayload::Verdict(_)), "{bare:?}");
+}
+
+/// A `kind` this build does not know keeps its payload, and the page decodes.
+#[test]
+fn a_judgement_of_an_unknown_kind_is_kept_whole() {
+    let payload = serde_json::json!({"kind": "replay", "judgement_id": "judgement-1", "new": 1});
+    let body = serde_json::json!({"count": 1, "records": [
+        event("introspection.judgement", payload.clone()),
+    ]});
+
+    round_trip::<Paginated<Event>>(&body).unwrap();
+
+    let page: Paginated<Event> = serde_json::from_value(body).unwrap();
+    let Event::Judgement(judgement) = &page.records[0] else {
+        panic!("a judgement: {:?}", page.records[0]);
+    };
+    let JudgementPayload::Unknown(raw) = &judgement.payload else {
+        panic!("an unknown kind: {:?}", judgement.payload);
+    };
+    assert_eq!(raw, &payload);
+    assert!(judgement.payload.base().is_none());
+}

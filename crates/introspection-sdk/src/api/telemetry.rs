@@ -58,8 +58,8 @@ pub const REPLAY_V1_ACCEPT: &str =
 /// the body names it in `schema_version`.
 pub const ATIF_ACCEPT: &str = "application/vnd.harbor.atif+json";
 
-/// Accept header selecting a JSON-lines export: one row per line, with no
-/// envelope.
+/// Accept header selecting the JSON-lines export: one GenAI span per line,
+/// with no envelope.
 pub const JSON_LINES_ACCEPT: &str = "application/x-ndjson";
 
 /// Wire representation selected for a complete conversation export — one of

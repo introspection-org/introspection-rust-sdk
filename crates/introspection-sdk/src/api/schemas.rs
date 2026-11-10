@@ -7422,6 +7422,9 @@ pub struct FeedbackPayload {
     /// Remaining `properties.*` extras.
     #[serde(default)]
     pub properties: Option<BTreeMap<String, serde_json::Value>>,
+    /// The member who gave the feedback.
+    #[serde(default)]
+    pub author_member_id: Option<Uuid>,
 }
 
 /// `introspection.annotation` payload — one member-authored mutation.
@@ -7429,6 +7432,12 @@ pub struct FeedbackPayload {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnnotationPayload {
     pub member_id: Uuid,
+    /// The member that ran the request for `member_id`, such as an agent.
+    #[serde(default)]
+    pub actor_member_id: Option<Uuid>,
+    /// The actor's capacity (`agent`, `dev`, `impersonation`).
+    #[serde(default)]
+    pub actor_member_type: Option<String>,
     #[serde(default)]
     pub labels: Option<Vec<String>>,
     #[serde(default)]
@@ -7437,24 +7446,141 @@ pub struct AnnotationPayload {
     pub assignee_member_ids: Option<Vec<Uuid>>,
 }
 
-/// `introspection.judgement` payload — mirrors the runtime-agent judges
-/// emitter (`introspection.judgement.*` / `introspection.judge.*` attributes).
+/// What every judgement carries, whichever kind it is.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct JudgementPayload {
+pub struct JudgementBasePayload {
     pub judgement_id: String,
     #[serde(default)]
     pub judge_id: Option<String>,
     #[serde(default)]
+    pub judge_slug: Option<String>,
+    /// `online`, `offline` or `mission`; absent on historical events.
+    #[serde(default)]
+    pub judge_type: Option<String>,
+    #[serde(default)]
+    pub runtime_slug: Option<String>,
+    /// The verdict.
+    #[serde(default)]
     pub result: Option<String>,
+    /// Whether the judgement ran (`ok`/`error`), distinct from the verdict.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub error_class: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    /// The component that emitted the judgement.
+    #[serde(default)]
+    pub source_component: Option<String>,
+    #[serde(default)]
+    pub judge_model: Option<String>,
+    #[serde(default)]
+    pub experiment_arm_id: Option<Uuid>,
+}
+
+/// A recipe judge's verdict on a conversation.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JudgementVerdictPayload {
+    #[serde(flatten)]
+    pub base: JudgementBasePayload,
+    #[serde(default)]
+    pub reasoning: Option<String>,
     #[serde(default)]
     pub definition_hash: Option<String>,
+    #[serde(default)]
+    pub engine_version: Option<String>,
+    #[serde(default)]
+    pub judge_provider: Option<String>,
     #[serde(default)]
     pub contract_version: Option<String>,
     #[serde(default)]
     pub sequence_hash: Option<String>,
     #[serde(default)]
-    pub experiment_arm_id: Option<Uuid>,
+    pub input_tokens: Option<i64>,
+    #[serde(default)]
+    pub output_tokens: Option<i64>,
+    #[serde(default)]
+    pub total_tokens: Option<i64>,
+}
+
+/// The egress policy gate's decision on one outbound request.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JudgementEgressPayload {
+    #[serde(flatten)]
+    pub base: JudgementBasePayload,
+    /// Each answered question's probability of true, 0-100.
+    #[serde(default)]
+    pub scores: Option<BTreeMap<String, i64>>,
+    /// The questions asked, by name.
+    #[serde(default)]
+    pub questions: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub policy_id: Option<String>,
+    #[serde(default)]
+    pub policy_action: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub request_host: Option<String>,
+    #[serde(default)]
+    pub request_method: Option<String>,
+    #[serde(default)]
+    pub request_path: Option<String>,
+}
+
+/// `introspection.judgement` payload, by its `kind`.
+///
+/// A Data Plane that predates `kind` sends neither it nor the split: such a
+/// payload reads as [`Self::Egress`] when its `result_schema` is
+/// `question_scores.v1` and as [`Self::Verdict`] otherwise. A `kind` this SDK
+/// build does not know is kept whole in [`Self::Unknown`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JudgementPayload {
+    Verdict(JudgementVerdictPayload),
+    Egress(JudgementEgressPayload),
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+impl JudgementPayload {
+    /// The fields both kinds carry; `None` for [`Self::Unknown`].
+    pub fn base(&self) -> Option<&JudgementBasePayload> {
+        match self {
+            Self::Verdict(payload) => Some(&payload.base),
+            Self::Egress(payload) => Some(&payload.base),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JudgementPayload {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(d)?;
+        let kind = match value.get("kind").and_then(serde_json::Value::as_str) {
+            Some(kind) => kind,
+            None if value.get("kind").is_some_and(|kind| !kind.is_null()) => {
+                return Ok(Self::Unknown(value))
+            }
+            None if value
+                .get("result_schema")
+                .and_then(serde_json::Value::as_str)
+                == Some("question_scores.v1") =>
+            {
+                "egress"
+            }
+            None => "verdict",
+        };
+        match kind {
+            "verdict" => serde_json::from_value(value).map(Self::Verdict),
+            "egress" => serde_json::from_value(value).map(Self::Egress),
+            _ => return Ok(Self::Unknown(value)),
+        }
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 /// `introspection.automation.triggered` payload — one automation trigger
@@ -9112,10 +9238,15 @@ mod tests {
         let Event::Judgement(j) = &event else {
             panic!("expected Judgement, got {event:?}");
         };
-        assert_eq!(j.payload.judgement_id, "jm_1");
-        assert_eq!(j.payload.result.as_deref(), Some("pass"));
+        let JudgementPayload::Verdict(verdict) = &j.payload else {
+            panic!("a payload without a kind is a verdict: {:?}", j.payload);
+        };
+        assert_eq!(verdict.sequence_hash.as_deref(), Some("def456"));
+        let base = j.payload.base().unwrap();
+        assert_eq!(base.judgement_id, "jm_1");
+        assert_eq!(base.result.as_deref(), Some("pass"));
         assert_eq!(
-            j.payload.experiment_arm_id.unwrap().to_string(),
+            base.experiment_arm_id.unwrap().to_string(),
             "00000000-0000-0000-0000-00000000eeee"
         );
     }

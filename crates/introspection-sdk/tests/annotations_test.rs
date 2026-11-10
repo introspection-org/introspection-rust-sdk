@@ -2,18 +2,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationExportParams,
-    AnnotationFacet, AnnotationListParams, AnnotationMutation, AnnotationTagCreate,
-    AnnotationTarget, Annotations, ClientConfig, Event, EventListParams, IntrospectionClient,
-    IntrospectionEventName, TagCreate, TagKind, TagUpdate, Tags,
+    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationFacet, AnnotationInclude,
+    AnnotationListParams, AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations,
+    ClientConfig, Event, EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate,
+    TagKind, TagUpdate, Tags,
 };
 use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{body_json, header, method, path, query_param};
-use wiremock::Request;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TRACE_ID: &str = "0af7651916cd43dd8448eb211c80319c";
@@ -114,69 +113,8 @@ async fn lists_folded_annotation_state_with_filters() {
     assert_eq!(state.comments, None);
 }
 
-const JSON_LINES: &str = "application/x-ndjson";
-
-fn export_body() -> String {
-    let older = json!({
-        "trace_id": TRACE_ID,
-        "span_id": "00f067aa0ba902b7",
-        "human_commenter_member_ids": [MEMBER_ID],
-        "updated_at": "2026-08-25T12:00:00Z",
-        "updated_by_member_id": MEMBER_ID
-    });
-    format!("{}\n{older}\n", annotation())
-}
-
 #[tokio::test]
-async fn export_reads_every_row_with_the_filters_on_the_query() {
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/annotations/export"))
-        .and(header("accept", JSON_LINES))
-        .and(query_param("assignee_member_id", MEMBER_ID))
-        .and(query_param("conversation_id", "conversation-1"))
-        .and(query_param("status", "reviewed"))
-        .and(|request: &Request| {
-            let labels: Vec<_> = request
-                .url
-                .query_pairs()
-                .filter(|(key, _)| key == "label")
-                .map(|(_, value)| value.into_owned())
-                .collect();
-            let paged = request
-                .url
-                .query_pairs()
-                .any(|(key, _)| key == "limit" || key == "next" || key == "include_total");
-            labels == ["needs-review", "wrong-tool"] && !paged
-        })
-        .respond_with(ResponseTemplate::new(200).set_body_raw(export_body(), JSON_LINES))
-        .expect(1)
-        .mount(&dp)
-        .await;
-
-    let rows: Vec<_> = Annotations::data_plane(http(&dp))
-        .export(&AnnotationExportParams {
-            assignee_member_id: Some(member()),
-            conversation_id: Some("conversation-1".into()),
-            labels: vec!["needs-review".into(), "wrong-tool".into()],
-            status: Some("reviewed".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
-
-    let spans: Vec<_> = rows.iter().map(|row| row.span_id.as_str()).collect();
-    assert_eq!(spans, [SPAN_ID, "00f067aa0ba902b7"]);
-    assert_eq!(rows[0].labels, vec!["needs-review"]);
-    // The second row names its reviewers the way an older Data Plane does.
-    assert_eq!(rows[1].reviewer_member_ids, vec![member()]);
-}
-
-#[tokio::test]
-async fn export_rows_carry_their_comments_oldest_first() {
+async fn include_comments_reaches_the_query_and_fills_each_row() {
     let dp = MockServer::start().await;
     let mut row = annotation();
     row["comment_count"] = json!(2);
@@ -202,112 +140,58 @@ async fn export_rows_carry_their_comments_oldest_first() {
     bare["comment_count"] = json!(0);
     bare["comments"] = json!([]);
     Mock::given(method("GET"))
-        .and(path("/v1/annotations/export"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_raw(format!("{row}\n{bare}\n"), JSON_LINES),
-        )
+        .and(path("/v1/annotations"))
+        .and(query_param("include", "comments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [row, bare], "count": 2, "total_count": null, "next": null
+        })))
+        .expect(1)
         .mount(&dp)
         .await;
 
-    let rows: Vec<_> = Annotations::data_plane(http(&dp))
-        .export(&AnnotationExportParams::default())
+    let rows = Annotations::data_plane(http(&dp))
+        .list(&AnnotationListParams {
+            include: vec![AnnotationInclude::Comments],
+            ..Default::default()
+        })
         .await
         .unwrap()
-        .try_collect()
+        .collect_all(0)
         .await
         .unwrap();
 
-    let comments = rows[0].comments.as_deref().expect("the export's comments");
+    let comments = rows[0].comments.as_deref().expect("the row's comments");
     let texts: Vec<_> = comments.iter().map(|c| c.comment.as_str()).collect();
     assert_eq!(texts, ["Wrong tool picked", "Confirmed against the trace"]);
     assert_eq!(comments[0].member_id, member());
     assert_eq!(comments[0].actor_member_type, None);
     assert_eq!(comments[1].actor_member_type.as_deref(), Some("agent"));
     assert!(comments[1].actor_member_id.is_some());
-    assert_eq!(comments[1].created_at, "2026-08-25T12:00:00Z");
     assert_eq!(rows[1].comments.as_deref(), Some(&[][..]));
 }
 
 #[tokio::test]
-async fn export_stream_passes_the_json_lines_bytes_through() {
+async fn a_list_without_an_include_sends_none() {
     let dp = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/v1/annotations/export"))
-        .and(header("accept", JSON_LINES))
-        .and(query_param("trace_id", TRACE_ID))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(export_body(), JSON_LINES))
-        .expect(1)
+        .and(path("/v1/annotations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [annotation()], "count": 1, "total_count": null, "next": null
+        })))
         .mount(&dp)
         .await;
 
-    let chunks: Vec<_> = Annotations::data_plane(http(&dp))
-        .export_stream(&AnnotationExportParams {
-            trace_id: Some(TRACE_ID.into()),
-            ..Default::default()
-        })
+    let rows = Annotations::data_plane(http(&dp))
+        .list(&AnnotationListParams::default())
         .await
         .unwrap()
-        .try_collect()
+        .collect_all(0)
         .await
         .unwrap();
 
-    assert_eq!(chunks.concat(), export_body().as_bytes());
-}
-
-#[tokio::test]
-async fn export_of_an_empty_body_yields_nothing() {
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/annotations/export"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw("", JSON_LINES))
-        .expect(1)
-        .mount(&dp)
-        .await;
-
-    let rows: Vec<_> = Annotations::data_plane(http(&dp))
-        .export(&AnnotationExportParams::default())
-        .await
-        .unwrap()
-        .try_collect()
-        .await
-        .unwrap();
-
-    assert!(rows.is_empty());
-}
-
-#[tokio::test]
-async fn export_surfaces_a_406() {
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/annotations/export"))
-        .respond_with(ResponseTemplate::new(406))
-        .expect(1)
-        .mount(&dp)
-        .await;
-
-    let result = Annotations::data_plane(http(&dp))
-        .export(&AnnotationExportParams::default())
-        .await;
-
-    let err = result.err().expect("the 406 is an error");
-    assert_eq!(err.status(), Some(406), "{err}");
-}
-
-#[tokio::test]
-async fn export_refuses_an_id_and_an_email_for_one_filter_without_a_request() {
-    let dp = MockServer::start().await;
-
-    let result = Annotations::data_plane(http(&dp))
-        .export(&AnnotationExportParams {
-            assignee_member_id: Some(member()),
-            assigned_to_email: Some("expert@example.com".into()),
-            ..Default::default()
-        })
-        .await;
-
-    let err = result.err().expect("the conflict is an error");
-    assert_eq!(err.status(), Some(422), "{err}");
-    assert!(dp.received_requests().await.unwrap().is_empty());
+    assert_eq!(rows[0].comments, None);
+    let requests = dp.received_requests().await.unwrap();
+    assert!(!requests[0].url.query().unwrap_or("").contains("include"));
 }
 
 #[tokio::test]
