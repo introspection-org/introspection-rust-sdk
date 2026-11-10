@@ -129,11 +129,6 @@ const TYPED: &[(&str, &str, Check)] = &[
     ),
     (
         "GET",
-        r"^/v1/annotations/facets$",
-        round_trip::<Vec<AnnotationFacet>>,
-    ),
-    (
-        "GET",
         r"^/v1/annotations/navigation$",
         round_trip::<AnnotationNavigation>,
     ),
@@ -413,7 +408,11 @@ const TYPED: &[(&str, &str, Check)] = &[
 ];
 
 /// JSON responses no SDK type decodes: `(method, path regex, reason)`.
-const UNTYPED: &[(&str, &str, &str)] = &[];
+const UNTYPED: &[(&str, &str, &str)] = &[(
+    "GET",
+    r"^/v1/annotations/facets$",
+    "the route is retired; the recording still holds the call until it is re-recorded",
+)];
 
 /// The SDK type for a JSON export, picked by its media type. The replay and
 /// ATIF exports have none: `Conversations::export_json_value` returns them

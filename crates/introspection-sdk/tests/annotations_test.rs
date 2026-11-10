@@ -5,7 +5,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationFacet, AnnotationInclude,
+    AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationInclude,
     AnnotationListParams, AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations,
     ClientConfig, Event, EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate,
     TagKind, TagUpdate, Tags,
@@ -195,35 +195,6 @@ async fn a_list_without_an_include_sends_none() {
 }
 
 #[tokio::test]
-async fn facets_read_the_dataset_summary_of_a_review_queue_bucket() {
-    let dp = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/annotations/facets"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {"dimension": "status", "value": "backlog", "count": 3},
-            {
-                "dimension": "review_queue",
-                "value": "needs-review",
-                "count": 2,
-                "conversation_count": 1,
-                "comment_count": 4,
-                "reviewer_member_ids": [MEMBER_ID],
-                "updated_at": "2026-08-25T12:00:00Z"
-            }
-        ])))
-        .mount(&dp)
-        .await;
-
-    let facets: Vec<AnnotationFacet> = Annotations::data_plane(http(&dp)).facets().await.unwrap();
-
-    assert_eq!(facets[0].conversation_count, None);
-    assert_eq!(facets[1].dimension, "review_queue");
-    assert_eq!(facets[1].conversation_count, Some(1));
-    assert_eq!(facets[1].comment_count, Some(4));
-    assert_eq!(facets[1].reviewer_member_ids, Some(vec![member()]));
-}
-
-#[tokio::test]
 async fn reads_the_row_an_older_data_plane_sends() {
     let dp = MockServer::start().await;
     Mock::given(method("GET"))
@@ -291,6 +262,7 @@ async fn resolves_email_list_filter_and_requests_total() {
         .and(path("/v1/annotations"))
         .and(query_param("assignee_member_id", MEMBER_ID))
         .and(query_param("include_total", "true"))
+        .and(query_param("lookback_days", "30"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [annotation()], "count": 1, "total_count": 1, "next": null
         })))
@@ -301,6 +273,7 @@ async fn resolves_email_list_filter_and_requests_total() {
     let mut page = annotations
         .list(&AnnotationListParams {
             include_total: Some(true),
+            lookback_days: Some(30),
             assigned_to_email: Some("expert@example.com".into()),
             ..Default::default()
         })

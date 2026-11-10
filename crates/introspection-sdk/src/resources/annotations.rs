@@ -92,6 +92,10 @@ pub struct AnnotationListParams {
     /// Row expansions, sent as a repeated `include`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<AnnotationInclude>,
+    /// How many days of annotation events the read reaches back (1-90; the
+    /// server's default is 90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookback_days: Option<u16>,
     /// The annotator as an active Business member's email, resolved to
     /// `annotated_by_member_id` on the Control Plane before the read; never
     /// on the wire. Setting both is refused.
@@ -107,27 +111,6 @@ pub struct AnnotationListParams {
     /// passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
-}
-
-/// One filter bucket of `GET /v1/annotations/facets`: how many annotated
-/// spans currently carry `value` along `dimension` (`annotator`,
-/// `assignee`, `label`, `status` or `review_queue`).
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct AnnotationFacet {
-    pub dimension: String,
-    pub value: String,
-    pub count: u64,
-    /// Set, with the three fields after it, on the `label` and
-    /// `review_queue` buckets, which summarize a dataset.
-    #[serde(default)]
-    pub conversation_count: Option<u64>,
-    #[serde(default)]
-    pub comment_count: Option<u64>,
-    #[serde(default)]
-    pub reviewer_member_ids: Option<Vec<Uuid>>,
-    #[serde(default)]
-    pub updated_at: Option<String>,
 }
 
 /// What `GET /v1/annotations/navigation` answers: the annotation at the
@@ -162,6 +145,10 @@ pub struct AnnotationNavigationParams {
     /// `backlog`, `assigned` or `reviewed`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// How many days of annotation events the read reaches back (1-90; the
+    /// server's default is 90).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookback_days: Option<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -347,12 +334,6 @@ impl Annotations {
             });
         }
         decode_json(res).await
-    }
-
-    /// `GET /v1/annotations/facets` — the current annotator, assignee,
-    /// label and status counts a review screen offers as filters.
-    pub async fn facets(&self) -> ApiResult<Vec<AnnotationFacet>> {
-        self.dp_http.get_json("/v1/annotations/facets", &()).await
     }
 
     /// `GET /v1/annotations/navigation` — the annotation on `target` with the

@@ -1002,7 +1002,7 @@ async fn annotations(
     annotation_reads(w, sa, &conversation_id, &target).await;
 }
 
-/// The annotation as events (JSON and Arrow), its facets and navigation.
+/// The annotation as events (JSON and Arrow) and its navigation.
 async fn annotation_reads(
     w: &Walk,
     sa: &IntrospectionClient,
@@ -1043,7 +1043,6 @@ async fn annotation_reads(
     );
     let member = w.member();
     let annotations = member.annotations();
-    annotations.facets().await.expect("annotation facets");
     annotations
         .navigation(target, &AnnotationNavigationParams::default())
         .await
