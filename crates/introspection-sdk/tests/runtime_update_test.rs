@@ -10,7 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use introspection_sdk::api::{HttpClient, HttpConfig};
-use introspection_sdk::{Lane, LaneRef, RuntimeLlmMode, RuntimeUpdateParams, Runtimes};
+use introspection_sdk::{
+    Lane, LaneRef, RuntimeListParams, RuntimeLlmMode, RuntimeUpdateParams, Runtimes,
+};
 use serde_json::{json, Value};
 use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
@@ -262,4 +264,45 @@ async fn update_leaves_the_project_to_the_credential_and_surfaces_a_rejected_ref
         .unwrap_err();
 
     assert_eq!(err.status(), Some(400));
+}
+
+#[tokio::test]
+async fn list_filters_by_recipe_ref_and_commit_and_reads_the_commit() {
+    const SHA: &str = "8abd64d159dac4df0b4d2b8433047ad27e00ab63";
+    let server = MockServer::start().await;
+    let mut row = runtime_json();
+    row["recipe_ref"] = json!("pr/always-clean-jokes");
+    row["git_commit_sha"] = json!(SHA);
+    Mock::given(method("GET"))
+        .and(path("/v1/runtimes"))
+        .and(query_param("runtime", "jester"))
+        .and(query_param("recipe_ref", "pr/always-clean-jokes"))
+        .and(query_param("git_commit_sha", SHA))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"records": [row], "count": 1, "next": null})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = Runtimes::new(build_http(&server))
+        .list(&RuntimeListParams {
+            runtime: Some("jester".into()),
+            recipe_ref: Some("pr/always-clean-jokes".into()),
+            git_commit_sha: Some(SHA.into()),
+            ..Default::default()
+        })
+        .next_page()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(page.records[0].git_commit_sha.as_deref(), Some(SHA));
+}
+
+#[test]
+fn a_runtime_without_a_commit_reads_none() {
+    let runtime: introspection_sdk::Runtime = serde_json::from_value(runtime_json()).unwrap();
+    assert_eq!(runtime.git_commit_sha, None);
 }

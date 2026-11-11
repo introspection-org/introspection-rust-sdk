@@ -1921,6 +1921,10 @@ pub struct Runtime {
     /// Git ref the runtime's recipe tracks (`main`, `pr/N`, a commit sha).
     #[serde(default)]
     pub recipe_ref: Option<String>,
+    /// The full recipe commit this version was built from; `None` for a
+    /// version whose Recipe records no commit.
+    #[serde(default)]
+    pub git_commit_sha: Option<String>,
     /// Kind of recipe the runtime serves (`production`, `preview`, ...).
     #[serde(default)]
     pub recipe_kind: Option<String>,
@@ -2016,6 +2020,14 @@ pub struct RuntimeListParams {
     pub runtime: Option<StringOrUuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipe_id: Option<Uuid>,
+    /// Restrict to versions whose recipe ref is exactly this (`main`,
+    /// `pr/<name>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe_ref: Option<String>,
+    /// Restrict to versions built from exactly this recipe commit (a full
+    /// sha).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_commit_sha: Option<String>,
     /// Restrict to runtimes serving this environment. An API key already
     /// selects its environment, so passing both is a 400.
     #[serde(skip_serializing_if = "Option::is_none")]
