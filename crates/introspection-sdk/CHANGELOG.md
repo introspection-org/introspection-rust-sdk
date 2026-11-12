@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.43.0...v0.44.0) (2026-11-12)
+
+
+### Features
+
+* **runtimes:** filter versions by recipe ref and commit, and read each version's commit ([#226](https://github.com/introspection-org/introspection-rust-sdk/issues/226)) ([90e0c97](https://github.com/introspection-org/introspection-rust-sdk/commit/90e0c97b78428fa6771d6ff492a29b9aa11bc5f6))
+
 ## [0.43.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.42.0...v0.43.0) (2026-11-10)
 
 
