@@ -430,8 +430,8 @@ static URL: LazyLock<Regex> = LazyLock::new(|| re(r"^https?://"));
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| re(r"\d"));
 static MEASURED_KEY: LazyLock<Regex> =
     LazyLock::new(|| re(r"(_ms$|_count$|_tokens$|^max_turn$|^display_index$)"));
-// A dependency version the server reports moves with the server's pin, not the API.
-static VERSION_KEY: LazyLock<Regex> = LazyLock::new(|| re(r"^validator_version$"));
+// A dependency or tool version the server reports moves with its pin, not the API.
+static VERSION_KEY: LazyLock<Regex> = LazyLock::new(|| re(r"_version$"));
 static VOLATILE_KEY: LazyLock<Regex> = LazyLock::new(|| {
     re(
         r"(^id$|_at$|_sha$|token$|secret$|^key$|_key$|cookie$|^url$|_url$|^expires_in$|^client_id$|_prefix$|_suffix$|^prefix$|^key_display$|image_tag$|_image_name$|_bytes$)",
@@ -520,6 +520,18 @@ fn to_content(value: Value) -> insta::internals::Content {
                 .collect(),
         ),
     }
+}
+
+/// `value` as JSON without `keys`: fields a server added after the walk
+/// was recorded, absent from the recording and present live, so one
+/// snapshot holds against both. The step asserts each beside the snapshot.
+pub fn without<T: Serialize>(value: &T, keys: &[&str]) -> Value {
+    let mut value = serde_json::to_value(value).expect("snapshot JSON");
+    let map = value.as_object_mut().expect("a JSON object");
+    for key in keys {
+        map.remove(*key);
+    }
+    value
 }
 
 /// `assert_json_snapshot!` through the walk's one normalisation rule.

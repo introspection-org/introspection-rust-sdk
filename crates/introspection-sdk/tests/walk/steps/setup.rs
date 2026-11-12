@@ -7,7 +7,7 @@ use futures::StreamExt as _;
 use introspection_sdk::{
     service_account_token, ApplicationCreateParams, ApplicationIdpCreateParams,
     ApplicationIdpProvider, ApplicationListParams, ApplicationSecretCreateParams, ApplicationType,
-    ApplicationUpdateParams, BranchesQuery, CommitsQuery, ContentsQuery,
+    ApplicationUpdateParams, BranchesQuery, CommitsQuery, ContentsQuery, DisplayIdPrefixes,
     HostedRepositoryCreateParams, IntrospectionClient, PaginationParams, ProjectCreateParams,
     ProjectListParams, ProjectUpdateParams, Recipe, RecipeCreateParams, RecipeListParams,
     RecipeUpdateParams, Repository, RepositoryAccessParams, RepositoryCreateParams,
@@ -19,7 +19,8 @@ use uuid::Uuid;
 
 use crate::steps::{expect_not_found, expect_refused, no_such_id};
 use crate::support::{
-    assert_stable, recordings_dir, settled, walk, walk_project_born, Creds, Mode, BOOTSTRAP_FILE,
+    assert_stable, recordings_dir, settled, walk, walk_project_born, without, Creds, Mode,
+    BOOTSTRAP_FILE,
 };
 use crate::{set, Walk};
 
@@ -156,7 +157,8 @@ pub async fn project(w: &mut Walk) {
     let owner = w.owner();
     let project = set(&w.project, "the project").clone();
     // The slug is new on every live run.
-    assert_stable!(project, { ".slug" => "[per run]" }, @r#"
+    assert_default_prefixes(&project);
+    assert_stable!(without(&project, &["display_id_prefixes"]), { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
@@ -227,7 +229,8 @@ pub async fn project(w: &mut Walk) {
         .await
         .expect("create a sibling project");
     assert_eq!(sibling.deployment_id, project.deployment_id);
-    assert_stable!(sibling, { ".slug" => "[per run]" }, @r#"
+    assert_default_prefixes(&sibling);
+    assert_stable!(without(&sibling, &["display_id_prefixes"]), { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
@@ -243,6 +246,20 @@ pub async fn project(w: &mut Walk) {
         .await
         .expect("delete the sibling");
     expect_not_found(owner.projects().get(sibling.id).await);
+}
+
+/// A project created without prefixes carries the defaults; a server that
+/// predates them sends none.
+fn assert_default_prefixes(project: &introspection_sdk::Project) {
+    if let Some(prefixes) = &project.display_id_prefixes {
+        let expected = DisplayIdPrefixes {
+            issue: Some("I".into()),
+            report: Some("R".into()),
+            observation: Some("F".into()),
+            task: Some("T".into()),
+        };
+        assert_eq!(prefixes, &expected);
+    }
 }
 
 /// The walk's project offers no runtime peering and is granted none.
@@ -720,7 +737,9 @@ pub async fn recipe(w: &mut Walk) {
     // The slug ends in the first 12 characters of the template repository's
     // commit, which moves with that repository; the text before it is pinned.
     let slug = recipe.slug.replace(&head[..12], "[sha]");
-    assert_stable!(recipe, { ".slug" => slug }, @r#"
+    // What the recipe's agents and issue providers are follows the template
+    // repository, and a server that predates them sends neither.
+    assert_stable!(without(&recipe, &["agents", "issue_providers"]), { ".slug" => slug }, @r#"
     {
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",

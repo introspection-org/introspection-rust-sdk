@@ -8,7 +8,7 @@ use introspection_sdk::{
     AdvancedOptions, AnnotationCreated, AnnotationEventOptions, AnnotationInclude,
     AnnotationListParams, AnnotationMutation, AnnotationTagCreate, AnnotationTarget, Annotations,
     ClientConfig, Event, EventListParams, IntrospectionClient, IntrospectionEventName, TagCreate,
-    TagKind, TagUpdate, Tags,
+    TagInclude, TagKind, TagListParams, TagUpdate, Tags,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -694,6 +694,94 @@ async fn an_update_naming_nothing_is_refused_before_the_request() {
         .update(TagKind::Annotation, "needs-review", TagUpdate::default())
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn a_rename_archives_the_old_tag_and_returns_its_replacement() {
+    let dp = MockServer::start().await;
+    let mut replacement = tag("annotation", json!("#f97316"), serde_json::Value::Null);
+    replacement["name"] = json!("expert-review");
+    replacement["archived_at"] = serde_json::Value::Null;
+    replacement["replaced_by"] = serde_json::Value::Null;
+    replacement["archived_names"] = json!(["needs-review"]);
+    Mock::given(method("PATCH"))
+        .and(path("/v1/tags/annotation/needs-review"))
+        .and(body_json(json!({"name": "expert-review"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(replacement))
+        .mount(&dp)
+        .await;
+    let tags = Tags::new(http(&dp));
+    let renamed = tags
+        .update(
+            TagKind::Annotation,
+            "needs-review",
+            TagUpdate::rename(" expert-review "),
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "expert-review");
+    assert!(renamed.archived_at.is_none());
+    assert_eq!(
+        renamed.archived_names,
+        Some(vec!["needs-review".to_string()])
+    );
+    assert!(tags
+        .update(TagKind::Access, "acme/eu", TagUpdate::rename("acme/us"))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn lists_archived_tags_when_asked() {
+    let dp = MockServer::start().await;
+    let mut archived = tag("annotation", json!("#f97316"), serde_json::Value::Null);
+    archived["archived_at"] = json!("2026-11-10T12:00:00Z");
+    archived["replaced_by"] = json!("expert-review");
+    archived["archived_names"] = json!([]);
+    Mock::given(method("GET"))
+        .and(path("/v1/tags"))
+        .and(query_param("kind", "annotation"))
+        .and(query_param("include", "archived"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [archived], "count": 1, "next": null
+        })))
+        .mount(&dp)
+        .await;
+    let params = TagListParams {
+        include: vec![TagInclude::Archived],
+        ..TagListParams::new(TagKind::Annotation)
+    };
+    let tags: Vec<_> = Tags::new(http(&dp))
+        .list(&params)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].replaced_by.as_deref(), Some("expert-review"));
+    assert!(tags[0].archived_at.is_some());
+}
+
+#[tokio::test]
+async fn a_tag_from_a_server_that_predates_renames_still_decodes() {
+    let dp = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/tags/annotation/needs-review"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tag(
+            "annotation",
+            json!("#f97316"),
+            serde_json::Value::Null,
+        )))
+        .mount(&dp)
+        .await;
+    let fetched = Tags::new(http(&dp))
+        .get(TagKind::Annotation, "needs-review")
+        .await
+        .unwrap();
+    assert!(fetched.archived_at.is_none());
+    assert!(fetched.replaced_by.is_none());
+    assert!(fetched.archived_names.is_none());
 }
 
 #[tokio::test]

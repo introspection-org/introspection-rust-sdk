@@ -60,8 +60,27 @@ pub struct Tag {
     pub color: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// When a rename archived this tag; `None` on a live tag.
+    #[serde(default)]
+    pub archived_at: Option<String>,
+    /// The tag an archived one was renamed to.
+    #[serde(default)]
+    pub replaced_by: Option<String>,
+    /// The archived names renamed to this tag, which its dataset also covers.
+    /// `None` from a server that predates tag renames.
+    #[serde(default)]
+    pub archived_names: Option<Vec<String>>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Rows a tag list leaves out unless asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TagInclude {
+    /// The tags a rename archived.
+    Archived,
 }
 
 /// A tag to add. The kind picks the variant, so an `access` tag has no colour
@@ -123,6 +142,10 @@ impl TagCreate {
 /// which is why it nests: the API distinguishes an omitted field from a null.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TagUpdate {
+    /// Rename an `annotation` tag: this one is archived and the tag that
+    /// replaces it comes back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -130,25 +153,33 @@ pub struct TagUpdate {
 }
 
 impl TagUpdate {
+    /// Rename an annotation tag, archiving the old name.
+    pub fn rename(name: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..Self::default()
+        }
+    }
+
     pub fn color(color: impl Into<String>) -> Self {
         Self {
             color: Some(color.into()),
-            description: None,
+            ..Self::default()
         }
     }
 
     pub fn description(description: impl Into<String>) -> Self {
         Self {
-            color: None,
             description: Some(Some(description.into())),
+            ..Self::default()
         }
     }
 
     /// Clear the description.
     pub fn clear_description() -> Self {
         Self {
-            color: None,
             description: Some(None),
+            ..Self::default()
         }
     }
 }
@@ -162,6 +193,9 @@ pub struct TagListParams {
     pub pagination: PaginationParams,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
+    /// `Archived` also returns the tags a rename archived.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<TagInclude>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string (a string, bool or number as itself, an
     /// array as a repeated key; a null is dropped, an object is refused).
@@ -177,6 +211,7 @@ impl TagListParams {
             kind,
             pagination: PaginationParams::default(),
             search: None,
+            include: Vec::new(),
             filters: None,
         }
     }
@@ -210,10 +245,12 @@ impl Tags {
         self.http.get_json(&path(kind, name), &Q {}).await
     }
 
+    /// Change a tag. A new `name` archives this one and returns the tag that
+    /// replaces it.
     pub async fn update(&self, kind: TagKind, name: &str, input: TagUpdate) -> ApiResult<Tag> {
-        if input.color.is_none() && input.description.is_none() {
+        if input.name.is_none() && input.color.is_none() && input.description.is_none() {
             return Err(validation(
-                "A tag update must name a color or a description",
+                "A tag update must name a new name, a color or a description",
                 "invalid_tag_update",
             ));
         }
@@ -223,7 +260,18 @@ impl Tags {
                 "invalid_tag_color",
             ));
         }
+        if kind == TagKind::Access && input.name.is_some() {
+            return Err(validation(
+                "An access tag cannot be renamed",
+                "invalid_tag_rename",
+            ));
+        }
+        let new_name = input.name.map(|new_name| new_name.trim().to_string());
+        if let Some(new_name) = new_name.as_deref() {
+            check_name(new_name)?;
+        }
         let input = TagUpdate {
+            name: new_name,
             color: input.color.map(|color| color.to_lowercase()),
             description: input.description,
         };

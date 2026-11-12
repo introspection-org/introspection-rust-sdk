@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.46.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.45.0...v0.46.0) (2026-11-12)
+
+
+### Features
+
+* model the response fields and filters introspection-cloud v0.84.0 added ([#229](https://github.com/introspection-org/introspection-rust-sdk/issues/229)) ([78583b3](https://github.com/introspection-org/introspection-rust-sdk/commit/78583b3b44b86fd296e18f9cf7eaf4648b0f2c24))
+
+## [0.45.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.44.0...v0.45.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tags:** Tag, TagUpdate and TagListParams gain public fields, so a struct literal of one needs the new fields or ..Default::default() (TagListParams::new for the list params).
+
+### Features
+
+* **tags:** model a tag's archived_at, replaced_by and archived_names; rename and list archived tags ([#225](https://github.com/introspection-org/introspection-rust-sdk/issues/225)) ([830f766](https://github.com/introspection-org/introspection-rust-sdk/commit/830f7661a97bca94d64e4d0703e38066e3615564))
+
 ## [0.44.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.43.0...v0.44.0) (2026-11-12)
 
 

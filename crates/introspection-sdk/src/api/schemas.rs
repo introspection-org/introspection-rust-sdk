@@ -1000,6 +1000,13 @@ pub struct Recipe {
     /// Result of the recipe check.
     #[serde(default)]
     pub validation: Option<RecipeValidation>,
+    /// The agents this version defines, from `agents/<name>.yaml`, the
+    /// default first. `None` until checked.
+    #[serde(default)]
+    pub agents: Option<Vec<String>>,
+    /// The issue providers the recipe declares.
+    #[serde(default)]
+    pub issue_providers: Option<Vec<String>>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
@@ -4147,6 +4154,10 @@ pub struct Project {
     pub description: Option<String>,
     #[serde(default)]
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
+    /// The prefixes of the project's display ids. The server fills every
+    /// one; `None` only from a server that predates them.
+    #[serde(default)]
+    pub display_id_prefixes: Option<DisplayIdPrefixes>,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
 }
@@ -4254,19 +4265,29 @@ impl ProjectCreateParams {
 pub struct ProjectUpdateParams {
     pub name: Option<String>,
     pub description: Option<String>,
+    /// The prefixes to change; one left out keeps its current value.
     pub display_id_prefixes: Option<DisplayIdPrefixes>,
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// The prefixes of a project's display ids (`I-1`, `R-1`, ...), each at
-/// most five characters. The server fills a prefix left out with its
-/// default.
+/// most five characters. On a create the server fills a prefix left out
+/// with its default; on an update it keeps the current one. A [`Project`]
+/// carries all four.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DisplayIdPrefixes {
+    /// Defaults to `I`.
+    #[serde(default)]
     pub issue: Option<String>,
+    /// Defaults to `R`.
+    #[serde(default)]
     pub report: Option<String>,
+    /// Defaults to `F`.
+    #[serde(default)]
     pub observation: Option<String>,
+    /// Defaults to `T`.
+    #[serde(default)]
     pub task: Option<String>,
 }
 
@@ -4286,6 +4307,34 @@ pub struct Organization {
     /// Whether new hosted repositories are allowed.
     #[serde(default = "default_true")]
     pub hosted_git: bool,
+    /// How members sign in and who can be invited; present only where the
+    /// organization has Enterprise sign-in.
+    #[serde(default)]
+    pub sign_in: Option<SignInSettings>,
+}
+
+/// An [`Organization`]'s sign-in settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SignInSettings {
+    #[serde(default)]
+    pub passkey_requirement: PasskeyRequirement,
+    /// Whether invites are limited to the organization's domains.
+    #[serde(default)]
+    pub restrict_invites_to_domains: bool,
+}
+
+open_wire_enum! {
+    /// When an organization's members must sign in with a passkey.
+    #[derive(Default)]
+    pub enum PasskeyRequirement {
+        /// A passkey is never required.
+        #[default]
+        Off => "off",
+        /// Every member signs in with a passkey.
+        Always => "always",
+        /// Always, except members who sign in through SSO.
+        ExceptSso => "except_sso",
+    }
 }
 
 /// `POST /v1/tokens` body: a Data Plane token for one project, minted from
@@ -4865,6 +4914,10 @@ pub struct Issue {
     /// Project-scoped display ID.
     #[serde(default)]
     pub display_index: Option<i64>,
+    /// The display ID with the project's issue prefix, e.g. `I-7`; `None`
+    /// without a display index.
+    #[serde(default)]
+    pub display_key: Option<String>,
     pub title: String,
     /// Markdown.
     pub description: String,
@@ -4912,6 +4965,10 @@ pub struct Issue {
     /// With [`IssueInclude::Comments`].
     #[serde(default)]
     pub comments: Option<Vec<IssueComment>>,
+    /// What this read left out, such as the comments beyond the include's
+    /// cap. `None` only from a server that predates it.
+    #[serde(default)]
+    pub warnings: Option<Vec<String>>,
 }
 
 impl Issue {
@@ -5058,6 +5115,9 @@ pub struct IssueListParams {
     /// The project-scoped display ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_index: Option<i64>,
+    /// The display ID with the project's issue prefix, e.g. `I-7`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_key: Option<String>,
     /// One `key:value` tag, e.g. `customer:acme`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
@@ -6458,9 +6518,13 @@ pub struct RunCaller {
     pub library: Option<RunCallerLibrary>,
     #[serde(default)]
     pub page: Option<RunCallerPage>,
+    /// IANA time zone, e.g. `America/Los_Angeles`. The agent reads its
+    /// current date in it.
+    #[serde(default)]
+    pub timezone: Option<String>,
     /// Any additional fields the caller supplied (app / device / os /
-    /// campaign / network / screen / timezone / traits / custom keys)
-    /// pass through verbatim.
+    /// campaign / network / screen / traits / custom keys) pass through
+    /// verbatim.
     #[serde(default, flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -8508,6 +8572,24 @@ mod tests {
 
         assert!(body.get("from_timestamp").is_some());
         assert!(body.get("to_timestamp").is_some());
+    }
+
+    #[test]
+    fn run_caller_carries_its_timezone_both_ways() {
+        let caller = RunCaller {
+            timezone: Some("America/Los_Angeles".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&caller).unwrap(),
+            json!({"timezone": "America/Los_Angeles"})
+        );
+        let echoed: RunCaller =
+            serde_json::from_value(json!({"locale": "en-US", "timezone": "Europe/Paris"})).unwrap();
+        assert_eq!(echoed.timezone.as_deref(), Some("Europe/Paris"));
+        assert!(echoed.extra.is_empty());
+        let older: RunCaller = serde_json::from_value(json!({"locale": "en-US"})).unwrap();
+        assert!(older.timezone.is_none());
     }
 
     #[test]
