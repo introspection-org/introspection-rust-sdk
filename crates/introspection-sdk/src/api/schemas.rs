@@ -7236,6 +7236,9 @@ pub enum IntrospectionEventName {
     Feedback,
     Observation,
     ObservationClusteringRun,
+    /// How synthesis of one queued conversation ended
+    /// ([`ObservationSynthesisCompletedPayload`]).
+    ObservationSynthesisCompleted,
     Judgement,
     /// One recorded action on an issue or on one of its human requests.
     Issue,
@@ -7259,6 +7262,7 @@ impl IntrospectionEventName {
             Self::Feedback => "introspection.feedback",
             Self::Observation => "introspection.observation",
             Self::ObservationClusteringRun => "introspection.observation_clustering.run",
+            Self::ObservationSynthesisCompleted => "introspection.observation_synthesis.completed",
             Self::Judgement => "introspection.judgement",
             Self::Issue => "introspection.issue",
             Self::Pattern => "introspection.pattern",
@@ -7284,6 +7288,7 @@ impl<'de> Deserialize<'de> for IntrospectionEventName {
             "introspection.feedback" => Self::Feedback,
             "introspection.observation" => Self::Observation,
             "introspection.observation_clustering.run" => Self::ObservationClusteringRun,
+            "introspection.observation_synthesis.completed" => Self::ObservationSynthesisCompleted,
             "introspection.judgement" => Self::Judgement,
             "introspection.issue" => Self::Issue,
             "introspection.pattern" => Self::Pattern,
@@ -7441,6 +7446,8 @@ pub struct ClusteringRunPayload {
     pub run_id: String,
     #[serde(default)]
     pub lens: Option<String>,
+    /// `completed`, `skipped`, or `failed` (persisting the lens failed; see
+    /// [`Self::error`]).
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
@@ -7455,6 +7462,41 @@ pub struct ClusteringRunPayload {
     pub params: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub replaces_run_id: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// How synthesis of one queued conversation ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationSynthesisStatus {
+    /// Synthesised, possibly into zero observations.
+    Completed,
+    /// Dropped after its last attempt failed.
+    Failed,
+    /// A status this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// `introspection.observation_synthesis.completed` payload — how synthesis of
+/// one queued conversation ended, even with no observations (stream family).
+/// The conversation is the event's `conversation_id`. A trigger with
+/// `conversation_ids` reports how many it queued in
+/// [`AutomationTriggerResponse::enqueued`]; each gets one of these events.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ObservationSynthesisCompletedPayload {
+    /// `completed`, or `failed` after its last attempt.
+    pub status: ObservationSynthesisStatus,
+    /// Observations this pass created.
+    #[serde(default)]
+    pub observation_count: i64,
+    /// Why a completed pass created nothing (`no_content`,
+    /// `no_observations`).
+    #[serde(default)]
+    pub skipped_reason: Option<String>,
+    /// Failure detail for a failed pass.
     #[serde(default)]
     pub error: Option<String>,
 }
@@ -7762,6 +7804,7 @@ pub type ObservationEvent = TypedEvent<ObservationPayload>;
 pub type PatternEvent = TypedEvent<PatternPayload>;
 pub type PatternAssignmentEvent = TypedEvent<PatternAssignmentPayload>;
 pub type ClusteringRunEvent = TypedEvent<ClusteringRunPayload>;
+pub type ObservationSynthesisCompletedEvent = TypedEvent<ObservationSynthesisCompletedPayload>;
 pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
 pub type AnnotationEvent = TypedEvent<AnnotationPayload>;
 pub type JudgementEvent = TypedEvent<JudgementPayload>;
@@ -7788,6 +7831,8 @@ pub enum Event {
     Observation(ObservationEvent),
     #[serde(rename = "introspection.observation_clustering.run")]
     ObservationClusteringRun(ClusteringRunEvent),
+    #[serde(rename = "introspection.observation_synthesis.completed")]
+    ObservationSynthesisCompleted(ObservationSynthesisCompletedEvent),
     #[serde(rename = "introspection.judgement")]
     Judgement(JudgementEvent),
     #[serde(rename = "introspection.issue")]
@@ -7815,6 +7860,9 @@ impl Event {
             Self::Observation(_) => Some(IntrospectionEventName::Observation),
             Self::ObservationClusteringRun(_) => {
                 Some(IntrospectionEventName::ObservationClusteringRun)
+            }
+            Self::ObservationSynthesisCompleted(_) => {
+                Some(IntrospectionEventName::ObservationSynthesisCompleted)
             }
             Self::Judgement(_) => Some(IntrospectionEventName::Judgement),
             Self::Issue(_) => Some(IntrospectionEventName::Issue),
@@ -9156,6 +9204,10 @@ mod tests {
             (
                 IntrospectionEventName::ObservationClusteringRun,
                 "introspection.observation_clustering.run",
+            ),
+            (
+                IntrospectionEventName::ObservationSynthesisCompleted,
+                "introspection.observation_synthesis.completed",
             ),
             (IntrospectionEventName::Judgement, "introspection.judgement"),
             (IntrospectionEventName::Pattern, "introspection.pattern"),

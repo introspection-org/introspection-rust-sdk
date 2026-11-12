@@ -12,7 +12,7 @@ use introspection_sdk::{
     AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
     AutomationSkipReason, AutomationTriggerParams, AutomationTriggerType, AutomationUpdateParams,
     Automations, ClientConfig, Event, EventListParams, Events, IntrospectionClient,
-    IntrospectionEventName, PaginationParams, TaskRepoRequest,
+    IntrospectionEventName, ObservationSynthesisStatus, PaginationParams, TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -773,4 +773,136 @@ fn automation_event_names_round_trip() {
             name
         );
     }
+}
+
+#[tokio::test]
+async fn synthesis_completed_events_list_by_conversation() {
+    let server = MockServer::start().await;
+    let completed = json!({
+        "id": "evt_completed",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "event_name": "introspection.observation_synthesis.completed",
+        "conversation_id": "conv-a",
+        "payload": {
+            "status": "completed",
+            "observation_count": 0,
+            "skipped_reason": "no_observations",
+        },
+    });
+    let failed = json!({
+        "id": "evt_failed",
+        "timestamp": "2026-11-12T09:00:01Z",
+        "event_name": "introspection.observation_synthesis.completed",
+        "conversation_id": "conv-b",
+        "payload": {
+            "status": "failed",
+            "observation_count": 0,
+            "error": "model timed out",
+        },
+    });
+    Mock::given(method("GET"))
+        .and(path("/v1/events"))
+        .and(query_param(
+            "event_name",
+            "introspection.observation_synthesis.completed",
+        ))
+        .and(query_param("conversation_ids", "conv-a"))
+        .and(query_param("conversation_ids", "conv-b"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(page(vec![completed.clone(), failed.clone()], None)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let found: Vec<_> = Events::new(build_http(&server))
+        .list(&EventListParams {
+            conversation_ids: Some(vec!["conv-a".into(), "conv-b".into()]),
+            ..EventListParams::new(IntrospectionEventName::ObservationSynthesisCompleted)
+        })
+        .unwrap()
+        .collect()
+        .await;
+
+    let events: Vec<Event> = found.into_iter().map(Result::unwrap).collect();
+    let [Event::ObservationSynthesisCompleted(first), Event::ObservationSynthesisCompleted(second)] =
+        &events[..]
+    else {
+        panic!("expected two synthesis events, got {events:?}");
+    };
+    assert_eq!(first.conversation_id.as_deref(), Some("conv-a"));
+    assert_eq!(first.payload.status, ObservationSynthesisStatus::Completed);
+    assert_eq!(first.payload.observation_count, 0);
+    assert_eq!(
+        first.payload.skipped_reason.as_deref(),
+        Some("no_observations")
+    );
+    assert_eq!(second.payload.status, ObservationSynthesisStatus::Failed);
+    assert_eq!(second.payload.error.as_deref(), Some("model timed out"));
+    assert_eq!(
+        events[0].event_name(),
+        Some(IntrospectionEventName::ObservationSynthesisCompleted)
+    );
+    // Both serialise back to what the server sent.
+    assert_eq!(serde_json::to_value(&events[0]).unwrap(), completed);
+    assert_eq!(serde_json::to_value(&events[1]).unwrap(), failed);
+}
+
+#[test]
+fn a_synthesis_status_from_the_future_is_kept() {
+    let event: Event = serde_json::from_value(json!({
+        "id": "evt_future",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "event_name": "introspection.observation_synthesis.completed",
+        "payload": { "status": "cancelled" },
+    }))
+    .unwrap();
+    let Event::ObservationSynthesisCompleted(event) = event else {
+        panic!("expected a synthesis event, got {event:?}");
+    };
+    assert_eq!(
+        event.payload.status,
+        ObservationSynthesisStatus::Unknown(json!("cancelled"))
+    );
+    assert_eq!(event.payload.observation_count, 0);
+}
+
+#[test]
+fn a_failed_clustering_run_decodes() {
+    let wire = json!({
+        "id": "evt_run",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "event_name": "introspection.observation_clustering.run",
+        "payload": {
+            "run_id": "run_1",
+            "lens": "friction",
+            "status": "failed",
+            "trigger": "manual",
+            "error": "persisting the lens failed",
+        },
+    });
+    let event: Event = serde_json::from_value(wire.clone()).unwrap();
+    let Event::ObservationClusteringRun(run) = &event else {
+        panic!("expected a clustering run, got {event:?}");
+    };
+    assert_eq!(run.payload.status.as_deref(), Some("failed"));
+    assert_eq!(
+        run.payload.error.as_deref(),
+        Some("persisting the lens failed")
+    );
+    assert_eq!(serde_json::to_value(&event).unwrap(), wire);
+}
+
+#[test]
+fn synthesis_completed_event_name_round_trips() {
+    let name = IntrospectionEventName::ObservationSynthesisCompleted;
+    assert_eq!(
+        name.as_str(),
+        "introspection.observation_synthesis.completed"
+    );
+    assert_eq!(
+        serde_json::from_value::<IntrospectionEventName>(json!(name.as_str())).unwrap(),
+        name
+    );
 }
