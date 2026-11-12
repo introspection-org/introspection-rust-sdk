@@ -91,9 +91,11 @@ impl Automations {
     }
 
     /// `POST /v1/automations/{id}/trigger` with a body: run it now on the
-    /// given `conversation_ids` (honoured only for an
+    /// given `conversation_ids` (at most 100). Only an
     /// [`AutomationKind::ObservationSynthesis`](crate::AutomationKind::ObservationSynthesis)
-    /// automation). Default params send `{}`, like [`Self::trigger`].
+    /// automation takes them; any other kind answers `422`. An unreadable
+    /// conversation answers `404`, one whose turn is still running `409`.
+    /// Default params send `{}`, like [`Self::trigger`].
     pub async fn trigger_with(
         &self,
         automation_id: Uuid,

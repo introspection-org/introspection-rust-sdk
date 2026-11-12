@@ -4653,11 +4653,13 @@ pub struct AutomationListParams {
 #[serde(deny_unknown_fields)]
 pub struct AutomationTriggerParams {
     /// Conversations to synthesise from instead of the automation's own
-    /// selection. The server honours it only for an
-    /// [`AutomationKind::ObservationSynthesis`] automation. Not sent when
-    /// empty.
+    /// selection, at most 100. Only an
+    /// [`AutomationKind::ObservationSynthesis`] automation takes it; any
+    /// other kind answers `422` when it is sent. A conversation the caller
+    /// cannot read answers `404`, and one whose turn is still running `409`.
+    /// Not sent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub conversation_ids: Vec<Uuid>,
+    pub conversation_ids: Vec<String>,
 }
 
 /// `POST /v1/automations/{id}/trigger` response. A `skipped` status carries

@@ -500,11 +500,10 @@ async fn trigger_sends_an_empty_body() {
 #[tokio::test]
 async fn trigger_with_sends_the_conversation_ids() {
     let server = MockServer::start().await;
-    let conversations = [id(TASK_ID), id(GROUP_ID)];
     Mock::given(method("POST"))
         .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
         .and(body_json(
-            json!({ "conversation_ids": [TASK_ID, GROUP_ID] }),
+            json!({ "conversation_ids": ["conv-a", "conv-b"] }),
         ))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "triggered",
@@ -519,7 +518,7 @@ async fn trigger_with_sends_the_conversation_ids() {
         .trigger_with(
             id(AUTOMATION_ID),
             &AutomationTriggerParams {
-                conversation_ids: conversations.to_vec(),
+                conversation_ids: vec!["conv-a".into(), "conv-b".into()],
             },
         )
         .await
@@ -555,7 +554,7 @@ async fn a_clustering_trigger_returns_its_run() {
 #[test]
 fn trigger_params_refuse_an_unknown_field() {
     let err = serde_json::from_value::<AutomationTriggerParams>(json!({
-        "conversation_id": [TASK_ID],
+        "conversation_id": ["conv-a"],
     }))
     .unwrap_err();
     assert!(err.to_string().contains("conversation_id"), "{err}");
