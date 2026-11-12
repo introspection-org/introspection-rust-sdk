@@ -121,3 +121,30 @@ fn a_new_status_and_severity_read_as_other_and_encode_back() {
     );
     assert_eq!(serde_json::to_value(&decoded).unwrap(), validation);
 }
+
+#[test]
+fn agents_and_issue_providers_decode_and_round_trip() {
+    let mut body = recipe(json!({"status": "valid", "diagnostics": []}));
+    body["agents"] = json!(["agent", "triage"]);
+    body["issue_providers"] = json!(["linear"]);
+
+    let decoded: Recipe = serde_json::from_value(body.clone()).unwrap();
+    assert_eq!(
+        decoded.agents.as_deref(),
+        Some(&["agent".to_string(), "triage".to_string()][..])
+    );
+    assert_eq!(
+        decoded.issue_providers.as_deref(),
+        Some(&["linear".to_string()][..])
+    );
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), body);
+}
+
+#[test]
+fn an_unchecked_recipe_has_no_agents() {
+    let mut body = recipe(json!({"status": "pending", "diagnostics": []}));
+    body["agents"] = Value::Null;
+    let decoded: Recipe = serde_json::from_value(body).unwrap();
+    assert!(decoded.agents.is_none());
+    assert!(decoded.issue_providers.is_none());
+}

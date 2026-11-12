@@ -1000,6 +1000,13 @@ pub struct Recipe {
     /// Result of the recipe check.
     #[serde(default)]
     pub validation: Option<RecipeValidation>,
+    /// The agents this version defines, from `agents/<name>.yaml`, the
+    /// default first. `None` until checked.
+    #[serde(default)]
+    pub agents: Option<Vec<String>>,
+    /// The issue providers the recipe declares.
+    #[serde(default)]
+    pub issue_providers: Option<Vec<String>>,
     pub created_by_member_id: Uuid,
     pub created_at: String,
     pub updated_at: String,
@@ -4147,6 +4154,10 @@ pub struct Project {
     pub description: Option<String>,
     #[serde(default)]
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
+    /// The prefixes of the project's display ids. The server fills every
+    /// one; `None` only from a server that predates them.
+    #[serde(default)]
+    pub display_id_prefixes: Option<DisplayIdPrefixes>,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
 }
@@ -4254,19 +4265,29 @@ impl ProjectCreateParams {
 pub struct ProjectUpdateParams {
     pub name: Option<String>,
     pub description: Option<String>,
+    /// The prefixes to change; one left out keeps its current value.
     pub display_id_prefixes: Option<DisplayIdPrefixes>,
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 /// The prefixes of a project's display ids (`I-1`, `R-1`, ...), each at
-/// most five characters. The server fills a prefix left out with its
-/// default.
+/// most five characters. On a create the server fills a prefix left out
+/// with its default; on an update it keeps the current one. A [`Project`]
+/// carries all four.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DisplayIdPrefixes {
+    /// Defaults to `I`.
+    #[serde(default)]
     pub issue: Option<String>,
+    /// Defaults to `R`.
+    #[serde(default)]
     pub report: Option<String>,
+    /// Defaults to `F`.
+    #[serde(default)]
     pub observation: Option<String>,
+    /// Defaults to `T`.
+    #[serde(default)]
     pub task: Option<String>,
 }
 
@@ -4822,6 +4843,10 @@ pub struct Issue {
     /// Project-scoped display ID.
     #[serde(default)]
     pub display_index: Option<i64>,
+    /// The display ID with the project's issue prefix, e.g. `I-7`; `None`
+    /// without a display index.
+    #[serde(default)]
+    pub display_key: Option<String>,
     pub title: String,
     /// Markdown.
     pub description: String,
@@ -5015,6 +5040,9 @@ pub struct IssueListParams {
     /// The project-scoped display ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_index: Option<i64>,
+    /// The display ID with the project's issue prefix, e.g. `I-7`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_key: Option<String>,
     /// One `key:value` tag, e.g. `customer:acme`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,

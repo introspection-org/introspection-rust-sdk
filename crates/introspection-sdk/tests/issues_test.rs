@@ -46,6 +46,7 @@ fn issue_json() -> serde_json::Value {
         "created_at": "2026-11-04T00:00:00Z",
         "updated_at": "2026-11-04T01:00:00Z",
         "display_index": 7,
+        "display_key": "I-7",
         "title": "Clarify affiliation rules",
         "description": "Affiliate classifications are inconsistent.",
         "status": "waiting",
@@ -156,6 +157,7 @@ async fn list_sends_repeated_filters_and_decodes_every_field() {
     assert_eq!(first.priority, IssuePriority::High);
     assert_eq!(first.revision, 3);
     assert_eq!(first.display_index, Some(7));
+    assert_eq!(first.display_key.as_deref(), Some("I-7"));
     assert_eq!(first.task_status, Some(TaskStatus::Idle));
     assert_eq!(first.metadata["attempts"], json!(2));
     assert_eq!(first.created_by_member_id, Some(id(MEMBER_ID)));
@@ -465,4 +467,46 @@ fn an_issue_etag_is_its_updated_at_as_rendered() {
     let mut issue: introspection_sdk::Issue = serde_json::from_value(issue_json()).unwrap();
     issue.updated_at = "2026-11-04T01:00:00.123456Z".into();
     assert_eq!(issue.etag(), "\"2026-11-04T01:00:00.123456Z\"");
+}
+
+#[tokio::test]
+async fn list_filters_by_display_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/issues"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [issue_json()],
+            "count": 1,
+            "next": null,
+        })))
+        .mount(&server)
+        .await;
+
+    let params = IssueListParams {
+        display_key: Some("I-7".into()),
+        ..Default::default()
+    };
+    let issue = build_http(&server)
+        .issues()
+        .list(&params)
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(issue.display_key.as_deref(), Some("I-7"));
+
+    let received = server.received_requests().await.unwrap();
+    assert_eq!(
+        query_pairs(&received[0]),
+        vec![("display_key".to_string(), "I-7".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn an_issue_without_a_display_index_has_no_display_key() {
+    let mut body = issue_json();
+    body["display_index"] = serde_json::Value::Null;
+    body.as_object_mut().unwrap().remove("display_key");
+    let issue: introspection_sdk::Issue = serde_json::from_value(body).unwrap();
+    assert!(issue.display_key.is_none());
 }
