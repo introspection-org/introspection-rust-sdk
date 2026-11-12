@@ -2776,14 +2776,6 @@ impl<'de> Deserialize<'de> for ConnectionSubjectType {
     }
 }
 
-/// Subjects currently accepted by registered connection creation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionCreateSubjectType {
-    App,
-    User,
-}
-
 /// Subjects currently accepted by authorize and token-broker operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2854,58 +2846,6 @@ pub struct Connector {
     pub requires_runtime: bool,
 }
 
-/// A connection under a connector. Access/refresh tokens are **never**
-/// serialized by the API, so they do not appear here.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Connection {
-    pub id: Uuid,
-    pub org_id: Uuid,
-    pub created_at: String,
-    pub updated_at: String,
-    pub connector_id: Uuid,
-    /// The project the connection serves. For a connector reached through a
-    /// runtime peering, the member's project, not the connector's own.
-    #[serde(default)]
-    pub project_id: Option<Uuid>,
-    /// `None` = org-owned (app subject); for a Slack workspace install this
-    /// points at the workspace customer member.
-    #[serde(default)]
-    pub member_id: Option<Uuid>,
-    /// The member who performed the grant, as distinct from `member_id`
-    /// (whose credential this is). For `app` and `workspace` subjects those
-    /// are never the same principal. `None` for grants made before the
-    /// column existed.
-    #[serde(default)]
-    pub created_by_member_id: Option<Uuid>,
-    /// Runtime group answering this connection's channels.
-    #[serde(default)]
-    pub runtime_group_id: Option<Uuid>,
-    pub subject_type: ConnectionSubjectType,
-    #[serde(default)]
-    pub scopes_granted: Vec<String>,
-    /// Application slug within a multi-application provider (Pipedream), as
-    /// [`Connectors::list_apps`] returns it. `None` for a provider with a
-    /// dedicated host.
-    ///
-    /// [`Connectors::list_apps`]: crate::resources::connectors::Connectors::list_apps
-    #[serde(default)]
-    pub provider_app: Option<String>,
-    /// The provider's own identifier for the connected account. An opaque
-    /// routing id, not a secret.
-    #[serde(default)]
-    pub provider_account_id: Option<String>,
-    /// The provider's display name for the connected account.
-    #[serde(default)]
-    pub provider_account_name: Option<String>,
-    /// When the grant was last confirmed usable.
-    #[serde(default)]
-    pub last_verified_at: Option<String>,
-    pub status: ConnectionStatus,
-    #[serde(default)]
-    pub token_expires_at: Option<String>,
-}
-
 /// Filters supported by `GET /v1/connectors`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ConnectorListParams {
@@ -2922,18 +2862,6 @@ pub struct ConnectorListParams {
     /// array as a repeated key; a null is dropped, an object is refused).
     /// Prefer the typed field where one exists; on a collision the
     /// passthrough wins.
-    #[serde(flatten)]
-    pub filters: Option<HashMap<String, serde_json::Value>>,
-}
-
-/// Parameters for `GET /v1/connectors/{connector_id}/connections`.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ConnectionListParams {
-    #[serde(flatten)]
-    pub pagination: PaginationParams,
-    /// Escape hatch for a filter this SDK build predates: each pair is merged
-    /// verbatim onto the query string (a string, bool or number as itself, an
-    /// array as a repeated key; a null is dropped, an object is refused).
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
@@ -3095,38 +3023,6 @@ pub struct EntityUid {
     #[serde(rename = "type")]
     pub entity_type: String,
     pub id: String,
-}
-
-/// `POST /v1/connectors/{connector_id}/connections` body — registered mode,
-/// where the caller supplies an already-minted provider token.
-///
-/// Deserializable too, so a body can be read from a JSON document.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConnectionCreateParams {
-    pub access_token: String,
-    /// Defaults to `App` server-side.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject_type: Option<ConnectionCreateSubjectType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scopes_granted: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_expires_at: Option<String>,
-}
-
-impl ConnectionCreateParams {
-    /// A registered-mode body carrying only the token the route requires.
-    pub fn new(access_token: impl Into<String>) -> Self {
-        Self {
-            access_token: access_token.into(),
-            subject_type: None,
-            scopes_granted: None,
-            refresh_token: None,
-            token_expires_at: None,
-        }
-    }
 }
 
 /// `POST /v1/oauth/connections/authorize` options (the `connector_id` itself
@@ -3390,6 +3286,9 @@ pub struct ConnectorOAuthDiscovery {
     /// automatic registration.
     #[serde(default)]
     pub client_registration: Option<ClientRegistrationMethod>,
+    /// RFC 7009 token revocation endpoint, if the provider advertises one.
+    #[serde(default)]
+    pub revocation_endpoint: Option<String>,
 }
 
 /// Response of `POST /v1/oauth/connections/authorize` — a freshly minted
@@ -3899,6 +3798,11 @@ pub struct EndpointMetadata {
     pub mcp_server_id: Option<String>,
     #[serde(default)]
     pub connector_id: Option<Uuid>,
+    /// The organization integration whose task member's own connection
+    /// authenticates the endpoint, in a project that allows its type.
+    /// Exclusive with `connector_id`.
+    #[serde(default)]
+    pub integration_id: Option<Uuid>,
     #[serde(default)]
     pub provider_app: Option<String>,
     /// Hosts the endpoint hands out URLs on that carry their own credential.
@@ -4158,6 +4062,10 @@ pub struct Project {
     /// one; `None` only from a server that predates them.
     #[serde(default)]
     pub display_id_prefixes: Option<DisplayIdPrefixes>,
+    /// Integration types whose members' own connections the project's
+    /// agents may use. `None` only from a server that predates them.
+    #[serde(default)]
+    pub connection_integrations: Option<Vec<IntegrationType>>,
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
 }
@@ -4242,6 +4150,9 @@ pub struct ProjectCreateParams {
     /// Seed the Ark runtime. `None`: an organization's first project takes
     /// it and later ones do not.
     pub include_ark: Option<bool>,
+    /// Integration types whose members' own connections the project's
+    /// agents may use; none by default.
+    pub connection_integrations: Option<Vec<IntegrationType>>,
 }
 
 impl ProjectCreateParams {
@@ -4254,6 +4165,7 @@ impl ProjectCreateParams {
             display_id_prefixes: None,
             settings: None,
             include_ark: None,
+            connection_integrations: None,
         }
     }
 }
@@ -4268,6 +4180,9 @@ pub struct ProjectUpdateParams {
     /// The prefixes to change; one left out keeps its current value.
     pub display_id_prefixes: Option<DisplayIdPrefixes>,
     pub settings: Option<BTreeMap<String, serde_json::Value>>,
+    /// Replaces the integration types whose members' own connections the
+    /// project's agents may use.
+    pub connection_integrations: Option<Vec<IntegrationType>>,
 }
 
 /// The prefixes of a project's display ids (`I-1`, `R-1`, ...), each at
@@ -4311,6 +4226,10 @@ pub struct Organization {
     /// organization has Enterprise sign-in.
     #[serde(default)]
     pub sign_in: Option<SignInSettings>,
+    /// Whether the subscription is paid and grants the organization's roles
+    /// their full scopes. `None` only from a server that predates it.
+    #[serde(default)]
+    pub subscription_live: Option<bool>,
 }
 
 /// An [`Organization`]'s sign-in settings.
@@ -5135,9 +5054,9 @@ pub struct IssueListParams {
 
 // ----- member connections (DP) -----------------------------------------------
 
-/// An app (Gmail, Slack, …) a member connected for themself, which the agent
-/// acts with in that member's sessions. Distinct from a connector's
-/// [`Connection`].
+/// A connection: a member's own grant (an app such as Gmail, or an
+/// account through an organization integration), or the project's own
+/// account on a connector.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemberConnection {
@@ -5173,6 +5092,16 @@ pub struct MemberConnection {
     /// The member who performed the grant.
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
+    /// The organization integration the connection is through; `None` for
+    /// a connector's.
+    #[serde(default)]
+    pub integration_id: Option<Uuid>,
+    /// The runtime group whose channels it answers, if any.
+    #[serde(default)]
+    pub runtime_group_id: Option<Uuid>,
+    /// When the access token expires, if it does.
+    #[serde(default)]
+    pub token_expires_at: Option<String>,
     pub created_at: String,
     #[serde(default)]
     pub updated_at: Option<String>,
@@ -5215,29 +5144,63 @@ pub struct MemberConnectionListParams {
     /// Provider application slug, e.g. `"gmail"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
+    /// Only connections on this connector.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector_id: Option<Uuid>,
+    /// Only members' own connections through this organization integration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_type: Option<ConnectionSubjectType>,
+    /// Only connectors reached through this runtime peering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peering: Option<String>,
+    /// Only accounts whose name, such as an email, contains this (1-128
+    /// characters, any case).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
     /// Escape hatch for a filter this SDK build predates: each pair is merged
     /// verbatim onto the query string. On a collision the passthrough wins.
     #[serde(flatten)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// Body of `POST /v1/connections`. Build with [`MemberConnectionCreate::new`].
+/// Body of `POST /v1/connections`: an app through the project's app
+/// connector ([`Self::new`]) or an organization integration
+/// ([`Self::integration`]), never both.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct MemberConnectionCreate {
     /// Provider application slug, e.g. `"gmail"`.
-    pub app: String,
-    /// Runtime slug or runtime group id whose sessions use the connection.
-    /// Required on the client; on a runner, `None` means the runner's own
-    /// runtime group.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// Runtime slug or runtime group id whose sessions use an app
+    /// connection. Required with `app` on the client; on a runner, `None`
+    /// means the runner's own runtime group.
     pub runtime: Option<StringOrUuid>,
+    /// Connect the caller's own account through this organization
+    /// integration, once for every project that allows its type.
+    pub integration_id: Option<Uuid>,
+    /// The app's own link the connect page ends on, such as
+    /// `ark://connected`; the control plane admits only the schemes it
+    /// allows.
+    pub return_url: Option<String>,
 }
 
 impl MemberConnectionCreate {
+    /// Connect one app, such as `"gmail"`.
     pub fn new(app: impl Into<String>) -> Self {
         Self {
-            app: app.into(),
-            runtime: None,
+            app: Some(app.into()),
+            ..Self::default()
+        }
+    }
+
+    /// Connect the caller's own account through an organization
+    /// integration (Google Workspace, Microsoft 365).
+    pub fn integration(integration_id: Uuid) -> Self {
+        Self {
+            integration_id: Some(integration_id),
+            ..Self::default()
         }
     }
 }
@@ -5843,6 +5806,8 @@ open_wire_enum! {
         Jira => "jira",
         Notion => "notion",
         Vercel => "vercel",
+        GoogleWorkspace => "google_workspace",
+        Microsoft365 => "microsoft_365",
         Custom => "custom",
     }
 }

@@ -15,10 +15,10 @@
 //!   [`RepositoryContents`], its files read through the Data Plane, and its
 //!   commits via [`Repositories::commits`] / [`Repositories::commit`], and
 //!   branch merges via [`Repositories::merge`].
-//! - [`Connectors`] — `/v1/connectors` CRUD with [`Connections`] nested
-//!   under `.connections`, plus `authorize()`, which mints the consent URL
-//!   (`POST /v1/oauth/connections/authorize`) a Business hands its customer
-//!   so their workspace connects to an agent.
+//! - [`Connectors`] — `/v1/connectors` CRUD, plus `authorize()`, which
+//!   mints the consent URL (`POST /v1/oauth/connections/authorize`) a
+//!   Business hands its customer so their workspace connects to an agent,
+//!   and `connection_token()`, the token broker.
 //! - [`Endpoints`] — `GET /v1/endpoints` lookup: the project's endpoint
 //!   bindings, such as the `kind: mcp` binding naming an MCP server.
 //! - [`Members`] — `/v1/members` list, read, invite and update: the customer
@@ -28,8 +28,8 @@
 //!   scheduled prompts, one-off reminders, and platform work.
 //! - [`Issues`] — Data Plane `/v1/issues` CRUD: a project's pursuits, their
 //!   evidence, and the human requests on them.
-//! - [`MemberConnections`] — Data Plane `/v1/connections` CRUD: the apps
-//!   members connected for themselves.
+//! - [`MemberConnections`] — Data Plane `/v1/connections` CRUD: every
+//!   connection, a member's own or a connector's.
 //! - [`Images`] — Data Plane `/v1/images`: what an eval task's compose
 //!   services run as.
 //!
@@ -102,7 +102,7 @@ pub use api_keys::ApiKeys;
 pub use applications::{ApplicationIdps, ApplicationKeys, ApplicationSecrets, Applications};
 pub use automations::Automations;
 pub use connections::MemberConnections;
-pub use connectors::{Connections, Connectors};
+pub use connectors::Connectors;
 pub use credentials::Credentials;
 pub use endpoints::Endpoints;
 pub use experiments::{ExperimentHandle, Experiments};

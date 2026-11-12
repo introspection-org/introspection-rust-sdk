@@ -30,6 +30,7 @@ fn organization_json() -> serde_json::Value {
         "external_org_id": "3001",
         "image_url": null,
         "hosted_git": true,
+        "subscription_live": true,
     })
 }
 
@@ -84,4 +85,12 @@ fn sign_in_settings_default_and_keep_an_unknown_requirement() {
         serde_json::to_value(&settings).unwrap()["passkey_requirement"],
         "hardware_key"
     );
+}
+
+#[tokio::test]
+async fn me_reads_whether_the_subscription_is_live() {
+    assert_eq!(me(organization_json()).await.subscription_live, Some(true));
+    let mut body = organization_json();
+    body.as_object_mut().unwrap().remove("subscription_live");
+    assert_eq!(me(body).await.subscription_live, None);
 }

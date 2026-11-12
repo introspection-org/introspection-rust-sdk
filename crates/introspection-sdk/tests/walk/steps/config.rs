@@ -4,23 +4,22 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use futures::StreamExt as _;
 use introspection_sdk::{
-    ConnectionCreateParams, ConnectionListParams, ConnectionTokenParams, ConnectionTokenResult,
-    ConnectorAppListParams, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
-    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
-    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, CredentialCreateParams,
-    CredentialUpdateParams, EndpointCreateParams, EndpointKind, EndpointListParams,
-    EndpointMcpCheckRequest, EndpointUpdateParams, IntrospectionClient, Lane, Runtime,
-    RuntimeCreateParams, RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret,
-    VariableCreateParams, VariableKind, VariableUpdateParams,
+    ConnectionTokenParams, ConnectionTokenResult, ConnectorAppListParams, ConnectorAuthMode,
+    ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
+    ConnectorUpdateParams, CredentialCreateParams, CredentialUpdateParams, EndpointCreateParams,
+    EndpointKind, EndpointListParams, EndpointMcpCheckRequest, EndpointUpdateParams,
+    IntrospectionClient, Lane, MemberConnectionListParams, Runtime, RuntimeCreateParams,
+    RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret, VariableCreateParams,
+    VariableKind, VariableUpdateParams,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::proxy::Exchange;
 use crate::steps::expect_refused;
-use crate::support::{assert_stable, settled, walk, without};
+use crate::support::{assert_stable, connection_snapshot, settled, walk, without};
 use crate::{set, Walk};
 
 pub async fn credential_and_variable(w: &mut Walk) {
@@ -293,24 +292,6 @@ pub async fn connector(w: &mut Walk) {
         })
         .await
         .expect("search the MCP registry");
-    // Registered mode: a token the caller already holds, stored and revoked
-    // before the consent flow (step 8) connects the app for real.
-    let connections = &sa.connectors().connections;
-    let registered = connections
-        .create(
-            connector.id,
-            &ConnectionCreateParams::new(walk::REGISTERED_TOKEN),
-        )
-        .await
-        .expect("register a connection");
-    assert_eq!(registered.connector_id, connector.id);
-    // Revoking takes connectors:delete, in the owner's scope alone.
-    w.owner()
-        .connectors()
-        .connections
-        .revoke(connector.id, registered.id)
-        .await
-        .expect("revoke the registered connection");
     w.connector = Some(connector);
 }
 
@@ -543,44 +524,49 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
         landed.query_pairs().into_owned().collect();
     assert_eq!(query.get("status").map(String::as_str), Some("active"));
     let connection_id: Uuid = query["connection_id"].parse().expect("a connection id");
-    let connection = sa
-        .connectors()
-        .connections
-        .get(connector, connection_id)
+    // `/v1/connections` lists the project's connection rows: the project's
+    // own grant on the walk's connector, and no member's. Read with the
+    // owner's token, since a project's own grant is an administrator's to see.
+    let listed = w
+        .member()
+        .connections()
+        .list(&MemberConnectionListParams::default())
+        .collect_all(0)
         .await
-        .expect("read the connection");
-    assert_stable!(connection, @r#"
-    {
-      "connector_id": "[uuid]",
-      "created_at": "[timestamp]",
-      "created_by_member_id": "[uuid]",
-      "id": "[uuid]",
-      "last_verified_at": "[timestamp]",
-      "org_id": "[uuid]",
-      "project_id": "[uuid]",
-      "runtime_group_id": "[uuid]",
-      "scopes_granted": [],
-      "status": "active",
-      "subject_type": "app",
-      "token_expires_at": "[timestamp]",
-      "updated_at": "[timestamp]"
-    }
+        .expect("list connections");
+    let connection = listed
+        .iter()
+        .find(|c| c.id == connection_id)
+        .expect("the grant's connection");
+    assert_eq!(connection.connector.as_ref().map(|c| c.id), Some(connector));
+    assert!(listed.iter().all(|c| c.integration_id.is_none()));
+    let listed: Vec<_> = listed.iter().map(connection_snapshot).collect();
+    assert_stable!(listed, @r#"
+    [
+      {
+        "app": "hello-mcp",
+        "connector": {
+          "id": "[uuid]",
+          "provider": "hello-mcp",
+          "slug": "hello-mcp"
+        },
+        "created_at": "[timestamp]",
+        "created_by_member_id": "[uuid]",
+        "healthy": true,
+        "id": "[uuid]",
+        "last_verified_at": "[timestamp]",
+        "owner": "project",
+        "status": "active",
+        "subject_type": "app",
+        "updated_at": "[timestamp]"
+      }
+    ]
     "#);
-    let mut seen = false;
-    let mut listed = sa
-        .connectors()
-        .connections
-        .list(connector, &ConnectionListParams::default());
-    while let Some(item) = listed.next().await {
-        seen |= item.expect("list connections").id == connection_id;
-    }
-    assert!(seen);
 
     endpoint(&sa, project).await;
     let token = sa
         .connectors()
-        .connections
-        .get_token(connector, &ConnectionTokenParams::default())
+        .connection_token(connector, &ConnectionTokenParams::default())
         .await
         .expect("read the connection's token");
     let ConnectionTokenResult::Token(token) = token else {

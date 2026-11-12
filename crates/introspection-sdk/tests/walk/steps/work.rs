@@ -12,10 +12,10 @@ use introspection_sdk::{
     ConversationItemListParams, ConversationListParams, DecidedBy, EventListParams, File,
     FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
     FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
-    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
-    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
-    ShareResourceType, StreamOptions, Tag, TagCreate, TagKind, TagListParams, TagUpdate, Task,
-    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    MemberConnectionCreate, MemberListParams, MetricFilter, MetricSpec, MetricsQuery,
+    MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
+    StreamOptions, Tag, TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate,
+    TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -1081,37 +1081,9 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
             .await,
         404,
     );
-    // `/v1/connections` lists the project's connection rows: the project's own
-    // grant on the walk's connector (step 8), and no member's. Connecting an
-    // app (Pipedream) needs that provider's credentials; with none on the
-    // project, an app connect and an unknown id answer 404.
+    // Connecting an app (Pipedream) needs that provider's credentials; with
+    // none on the project, an app connect and an unknown id answer 404.
     let connections = member.connections();
-    let listed = connections
-        .list(&MemberConnectionListParams::default())
-        .collect_all(0)
-        .await
-        .expect("list connections");
-    assert_stable!(listed, @r#"
-    [
-      {
-        "app": "hello-mcp",
-        "connector": {
-          "id": "[uuid]",
-          "provider": "hello-mcp",
-          "slug": "hello-mcp"
-        },
-        "created_at": "[timestamp]",
-        "created_by_member_id": "[uuid]",
-        "healthy": true,
-        "id": "[uuid]",
-        "last_verified_at": "[timestamp]",
-        "owner": "project",
-        "status": "active",
-        "subject_type": "app",
-        "updated_at": "[timestamp]"
-      }
-    ]
-    "#);
     let id: Uuid = "019a1000-0000-7000-8000-0000000000c1"
         .parse()
         .expect("a uuid");
@@ -1120,17 +1092,14 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
     expect_not_found(
         connections
             .create(&MemberConnectionCreate {
-                app: "gmail".into(),
                 runtime: Some(walk::RUNTIME_SLUG.into()),
+                ..MemberConnectionCreate::new("gmail")
             })
             .await,
     );
     // A client with no runtime of its own refuses before any request.
     let refused = connections
-        .create(&MemberConnectionCreate {
-            app: "gmail".into(),
-            runtime: None,
-        })
+        .create(&MemberConnectionCreate::new("gmail"))
         .await;
     assert!(refused.is_err_and(|e| e.to_string().contains("runtime")));
 }

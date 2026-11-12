@@ -110,11 +110,6 @@ const TYPED: &[(&str, &str, Check)] = &[
         round_trip::<ApplicationKey>,
     ),
     ("GET", r"^/v1/connectors/custom/apps$", connector_app_page),
-    (
-        "POST",
-        r"^/v1/connectors/[^/]+/connections$",
-        round_trip::<Connection>,
-    ),
     ("POST", r"^/v1/images$", round_trip::<Image>),
     ("POST", r"^/v1/oauth/revoke$", round_trip::<OAuthRevocation>),
     (
@@ -198,16 +193,6 @@ const TYPED: &[(&str, &str, Check)] = &[
         "GET|PATCH",
         r"^/v1/connectors/[^/]+$",
         round_trip::<Connector>,
-    ),
-    (
-        "GET",
-        r"^/v1/connectors/[^/]+/connections$",
-        round_trip::<Paginated<Connection>>,
-    ),
-    (
-        "GET",
-        r"^/v1/connectors/[^/]+/connections/[^/]+$",
-        round_trip::<Connection>,
     ),
     (
         "GET",
@@ -404,11 +389,18 @@ const TYPED: &[(&str, &str, Check)] = &[
 ];
 
 /// JSON responses no SDK type decodes: `(method, path regex, reason)`.
-const UNTYPED: &[(&str, &str, &str)] = &[(
-    "GET",
-    r"^/v1/annotations/facets$",
-    "the route is retired; the recording still holds the call until it is re-recorded",
-)];
+const UNTYPED: &[(&str, &str, &str)] = &[
+    (
+        "GET",
+        r"^/v1/annotations/facets$",
+        "the route is retired; the recording still holds the call until it is re-recorded",
+    ),
+    (
+        "GET|POST",
+        r"^/v1/connectors/[^/]+/connections(/[^/]+)?$",
+        "the routes are retired; the recording still holds the calls until it is re-recorded",
+    ),
+];
 
 /// The SDK type for a JSON export, picked by its media type. The replay and
 /// ATIF exports have none: `Conversations::export_json_value` returns them

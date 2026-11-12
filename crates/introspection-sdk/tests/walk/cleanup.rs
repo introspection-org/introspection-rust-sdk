@@ -5,11 +5,10 @@
 use futures::StreamExt as _;
 use introspection_sdk::api::ApiResult;
 use introspection_sdk::{
-    ApiKeyDeleteParams, ApiKeyListParams, AutomationListParams, ConnectionListParams,
-    ConnectorListParams, EndpointListParams, ExperimentListParams, FileListParams,
-    IntrospectionClient, RecipeListParams, RepositoryListParams, RuntimeListParams,
-    RuntimeSettingListParams, ShareListParams, ShareResourceType, StringOrUuid, TagKind,
-    TaskListParams,
+    ApiKeyDeleteParams, ApiKeyListParams, AutomationListParams, ConnectorListParams,
+    EndpointListParams, ExperimentListParams, FileListParams, IntrospectionClient,
+    RecipeListParams, RepositoryListParams, RuntimeListParams, RuntimeSettingListParams,
+    ShareListParams, ShareResourceType, StringOrUuid, TagKind, TaskListParams,
 };
 use uuid::Uuid;
 
@@ -207,6 +206,7 @@ async fn remove_applications(owner: &IntrospectionClient, project: Uuid) {
     }
 }
 
+/// Deleting a connector revokes its connections in the same transaction.
 async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
     let connectors = owner
         .connectors()
@@ -221,21 +221,6 @@ async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
         .into_iter()
         .filter(|c| c.slug == walk::CONNECTOR_NAME)
     {
-        let connections = owner
-            .connectors()
-            .connections
-            .list(c.id, &ConnectionListParams::default())
-            .collect_all(0)
-            .await
-            .expect("list connections");
-        for conn in connections {
-            owner
-                .connectors()
-                .connections
-                .revoke(c.id, conn.id)
-                .await
-                .expect("revoke connection");
-        }
         owner
             .connectors()
             .delete(c.id, Some(project.into()))

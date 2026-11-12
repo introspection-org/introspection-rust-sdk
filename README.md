@@ -450,10 +450,13 @@ change, so it is not served yet.
 
 ## Connect a member's apps
 
-`connections()` is the apps (Gmail, Slack, …) members connected for
-themselves; the agent acts with them in that member's sessions. Creating one
-returns a connect page to hand the member. On a runner, `runtime` defaults to
-the runner's runtime group; on the client, set it:
+`connections()` is every connection in the project: the apps (Gmail, Slack, …)
+and organization integrations (Google Workspace, Microsoft 365) members connected
+for themselves, which the agent acts with in that member's sessions, and the
+project's own accounts on its connectors (filter with `connector_id`). Creating
+one returns a connect page to hand the member. For an app, on a runner, `runtime`
+defaults to the runner's runtime group; on the client, set it. An integration
+(`MemberConnectionCreate::integration(id)`) takes no runtime:
 
 ```rust
 use futures::StreamExt;
@@ -469,6 +472,7 @@ let page = client.connections().create(&MemberConnectionCreate {
 
 let mut connections = runner.connections().list(&MemberConnectionListParams {
     app: Some("gmail".into()),
+    search: Some("@example.com".into()),
     ..Default::default()
 });
 while let Some(connection) = connections.next().await {

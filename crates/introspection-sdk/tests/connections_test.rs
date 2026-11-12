@@ -8,8 +8,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError, RunRequest};
 use introspection_sdk::{
-    AdvancedOptions, ClientConfig, IntrospectionClient, MemberConnectionCreate,
-    MemberConnectionListParams, MemberConnections, PaginationParams, Runner,
+    AdvancedOptions, ClientConfig, ConnectionSubjectType, IntrospectionClient,
+    MemberConnectionCreate, MemberConnectionListParams, MemberConnections, PaginationParams,
+    Runner,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -313,4 +314,103 @@ async fn delete_is_a_bodyless_204_and_a_403_surfaces_as_an_api_error() {
         Err(IntrospectionAPIError::Http { status: 403, .. }) => {}
         other => panic!("expected a 403, got {other:?}"),
     }
+}
+
+const CONNECTOR_ID: &str = "66666666-6666-7666-8666-666666666666";
+const INTEGRATION_ID: &str = "77777777-7777-7777-8777-777777777777";
+
+#[tokio::test]
+async fn list_sends_the_connector_integration_and_search_filters() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/connections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "records": [],
+            "count": 0,
+            "next": null,
+        })))
+        .mount(&server)
+        .await;
+
+    let found: Vec<_> = MemberConnections::new(build_http(&server), None)
+        .list(&MemberConnectionListParams {
+            connector_id: Some(id(CONNECTOR_ID)),
+            integration_id: Some(id(INTEGRATION_ID)),
+            subject_type: Some(ConnectionSubjectType::User),
+            peering: Some("acme".into()),
+            search: Some("ada@".into()),
+            ..Default::default()
+        })
+        .collect()
+        .await;
+    assert!(found.is_empty());
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        query_pairs(&requests[0]),
+        vec![
+            ("connector_id".to_string(), CONNECTOR_ID.to_string()),
+            ("integration_id".to_string(), INTEGRATION_ID.to_string()),
+            ("peering".to_string(), "acme".to_string()),
+            ("search".to_string(), "ada@".to_string()),
+            ("subject_type".to_string(), "user".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn get_reads_the_integration_runtime_group_and_token_expiry() {
+    let server = MockServer::start().await;
+    let mut body = connection_json();
+    body["integration_id"] = json!(INTEGRATION_ID);
+    body["runtime_group_id"] = json!(RUNTIME_GROUP_ID);
+    body["token_expires_at"] = json!("2026-10-04T01:00:00Z");
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/connections/{CONNECTION_ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let connection = MemberConnections::new(build_http(&server), None)
+        .get(id(CONNECTION_ID))
+        .await
+        .unwrap();
+    assert_eq!(connection.integration_id, Some(id(INTEGRATION_ID)));
+    assert_eq!(connection.runtime_group_id, Some(id(RUNTIME_GROUP_ID)));
+    assert_eq!(
+        connection.token_expires_at.as_deref(),
+        Some("2026-10-04T01:00:00Z")
+    );
+}
+
+#[test]
+fn a_connection_from_an_older_server_has_none_of_them() {
+    let connection: introspection_sdk::MemberConnection =
+        serde_json::from_value(connection_json()).unwrap();
+    assert!(connection.integration_id.is_none());
+    assert!(connection.runtime_group_id.is_none());
+    assert!(connection.token_expires_at.is_none());
+}
+
+#[tokio::test]
+async fn create_through_an_integration_sends_no_app_or_runtime() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/connections"))
+        .and(body_json(json!({
+            "integration_id": INTEGRATION_ID,
+            "return_url": "ark://connected",
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(connect_page_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    MemberConnections::new(build_http(&server), None)
+        .create(&MemberConnectionCreate {
+            return_url: Some("ark://connected".into()),
+            ..MemberConnectionCreate::integration(id(INTEGRATION_ID))
+        })
+        .await
+        .unwrap();
 }

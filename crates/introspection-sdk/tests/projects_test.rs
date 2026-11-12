@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    DisplayIdPrefixes, PaginationParams, ProjectCreateParams, ProjectListParams,
+    DisplayIdPrefixes, IntegrationType, PaginationParams, ProjectCreateParams, ProjectListParams,
     ProjectUpdateParams, Projects, RuntimePeering, RuntimePeeringListParams,
 };
 use serde_json::json;
@@ -390,5 +390,82 @@ async fn update_changes_one_prefix_and_keeps_the_rest() {
             observation: Some("F".into()),
             task: Some("T".into()),
         })
+    );
+}
+
+#[tokio::test]
+async fn create_and_update_send_the_connection_integrations() {
+    let server = MockServer::start().await;
+    let deployment_id = Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap();
+    let mut created = project_json();
+    created["connection_integrations"] = json!(["google_workspace"]);
+    Mock::given(method("POST"))
+        .and(path("/v1/projects"))
+        .and(body_json(json!({
+            "name": "Support desk",
+            "deployment_id": deployment_id,
+            "connection_integrations": ["google_workspace"],
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut updated = project_json();
+    updated["connection_integrations"] = json!(["google_workspace", "microsoft_365"]);
+    Mock::given(method("PATCH"))
+        .and(path("/v1/projects/support-desk"))
+        .and(body_json(json!({
+            "connection_integrations": ["google_workspace", "microsoft_365"],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(updated))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let projects = Projects::new(build_http(&server));
+    let project = projects
+        .create(&ProjectCreateParams {
+            connection_integrations: Some(vec![IntegrationType::GoogleWorkspace]),
+            ..ProjectCreateParams::new("Support desk", deployment_id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        project.connection_integrations,
+        Some(vec![IntegrationType::GoogleWorkspace])
+    );
+
+    let project = projects
+        .update(
+            "support-desk",
+            &ProjectUpdateParams {
+                connection_integrations: Some(vec![
+                    IntegrationType::GoogleWorkspace,
+                    IntegrationType::Microsoft365,
+                ]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        project.connection_integrations,
+        Some(vec![
+            IntegrationType::GoogleWorkspace,
+            IntegrationType::Microsoft365
+        ])
+    );
+}
+
+#[test]
+fn a_project_keeps_an_integration_type_it_does_not_know_and_reads_none_from_an_older_server() {
+    let mut body = project_json();
+    let project: introspection_sdk::Project = serde_json::from_value(body.clone()).unwrap();
+    assert!(project.connection_integrations.is_none());
+    body["connection_integrations"] = json!(["dropbox"]);
+    let project: introspection_sdk::Project = serde_json::from_value(body).unwrap();
+    assert_eq!(
+        project.connection_integrations,
+        Some(vec![IntegrationType::Other("dropbox".into())])
     );
 }

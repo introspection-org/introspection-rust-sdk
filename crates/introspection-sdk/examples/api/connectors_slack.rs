@@ -13,7 +13,7 @@
 //!   cargo run --example connectors-slack
 //! ```
 //!
-//! Optional: `REVOKE_FIRST_CONNECTION=1` revokes the first listed connection.
+//! Optional: `REVOKE_FIRST_CONNECTION=1` removes the first listed connection.
 //!
 //! Connectors sit behind a server-side feature flag. If every call fails with
 //! "Connectors are not enabled", the deployment has not opted in yet.
@@ -22,8 +22,8 @@ use std::error::Error;
 
 use futures::StreamExt;
 use introspection_sdk::{
-    ClientConfig, ConnectionListParams, ConnectorAuthMode, ConnectorAuthorizeParams,
-    ConnectorCreateParams, IntrospectionClient,
+    ClientConfig, ConnectorAuthMode, ConnectorAuthorizeParams, ConnectorCreateParams,
+    IntrospectionClient, MemberConnectionListParams,
 };
 
 #[tokio::main]
@@ -116,19 +116,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 3) List what connected. For Slack each connection is one workspace that
     //    completed the install; `member_id` is the workspace's customer member
     //    and `runtime_group_id` is the agent answering it. Tokens are never
-    //    serialized.
+    //    serialized. Connections are read on the Data Plane.
     let mut connections = Vec::new();
-    let mut listing = client
-        .connectors()
-        .connections
-        .list(connector.id, &ConnectionListParams::default());
+    let mut listing = client.connections().list(&MemberConnectionListParams {
+        connector_id: Some(connector.id),
+        ..Default::default()
+    });
     while let Some(connection) = listing.next().await {
         let connection = connection?;
         println!(
             "  connection {}: subject={}, status={}, member={}",
             connection.id,
-            connection.subject_type.as_str(),
-            connection.status.as_str(),
+            connection.subject_type.as_ref().map_or("-", |s| s.as_str()),
+            connection.status.as_ref().map_or("-", |s| s.as_str()),
             connection
                 .member_id
                 .map(|id| id.to_string())
@@ -140,17 +140,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("  (none yet — open the install link above to connect one)");
     }
 
-    // 4) Disconnect one. Revoking destroys the provider token behind that one
-    //    connection; the connector and its other connections are untouched,
-    //    and the customer must re-consent through a fresh install link.
+    // 4) Disconnect one. Removing it destroys the provider token behind that
+    //    one connection; the connector and its other connections are
+    //    untouched, and the customer must re-consent through a fresh install
+    //    link.
     if std::env::var("REVOKE_FIRST_CONNECTION").as_deref() == Ok("1") {
         if let Some(connection) = connections.first() {
-            client
-                .connectors()
-                .connections
-                .revoke(connector.id, connection.id)
-                .await?;
-            println!("revoked connection {}", connection.id);
+            client.connections().delete(connection.id).await?;
+            println!("removed connection {}", connection.id);
         }
     }
 
