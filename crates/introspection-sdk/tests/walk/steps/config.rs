@@ -22,6 +22,23 @@ use crate::steps::expect_refused;
 use crate::support::{assert_stable, connection_snapshot, settled, walk, without};
 use crate::{set, Walk};
 
+/// The connector without its OAuth metadata's `revocation_endpoint`, which
+/// the recording predates; when the server discovered one it is a URL.
+fn connector_snapshot(connector: &introspection_sdk::Connector) -> Value {
+    let mut value = serde_json::to_value(connector).expect("snapshot JSON");
+    let oauth = value
+        .pointer_mut("/metadata/oauth")
+        .and_then(Value::as_object_mut);
+    if let Some(endpoint) = oauth.and_then(|oauth| oauth.remove("revocation_endpoint")) {
+        let endpoint = endpoint.as_str().unwrap_or_default();
+        assert!(
+            endpoint.starts_with("https://") || endpoint.starts_with("http://"),
+            "a revocation endpoint URL, not {endpoint:?}"
+        );
+    }
+    value
+}
+
 pub async fn credential_and_variable(w: &mut Walk) {
     let sa = w.sa();
     let project = w.project_id();
@@ -201,7 +218,7 @@ pub async fn connector(w: &mut Walk) {
         )
         .await
         .expect("create the connector");
-    assert_stable!(connector, @r#"
+    assert_stable!(connector_snapshot(&connector), @r#"
     {
       "agent_member_id": "[uuid]",
       "api_hosts": [
