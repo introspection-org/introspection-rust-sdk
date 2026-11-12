@@ -228,7 +228,8 @@ pub use resources::annotations::{
     AnnotationListParams, AnnotationMutation, AnnotationState, AnnotationTarget,
 };
 pub use resources::tags::{
-    AccessTagCreate, AnnotationTagCreate, Tag, TagCreate, TagKind, TagListParams, TagUpdate,
+    AccessTagCreate, AnnotationTagCreate, Tag, TagCreate, TagInclude, TagKind, TagListParams,
+    TagUpdate,
 };
 pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
