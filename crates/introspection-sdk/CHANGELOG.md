@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.45.0...v0.46.0) (2026-11-12)
+
+
+### Features
+
+* model the response fields and filters introspection-cloud v0.84.0 added ([#229](https://github.com/introspection-org/introspection-rust-sdk/issues/229)) ([78583b3](https://github.com/introspection-org/introspection-rust-sdk/commit/78583b3b44b86fd296e18f9cf7eaf4648b0f2c24))
+
 ## [0.45.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.44.0...v0.45.0) (2026-11-12)
 
 
