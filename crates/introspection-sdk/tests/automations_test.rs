@@ -11,8 +11,9 @@ use introspection_sdk::{
     AdvancedOptions, AutomationCondition, AutomationConditionType, AutomationCreateParams,
     AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
     AutomationSkipReason, AutomationTriggerParams, AutomationTriggerType, AutomationUpdateParams,
-    Automations, ClientConfig, Event, EventListParams, Events, IntrospectionClient,
-    IntrospectionEventName, ObservationSynthesisStatus, PaginationParams, TaskRepoRequest,
+    Automations, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
+    IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
+    TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -511,6 +512,10 @@ async fn trigger_with_sends_the_conversation_ids() {
             "automation_id": AUTOMATION_ID,
             "task_id": TASK_ID,
             "enqueued": 2,
+            "conversations": [
+                { "conversation_id": "conv-a", "completed_at": "2026-11-12T08:59:00Z" },
+                { "conversation_id": "conv-b", "completed_at": "2026-11-12T08:58:00Z" },
+            ],
         })))
         .expect(1)
         .mount(&server)
@@ -528,6 +533,19 @@ async fn trigger_with_sends_the_conversation_ids() {
 
     assert_eq!(response.task_id, Some(id(TASK_ID)));
     assert_eq!(response.enqueued, Some(2));
+    assert_eq!(
+        response.conversations,
+        Some(vec![
+            EnqueuedConversation {
+                conversation_id: "conv-a".into(),
+                completed_at: "2026-11-12T08:59:00Z".into(),
+            },
+            EnqueuedConversation {
+                conversation_id: "conv-b".into(),
+                completed_at: "2026-11-12T08:58:00Z".into(),
+            },
+        ])
+    );
 }
 
 #[tokio::test]
@@ -553,6 +571,7 @@ async fn a_clustering_trigger_returns_its_run() {
 
     assert_eq!(response.run_id, Some(id(RUN_ID)));
     assert_eq!(response.enqueued, None);
+    assert_eq!(response.conversations, None);
 }
 
 #[test]
@@ -787,6 +806,7 @@ async fn synthesis_completed_events_list_by_conversation() {
             "status": "completed",
             "observation_count": 0,
             "skipped_reason": "no_observations",
+            "conversation_completed_at": "2026-11-12T08:59:00Z",
         },
     });
     let failed = json!({
@@ -839,7 +859,13 @@ async fn synthesis_completed_events_list_by_conversation() {
         Some("no_observations")
     );
     assert_eq!(second.payload.status, ObservationSynthesisStatus::Failed);
+    assert_eq!(
+        first.payload.conversation_completed_at.as_deref(),
+        Some("2026-11-12T08:59:00Z")
+    );
     assert_eq!(second.payload.error.as_deref(), Some("model timed out"));
+    // An event from a server that predates the field still decodes.
+    assert_eq!(second.payload.conversation_completed_at, None);
     assert_eq!(
         events[0].event_name(),
         Some(IntrospectionEventName::ObservationSynthesisCompleted)

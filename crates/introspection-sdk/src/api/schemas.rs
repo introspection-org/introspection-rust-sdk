@@ -4684,6 +4684,23 @@ pub struct AutomationTriggerResponse {
     /// kinds and from a server that predates it.
     #[serde(default)]
     pub enqueued: Option<u64>,
+    /// [`AutomationKind::ObservationSynthesis`] triggered with
+    /// [`AutomationTriggerParams::conversation_ids`] only: what was queued,
+    /// per conversation. `None` otherwise and from a server that predates it.
+    #[serde(default)]
+    pub conversations: Option<Vec<EnqueuedConversation>>,
+}
+
+/// A conversation a synthesis trigger queued, and the end it queued it at
+/// ([`AutomationTriggerResponse::conversations`]).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct EnqueuedConversation {
+    pub conversation_id: String,
+    /// The conversation's completion answers this trigger once an
+    /// `introspection.observation_synthesis.completed` event's
+    /// [`ObservationSynthesisCompletedPayload::conversation_completed_at`] is
+    /// at or after this; an earlier pass reports an earlier one.
+    pub completed_at: String,
 }
 
 // ----- issues (DP) ------------------------------------------------------------
@@ -7499,6 +7516,12 @@ pub struct ObservationSynthesisCompletedPayload {
     /// Failure detail for a failed pass.
     #[serde(default)]
     pub error: Option<String>,
+    /// Last span of the conversation this pass consumed; an earlier pass
+    /// consumed an earlier one. Compare it with
+    /// [`EnqueuedConversation::completed_at`] to tell whether this event
+    /// answers a trigger. `None` from a server that predates it.
+    #[serde(default)]
+    pub conversation_completed_at: Option<String>,
 }
 
 /// `introspection.feedback` payload — mirrors what the SDK `feedback()`
