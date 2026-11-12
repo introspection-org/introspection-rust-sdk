@@ -4678,6 +4678,12 @@ pub struct AutomationTriggerResponse {
     /// automation. `None` for other kinds and from a server that predates it.
     #[serde(default)]
     pub run_id: Option<Uuid>,
+    /// [`AutomationKind::ObservationSynthesis`] only: the conversations sent
+    /// to the synthesis queue. Each one later gets an
+    /// `introspection.observation_synthesis.completed` event. `None` for other
+    /// kinds and from a server that predates it.
+    #[serde(default)]
+    pub enqueued: Option<u64>,
 }
 
 // ----- issues (DP) ------------------------------------------------------------

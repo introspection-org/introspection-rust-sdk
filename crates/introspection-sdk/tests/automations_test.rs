@@ -470,8 +470,9 @@ async fn trigger_returns_the_task_it_ran() {
     assert_eq!(response.status, AutomationExecutionStatus::Triggered);
     assert_eq!(response.automation_id, id(AUTOMATION_ID));
     assert_eq!(response.task_id, Some(id(TASK_ID)));
-    // A server that predates `run_id` leaves it out.
+    // A server that predates `run_id` and `enqueued` leaves them out.
     assert_eq!(response.run_id, None);
+    assert_eq!(response.enqueued, None);
 }
 
 #[tokio::test]
@@ -509,6 +510,7 @@ async fn trigger_with_sends_the_conversation_ids() {
             "status": "triggered",
             "automation_id": AUTOMATION_ID,
             "task_id": TASK_ID,
+            "enqueued": 2,
         })))
         .expect(1)
         .mount(&server)
@@ -525,6 +527,7 @@ async fn trigger_with_sends_the_conversation_ids() {
         .unwrap();
 
     assert_eq!(response.task_id, Some(id(TASK_ID)));
+    assert_eq!(response.enqueued, Some(2));
 }
 
 #[tokio::test]
@@ -549,6 +552,7 @@ async fn a_clustering_trigger_returns_its_run() {
         .unwrap();
 
     assert_eq!(response.run_id, Some(id(RUN_ID)));
+    assert_eq!(response.enqueued, None);
 }
 
 #[test]
