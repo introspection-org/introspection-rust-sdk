@@ -4695,6 +4695,22 @@ pub struct AutomationListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// `POST /v1/automations/{id}/trigger` body, sent by
+/// [`Automations::trigger_with`](crate::Automations::trigger_with). The
+/// default sends `{}`, the same as [`Automations::trigger`](crate::Automations::trigger).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutomationTriggerParams {
+    /// Conversations to synthesise from instead of the automation's own
+    /// selection, at most 100. Only an
+    /// [`AutomationKind::ObservationSynthesis`] automation takes it; any
+    /// other kind answers `422` when it is sent. A conversation the caller
+    /// cannot read answers `404`, and one whose turn is still running `409`.
+    /// Not sent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conversation_ids: Vec<String>,
+}
+
 /// `POST /v1/automations/{id}/trigger` response. A `skipped` status carries
 /// its `reason` and records no event.
 #[serde_with::skip_serializing_none]
@@ -4707,6 +4723,33 @@ pub struct AutomationTriggerResponse {
     pub task_id: Option<Uuid>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// The run started, for an [`AutomationKind::ObservationClustering`]
+    /// automation. `None` for other kinds and from a server that predates it.
+    #[serde(default)]
+    pub run_id: Option<Uuid>,
+    /// [`AutomationKind::ObservationSynthesis`] only: the conversations sent
+    /// to the synthesis queue. Each one later gets an
+    /// `introspection.observation_synthesis.completed` event. `None` for other
+    /// kinds and from a server that predates it.
+    #[serde(default)]
+    pub enqueued: Option<u64>,
+    /// [`AutomationKind::ObservationSynthesis`] triggered with
+    /// [`AutomationTriggerParams::conversation_ids`] only: what was queued,
+    /// per conversation. `None` otherwise and from a server that predates it.
+    #[serde(default)]
+    pub conversations: Option<Vec<EnqueuedConversation>>,
+}
+
+/// A conversation a synthesis trigger queued, and the end it queued it at
+/// ([`AutomationTriggerResponse::conversations`]).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct EnqueuedConversation {
+    pub conversation_id: String,
+    /// The conversation's completion answers this trigger once an
+    /// `introspection.observation_synthesis.completed` event's
+    /// [`ObservationSynthesisCompletedPayload::conversation_completed_at`] is
+    /// at or after this; an earlier pass reports an earlier one.
+    pub completed_at: String,
 }
 
 // ----- issues (DP) ------------------------------------------------------------
@@ -7274,6 +7317,9 @@ pub enum IntrospectionEventName {
     Feedback,
     Observation,
     ObservationClusteringRun,
+    /// How synthesis of one queued conversation ended
+    /// ([`ObservationSynthesisCompletedPayload`]).
+    ObservationSynthesisCompleted,
     Judgement,
     /// One recorded action on an issue or on one of its human requests.
     Issue,
@@ -7297,6 +7343,7 @@ impl IntrospectionEventName {
             Self::Feedback => "introspection.feedback",
             Self::Observation => "introspection.observation",
             Self::ObservationClusteringRun => "introspection.observation_clustering.run",
+            Self::ObservationSynthesisCompleted => "introspection.observation_synthesis.completed",
             Self::Judgement => "introspection.judgement",
             Self::Issue => "introspection.issue",
             Self::Pattern => "introspection.pattern",
@@ -7322,6 +7369,7 @@ impl<'de> Deserialize<'de> for IntrospectionEventName {
             "introspection.feedback" => Self::Feedback,
             "introspection.observation" => Self::Observation,
             "introspection.observation_clustering.run" => Self::ObservationClusteringRun,
+            "introspection.observation_synthesis.completed" => Self::ObservationSynthesisCompleted,
             "introspection.judgement" => Self::Judgement,
             "introspection.issue" => Self::Issue,
             "introspection.pattern" => Self::Pattern,
@@ -7479,6 +7527,8 @@ pub struct ClusteringRunPayload {
     pub run_id: String,
     #[serde(default)]
     pub lens: Option<String>,
+    /// `completed`, `skipped`, or `failed` (persisting the lens failed; see
+    /// [`Self::error`]).
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
@@ -7495,6 +7545,47 @@ pub struct ClusteringRunPayload {
     pub replaces_run_id: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+/// How synthesis of one queued conversation ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationSynthesisStatus {
+    /// Synthesised, possibly into zero observations.
+    Completed,
+    /// Dropped after its last attempt failed.
+    Failed,
+    /// A status this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// `introspection.observation_synthesis.completed` payload — how synthesis of
+/// one queued conversation ended, even with no observations (stream family).
+/// The conversation is the event's `conversation_id`. A trigger with
+/// `conversation_ids` reports how many it queued in
+/// [`AutomationTriggerResponse::enqueued`]; each gets one of these events.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ObservationSynthesisCompletedPayload {
+    /// `completed`, or `failed` after its last attempt.
+    pub status: ObservationSynthesisStatus,
+    /// Observations this pass created.
+    #[serde(default)]
+    pub observation_count: i64,
+    /// Why a completed pass created nothing (`no_content`,
+    /// `no_observations`).
+    #[serde(default)]
+    pub skipped_reason: Option<String>,
+    /// Failure detail for a failed pass.
+    #[serde(default)]
+    pub error: Option<String>,
+    /// Last span of the conversation this pass consumed; an earlier pass
+    /// consumed an earlier one. Compare it with
+    /// [`EnqueuedConversation::completed_at`] to tell whether this event
+    /// answers a trigger. `None` from a server that predates it.
+    #[serde(default)]
+    pub conversation_completed_at: Option<String>,
 }
 
 /// `introspection.feedback` payload — mirrors what the SDK `feedback()`
@@ -7800,6 +7891,7 @@ pub type ObservationEvent = TypedEvent<ObservationPayload>;
 pub type PatternEvent = TypedEvent<PatternPayload>;
 pub type PatternAssignmentEvent = TypedEvent<PatternAssignmentPayload>;
 pub type ClusteringRunEvent = TypedEvent<ClusteringRunPayload>;
+pub type ObservationSynthesisCompletedEvent = TypedEvent<ObservationSynthesisCompletedPayload>;
 pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
 pub type AnnotationEvent = TypedEvent<AnnotationPayload>;
 pub type JudgementEvent = TypedEvent<JudgementPayload>;
@@ -7826,6 +7918,8 @@ pub enum Event {
     Observation(ObservationEvent),
     #[serde(rename = "introspection.observation_clustering.run")]
     ObservationClusteringRun(ClusteringRunEvent),
+    #[serde(rename = "introspection.observation_synthesis.completed")]
+    ObservationSynthesisCompleted(ObservationSynthesisCompletedEvent),
     #[serde(rename = "introspection.judgement")]
     Judgement(JudgementEvent),
     #[serde(rename = "introspection.issue")]
@@ -7853,6 +7947,9 @@ impl Event {
             Self::Observation(_) => Some(IntrospectionEventName::Observation),
             Self::ObservationClusteringRun(_) => {
                 Some(IntrospectionEventName::ObservationClusteringRun)
+            }
+            Self::ObservationSynthesisCompleted(_) => {
+                Some(IntrospectionEventName::ObservationSynthesisCompleted)
             }
             Self::Judgement(_) => Some(IntrospectionEventName::Judgement),
             Self::Issue(_) => Some(IntrospectionEventName::Issue),
@@ -9212,6 +9309,10 @@ mod tests {
             (
                 IntrospectionEventName::ObservationClusteringRun,
                 "introspection.observation_clustering.run",
+            ),
+            (
+                IntrospectionEventName::ObservationSynthesisCompleted,
+                "introspection.observation_synthesis.completed",
             ),
             (IntrospectionEventName::Judgement, "introspection.judgement"),
             (IntrospectionEventName::Pattern, "introspection.pattern"),

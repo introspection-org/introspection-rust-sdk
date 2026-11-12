@@ -10,8 +10,9 @@ use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
     AdvancedOptions, AutomationCondition, AutomationConditionType, AutomationCreateParams,
     AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
-    AutomationSkipReason, AutomationTriggerType, AutomationUpdateParams, Automations, ClientConfig,
-    Event, EventListParams, Events, IntrospectionClient, IntrospectionEventName, PaginationParams,
+    AutomationSkipReason, AutomationTriggerParams, AutomationTriggerType, AutomationUpdateParams,
+    Automations, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
+    IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
     TaskRepoRequest,
 };
 use serde_json::json;
@@ -470,6 +471,116 @@ async fn trigger_returns_the_task_it_ran() {
     assert_eq!(response.status, AutomationExecutionStatus::Triggered);
     assert_eq!(response.automation_id, id(AUTOMATION_ID));
     assert_eq!(response.task_id, Some(id(TASK_ID)));
+    // A server that predates `run_id` and `enqueued` leaves them out.
+    assert_eq!(response.run_id, None);
+    assert_eq!(response.enqueued, None);
+}
+
+#[tokio::test]
+async fn trigger_sends_an_empty_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(body_json(json!({})))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "automation_id": AUTOMATION_ID,
+        })))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let automations = Automations::new(build_http(&server));
+    automations.trigger(id(AUTOMATION_ID)).await.unwrap();
+    // Default params send no `conversation_ids` either.
+    automations
+        .trigger_with(id(AUTOMATION_ID), &AutomationTriggerParams::default())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn trigger_with_sends_the_conversation_ids() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(body_json(
+            json!({ "conversation_ids": ["conv-a", "conv-b"] }),
+        ))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "automation_id": AUTOMATION_ID,
+            "task_id": TASK_ID,
+            "enqueued": 2,
+            "conversations": [
+                { "conversation_id": "conv-a", "completed_at": "2026-11-12T08:59:00Z" },
+                { "conversation_id": "conv-b", "completed_at": "2026-11-12T08:58:00Z" },
+            ],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let response = Automations::new(build_http(&server))
+        .trigger_with(
+            id(AUTOMATION_ID),
+            &AutomationTriggerParams {
+                conversation_ids: vec!["conv-a".into(), "conv-b".into()],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.task_id, Some(id(TASK_ID)));
+    assert_eq!(response.enqueued, Some(2));
+    assert_eq!(
+        response.conversations,
+        Some(vec![
+            EnqueuedConversation {
+                conversation_id: "conv-a".into(),
+                completed_at: "2026-11-12T08:59:00Z".into(),
+            },
+            EnqueuedConversation {
+                conversation_id: "conv-b".into(),
+                completed_at: "2026-11-12T08:58:00Z".into(),
+            },
+        ])
+    );
+}
+
+#[tokio::test]
+async fn a_clustering_trigger_returns_its_run() {
+    const RUN_ID: &str = "55555555-5555-7555-8555-555555555555";
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "automation_id": AUTOMATION_ID,
+            "task_id": null,
+            "reason": null,
+            "run_id": RUN_ID,
+        })))
+        .mount(&server)
+        .await;
+
+    let response = Automations::new(build_http(&server))
+        .trigger(id(AUTOMATION_ID))
+        .await
+        .unwrap();
+
+    assert_eq!(response.run_id, Some(id(RUN_ID)));
+    assert_eq!(response.enqueued, None);
+    assert_eq!(response.conversations, None);
+}
+
+#[test]
+fn trigger_params_refuse_an_unknown_field() {
+    let err = serde_json::from_value::<AutomationTriggerParams>(json!({
+        "conversation_id": ["conv-a"],
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("conversation_id"), "{err}");
 }
 
 #[tokio::test]
@@ -681,4 +792,143 @@ fn automation_event_names_round_trip() {
             name
         );
     }
+}
+
+#[tokio::test]
+async fn synthesis_completed_events_list_by_conversation() {
+    let server = MockServer::start().await;
+    let completed = json!({
+        "id": "evt_completed",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "event_name": "introspection.observation_synthesis.completed",
+        "conversation_id": "conv-a",
+        "payload": {
+            "status": "completed",
+            "observation_count": 0,
+            "skipped_reason": "no_observations",
+            "conversation_completed_at": "2026-11-12T08:59:00Z",
+        },
+    });
+    let failed = json!({
+        "id": "evt_failed",
+        "timestamp": "2026-11-12T09:00:01Z",
+        "event_name": "introspection.observation_synthesis.completed",
+        "conversation_id": "conv-b",
+        "payload": {
+            "status": "failed",
+            "observation_count": 0,
+            "error": "model timed out",
+        },
+    });
+    Mock::given(method("GET"))
+        .and(path("/v1/events"))
+        .and(query_param(
+            "event_name",
+            "introspection.observation_synthesis.completed",
+        ))
+        .and(query_param("conversation_ids", "conv-a"))
+        .and(query_param("conversation_ids", "conv-b"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(page(vec![completed.clone(), failed.clone()], None)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let found: Vec<_> = Events::new(build_http(&server))
+        .list(&EventListParams {
+            conversation_ids: Some(vec!["conv-a".into(), "conv-b".into()]),
+            ..EventListParams::new(IntrospectionEventName::ObservationSynthesisCompleted)
+        })
+        .unwrap()
+        .collect()
+        .await;
+
+    let events: Vec<Event> = found.into_iter().map(Result::unwrap).collect();
+    let [Event::ObservationSynthesisCompleted(first), Event::ObservationSynthesisCompleted(second)] =
+        &events[..]
+    else {
+        panic!("expected two synthesis events, got {events:?}");
+    };
+    assert_eq!(first.conversation_id.as_deref(), Some("conv-a"));
+    assert_eq!(first.payload.status, ObservationSynthesisStatus::Completed);
+    assert_eq!(first.payload.observation_count, 0);
+    assert_eq!(
+        first.payload.skipped_reason.as_deref(),
+        Some("no_observations")
+    );
+    assert_eq!(second.payload.status, ObservationSynthesisStatus::Failed);
+    assert_eq!(
+        first.payload.conversation_completed_at.as_deref(),
+        Some("2026-11-12T08:59:00Z")
+    );
+    assert_eq!(second.payload.error.as_deref(), Some("model timed out"));
+    // An event from a server that predates the field still decodes.
+    assert_eq!(second.payload.conversation_completed_at, None);
+    assert_eq!(
+        events[0].event_name(),
+        Some(IntrospectionEventName::ObservationSynthesisCompleted)
+    );
+    // Both serialise back to what the server sent.
+    assert_eq!(serde_json::to_value(&events[0]).unwrap(), completed);
+    assert_eq!(serde_json::to_value(&events[1]).unwrap(), failed);
+}
+
+#[test]
+fn a_synthesis_status_from_the_future_is_kept() {
+    let event: Event = serde_json::from_value(json!({
+        "id": "evt_future",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "event_name": "introspection.observation_synthesis.completed",
+        "payload": { "status": "cancelled" },
+    }))
+    .unwrap();
+    let Event::ObservationSynthesisCompleted(event) = event else {
+        panic!("expected a synthesis event, got {event:?}");
+    };
+    assert_eq!(
+        event.payload.status,
+        ObservationSynthesisStatus::Unknown(json!("cancelled"))
+    );
+    assert_eq!(event.payload.observation_count, 0);
+}
+
+#[test]
+fn a_failed_clustering_run_decodes() {
+    let wire = json!({
+        "id": "evt_run",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "event_name": "introspection.observation_clustering.run",
+        "payload": {
+            "run_id": "run_1",
+            "lens": "friction",
+            "status": "failed",
+            "trigger": "manual",
+            "error": "persisting the lens failed",
+        },
+    });
+    let event: Event = serde_json::from_value(wire.clone()).unwrap();
+    let Event::ObservationClusteringRun(run) = &event else {
+        panic!("expected a clustering run, got {event:?}");
+    };
+    assert_eq!(run.payload.status.as_deref(), Some("failed"));
+    assert_eq!(
+        run.payload.error.as_deref(),
+        Some("persisting the lens failed")
+    );
+    assert_eq!(serde_json::to_value(&event).unwrap(), wire);
+}
+
+#[test]
+fn synthesis_completed_event_name_round_trips() {
+    let name = IntrospectionEventName::ObservationSynthesisCompleted;
+    assert_eq!(
+        name.as_str(),
+        "introspection.observation_synthesis.completed"
+    );
+    assert_eq!(
+        serde_json::from_value::<IntrospectionEventName>(json!(name.as_str())).unwrap(),
+        name
+    );
 }
