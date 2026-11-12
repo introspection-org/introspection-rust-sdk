@@ -15,7 +15,7 @@ use introspection_sdk::{
     RuntimeCreateParams, RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret,
     VariableCreateParams, VariableKind, VariableUpdateParams,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::proxy::Exchange;
@@ -346,6 +346,25 @@ fn assert_built_from(runtime: &Runtime, recipe_sha: &str) {
         .is_none_or(|sha| sha == recipe_sha));
 }
 
+/// The runtime without what moves between the recording and a live run:
+/// `git_commit_sha`, which the recording predates, and the image metadata
+/// past its five declared fields, which is whatever the data plane reports
+/// (tool versions, say) and changes with a release.
+fn runtime_snapshot(runtime: &Runtime) -> Value {
+    const DECLARED: [&str; 5] = [
+        "image_tag",
+        "built_at",
+        "size_bytes",
+        "external_image_name",
+        "verdict_by",
+    ];
+    let mut value = without(runtime, &["git_commit_sha"]);
+    if let Some(Value::Object(metadata)) = value.get_mut("image_build_metadata") {
+        metadata.retain(|key, _| DECLARED.contains(&key.as_str()));
+    }
+    value
+}
+
 pub async fn runtime(w: &mut Walk) {
     let sa = w.sa();
     let project = w.project_id();
@@ -374,7 +393,7 @@ pub async fn runtime(w: &mut Walk) {
         .find(|r| r.recipe_id == Some(recipe))
         .expect("the push-versioned runtime");
     assert_built_from(&runtime, &recipe_sha);
-    assert_stable!(without(&runtime, &["git_commit_sha"]), @r#"
+    assert_stable!(runtime_snapshot(&runtime), @r#"
     {
       "config_json": {
         "connectors": [

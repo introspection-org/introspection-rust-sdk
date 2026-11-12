@@ -430,8 +430,8 @@ static URL: LazyLock<Regex> = LazyLock::new(|| re(r"^https?://"));
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| re(r"\d"));
 static MEASURED_KEY: LazyLock<Regex> =
     LazyLock::new(|| re(r"(_ms$|_count$|_tokens$|^max_turn$|^display_index$)"));
-// A dependency version the server reports moves with the server's pin, not the API.
-static VERSION_KEY: LazyLock<Regex> = LazyLock::new(|| re(r"^validator_version$"));
+// A dependency or tool version the server reports moves with its pin, not the API.
+static VERSION_KEY: LazyLock<Regex> = LazyLock::new(|| re(r"_version$"));
 static VOLATILE_KEY: LazyLock<Regex> = LazyLock::new(|| {
     re(
         r"(^id$|_at$|_sha$|token$|secret$|^key$|_key$|cookie$|^url$|_url$|^expires_in$|^client_id$|_prefix$|_suffix$|^prefix$|^key_display$|image_tag$|_image_name$|_bytes$)",
