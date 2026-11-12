@@ -223,6 +223,7 @@ pub async fn connector(w: &mut Walk) {
           ],
           "registration_endpoint": "[url]",
           "resource": "[url]",
+          "revocation_endpoint": "[url]",
           "token_endpoint_auth_methods_supported": [
             "none"
           ]

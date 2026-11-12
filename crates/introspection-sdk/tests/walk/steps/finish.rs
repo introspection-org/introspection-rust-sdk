@@ -177,7 +177,12 @@ pub async fn members_and_keys(w: &mut Walk) {
         .await
         .expect("create a development API key");
     assert!(key.api_key.is_some(), "the plaintext key is returned once");
-    assert_stable!(key, { ".api_key" => "[omitted]" }, @r#"
+    // The platform's default scopes grow, so the walk asserts the ones `allow` grants.
+    let scopes: Vec<&str> = key.key.scope.split_whitespace().collect();
+    for scope in ["runtimes:read", "runtimes:write"] {
+        assert!(scopes.contains(&scope), "the key carries {scope}");
+    }
+    assert_stable!(key, { ".api_key" => "[omitted]", ".scope" => "[default scopes]" }, @r#"
     {
       "allow": [
         "runtimes"
@@ -195,7 +200,7 @@ pub async fn members_and_keys(w: &mut Walk) {
       "prefix": "[redacted]",
       "project_id": "[uuid]",
       "redacted_key": "[redacted]",
-      "scope": "telemetry:write projects:read repositories:read recipes:read recipes:write runtimes:read runtimes:write experiments:read experiments:write tasks:read tasks:write tasks:delete files:read files:write conversations:read events:read metrics:read shares:read shares:write shares:delete connectors:read connectors:write annotations:read approvals:read approvals:write",
+      "scope": "[default scopes]",
       "status": "active"
     }
     "#);
