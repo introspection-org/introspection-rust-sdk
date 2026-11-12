@@ -1,10 +1,8 @@
-//! `connections()` (DP) — the apps (Gmail, Slack, …) members connected for
-//! themselves, at `/v1/connections`. The agent acts with a member's
-//! connections in that member's sessions.
-//!
-//! These are distinct from a connector's connections ([`crate::Connections`],
-//! `/v1/connectors/{id}/connections`), which an integrator administers for the
-//! project.
+//! `connections()` (DP) — every connection, at `/v1/connections`: the apps
+//! (Gmail, Slack, …) and organization integrations (Google Workspace,
+//! Microsoft 365) members connected for themselves, and the project's own
+//! accounts on its connectors. The agent acts with a member's connections in
+//! that member's sessions.
 //!
 //! Data Plane routes gated on `connections:read`, `connections:write` and
 //! `connections:delete`, which a runner a member opens for themself carries.
@@ -45,15 +43,17 @@ impl MemberConnections {
             .expect("MemberConnectionListParams must serialize to a JSON object")
     }
 
-    /// `POST /v1/connections` — a connect page for `params.app`, for the
-    /// caller themself. Hand the member [`ConnectPage::authorize_url`].
+    /// `POST /v1/connections` — a connect page for the caller themself, for
+    /// `params.app` or `params.integration_id`. Hand the member
+    /// [`ConnectPage::authorize_url`].
     ///
-    /// On a runner, `params.runtime: None` connects the app for the runner's
-    /// runtime group. On the client, or a runner whose context has no runtime
-    /// group, `None` answers [`IntrospectionAPIError::InvalidConfig`] without
-    /// a request.
+    /// For an app, on a runner, `params.runtime: None` connects the app for
+    /// the runner's runtime group. On the client, or a runner whose context
+    /// has no runtime group, `None` answers
+    /// [`IntrospectionAPIError::InvalidConfig`] without a request. An
+    /// integration connection takes no runtime.
     pub async fn create(&self, params: &MemberConnectionCreate) -> ApiResult<ConnectPage> {
-        if params.runtime.is_some() {
+        if params.runtime.is_some() || params.app.is_none() {
             return self.http.post_json("/v1/connections", params).await;
         }
         let Some(runtime_group_id) = self.default_runtime_group_id else {

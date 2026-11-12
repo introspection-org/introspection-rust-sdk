@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::steps::{expect_not_found, expect_refused, no_such_id};
-use crate::support::{assert_stable, settled, span_event_id, walk, without};
+use crate::support::{assert_stable, connection_snapshot, settled, span_event_id, walk, without};
 use crate::{set, Walk};
 
 /// How long the input file lives: a day outlasts the walk.
@@ -1091,6 +1091,8 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
         .collect_all(0)
         .await
         .expect("list connections");
+    assert!(listed.iter().all(|c| c.integration_id.is_none()));
+    let listed: Vec<_> = listed.iter().map(connection_snapshot).collect();
     assert_stable!(listed, @r#"
     [
       {
@@ -1120,17 +1122,14 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
     expect_not_found(
         connections
             .create(&MemberConnectionCreate {
-                app: "gmail".into(),
                 runtime: Some(walk::RUNTIME_SLUG.into()),
+                ..MemberConnectionCreate::new("gmail")
             })
             .await,
     );
     // A client with no runtime of its own refuses before any request.
     let refused = connections
-        .create(&MemberConnectionCreate {
-            app: "gmail".into(),
-            runtime: None,
-        })
+        .create(&MemberConnectionCreate::new("gmail"))
         .await;
     assert!(refused.is_err_and(|e| e.to_string().contains("runtime")));
 }

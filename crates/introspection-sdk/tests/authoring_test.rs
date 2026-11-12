@@ -580,3 +580,23 @@ fn a_header_secret_does_not_debug_print() {
     };
     assert!(!format!("{params:?}").contains("sk-live-123"));
 }
+
+#[test]
+fn endpoint_metadata_types_the_integration_and_keeps_undeclared_keys() {
+    let metadata: EndpointMetadata = serde_json::from_value(json!({
+        "integration_id": INTEGRATION_ID,
+        "extra_hosts": [],
+        "custom": "kept",
+    }))
+    .unwrap();
+    assert_eq!(
+        metadata.integration_id,
+        Some(INTEGRATION_ID.parse().unwrap())
+    );
+    assert!(metadata.connector_id.is_none());
+    assert_eq!(metadata.other.get("custom"), Some(&json!("kept")));
+    assert_eq!(
+        serde_json::to_value(&metadata).unwrap(),
+        json!({"integration_id": INTEGRATION_ID, "extra_hosts": [], "custom": "kept"})
+    );
+}

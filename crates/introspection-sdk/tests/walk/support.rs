@@ -52,8 +52,6 @@ pub mod walk {
     /// An identity provider a federated application attaches and a service
     /// account refuses (step 2). Checked by its issuer alone.
     pub const IDP_ISSUER: &str = "https://idp.walk.invalid";
-    /// The token a registered connection stores (step 6); no provider issued it.
-    pub const REGISTERED_TOKEN: &str = "walk-registered-token";
     /// An image mirror (step 14), digest-pinned as a mirror must be. The copy
     /// may fail on a stack with no egress; the walk does not wait for it.
     pub const IMAGE_NAME: &str = "walk/busybox";
@@ -532,6 +530,16 @@ pub fn without<T: Serialize>(value: &T, keys: &[&str]) -> Value {
         map.remove(*key);
     }
     value
+}
+
+/// A connection without the fields the recording predates: its integration,
+/// its runtime group and its token's expiry. The step asserts what it needs
+/// of them beside the snapshot.
+pub fn connection_snapshot(connection: &introspection_sdk::MemberConnection) -> Value {
+    without(
+        connection,
+        &["integration_id", "runtime_group_id", "token_expires_at"],
+    )
 }
 
 /// `assert_json_snapshot!` through the walk's one normalisation rule.

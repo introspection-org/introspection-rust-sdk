@@ -157,8 +157,8 @@ pub async fn project(w: &mut Walk) {
     let owner = w.owner();
     let project = set(&w.project, "the project").clone();
     // The slug is new on every live run.
-    assert_default_prefixes(&project);
-    assert_stable!(without(&project, &["display_id_prefixes"]), { ".slug" => "[per run]" }, @r#"
+    assert_project_defaults(&project);
+    assert_stable!(without(&project, &["display_id_prefixes", "connection_integrations"]), { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
@@ -229,8 +229,8 @@ pub async fn project(w: &mut Walk) {
         .await
         .expect("create a sibling project");
     assert_eq!(sibling.deployment_id, project.deployment_id);
-    assert_default_prefixes(&sibling);
-    assert_stable!(without(&sibling, &["display_id_prefixes"]), { ".slug" => "[per run]" }, @r#"
+    assert_project_defaults(&sibling);
+    assert_stable!(without(&sibling, &["display_id_prefixes", "connection_integrations"]), { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
@@ -248,9 +248,13 @@ pub async fn project(w: &mut Walk) {
     expect_not_found(owner.projects().get(sibling.id).await);
 }
 
-/// A project created without prefixes carries the defaults; a server that
-/// predates them sends none.
-fn assert_default_prefixes(project: &introspection_sdk::Project) {
+/// A project created without prefixes or connection integrations carries
+/// the defaults; a server that predates either sends none.
+fn assert_project_defaults(project: &introspection_sdk::Project) {
+    assert!(project
+        .connection_integrations
+        .as_ref()
+        .is_none_or(Vec::is_empty));
     if let Some(prefixes) = &project.display_id_prefixes {
         let expected = DisplayIdPrefixes {
             issue: Some("I".into()),

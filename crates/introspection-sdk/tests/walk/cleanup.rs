@@ -5,9 +5,9 @@
 use futures::StreamExt as _;
 use introspection_sdk::api::ApiResult;
 use introspection_sdk::{
-    ApiKeyDeleteParams, ApiKeyListParams, AutomationListParams, ConnectionListParams,
-    ConnectorListParams, EndpointListParams, ExperimentListParams, FileListParams,
-    IntrospectionClient, RecipeListParams, RepositoryListParams, RuntimeListParams,
+    ApiKeyDeleteParams, ApiKeyListParams, AutomationListParams, ConnectorListParams,
+    EndpointListParams, ExperimentListParams, FileListParams, IntrospectionClient,
+    MemberConnectionListParams, RecipeListParams, RepositoryListParams, RuntimeListParams,
     RuntimeSettingListParams, ShareListParams, ShareResourceType, StringOrUuid, TagKind,
     TaskListParams,
 };
@@ -44,7 +44,7 @@ pub async fn remove_walk_resources(w: &Walk, dp: &IntrospectionClient) {
     }
     ignore_404(member.tags().delete(TagKind::Access, walk::TAG_NAME).await);
     remove_tasks_and_files(dp).await;
-    remove_control_plane(&owner, project).await;
+    remove_control_plane(&owner, &member, project).await;
 }
 
 async fn remove_api_keys(owner: &IntrospectionClient, project: Uuid) {
@@ -130,9 +130,15 @@ async fn remove_tasks_and_files(dp: &IntrospectionClient) {
     }
 }
 
-async fn remove_control_plane(owner: &IntrospectionClient, project: Uuid) {
+/// A connector's connections are removed on the Data Plane with the owner's
+/// member token, before the connector.
+async fn remove_control_plane(
+    owner: &IntrospectionClient,
+    member: &IntrospectionClient,
+    project: Uuid,
+) {
     remove_runtimes(owner, project).await;
-    remove_connectors(owner, project).await;
+    remove_connectors(owner, member, project).await;
     remove_settings(owner, project).await;
     remove_repositories(owner, project).await;
     remove_applications(owner, project).await;
@@ -207,7 +213,11 @@ async fn remove_applications(owner: &IntrospectionClient, project: Uuid) {
     }
 }
 
-async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
+async fn remove_connectors(
+    owner: &IntrospectionClient,
+    member: &IntrospectionClient,
+    project: Uuid,
+) {
     let connectors = owner
         .connectors()
         .list(&ConnectorListParams {
@@ -221,20 +231,17 @@ async fn remove_connectors(owner: &IntrospectionClient, project: Uuid) {
         .into_iter()
         .filter(|c| c.slug == walk::CONNECTOR_NAME)
     {
-        let connections = owner
-            .connectors()
-            .connections
-            .list(c.id, &ConnectionListParams::default())
+        let connections = member
+            .connections()
+            .list(&MemberConnectionListParams {
+                connector_id: Some(c.id),
+                ..Default::default()
+            })
             .collect_all(0)
             .await
             .expect("list connections");
         for conn in connections {
-            owner
-                .connectors()
-                .connections
-                .revoke(c.id, conn.id)
-                .await
-                .expect("revoke connection");
+            ignore_404(member.connections().delete(conn.id).await);
         }
         owner
             .connectors()

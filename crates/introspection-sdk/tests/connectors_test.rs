@@ -1,5 +1,5 @@
-//! Integration tests for the connectors CP surface (`client.connectors` and
-//! its nested `connections`) backed by `wiremock`.
+//! Integration tests for the connectors CP surface (`client.connectors`)
+//! backed by `wiremock`.
 //!
 //! Like the other REST tests these construct the namespace directly via
 //! [`HttpClient::from_parts`], swapping the real CP for a mock server.
@@ -11,13 +11,11 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
 use introspection_sdk::{
-    ClientRegistrationMethod, ConnectionBrokerSubjectType, ConnectionCreateParams,
-    ConnectionCreateSubjectType, ConnectionListParams, ConnectionMissionConstraints,
-    ConnectionSubjectType, ConnectionTokenParams, ConnectionTokenResult, Connections,
-    ConnectorAppListParams, ConnectorAuthMode, ConnectorAuthorizeBinding, ConnectorAuthorizeParams,
-    ConnectorCreateParams, ConnectorCustomAppSearchParams, ConnectorListParams,
-    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, Connectors, PaginationParams,
-    RunnerIdentity,
+    ClientRegistrationMethod, ConnectionBrokerSubjectType, ConnectionMissionConstraints,
+    ConnectionTokenParams, ConnectionTokenResult, ConnectorAppListParams, ConnectorAuthMode,
+    ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
+    ConnectorUpdateParams, Connectors, RunnerIdentity,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -63,23 +61,6 @@ fn connector_json() -> serde_json::Value {
         "api_hosts": ["slack.com"],
         "status": "active",
         "requires_runtime": true,
-    })
-}
-
-fn connection_json() -> serde_json::Value {
-    json!({
-        "id": CONNECTION_ID,
-        "org_id": "00000000-0000-0000-0000-0000000000aa",
-        "created_at": "2026-08-08T00:00:00Z",
-        "updated_at": "2026-08-08T00:00:00Z",
-        "connector_id": CONNECTOR_ID,
-        "member_id": "00000000-0000-0000-0000-0000000000cc",
-        "created_by_member_id": "00000000-0000-0000-0000-0000000000dd",
-        "runtime_group_id": "33333333-3333-3333-3333-333333333333",
-        "subject_type": "workspace",
-        "scopes_granted": ["chat:write"],
-        "status": "active",
-        "token_expires_at": null,
     })
 }
 
@@ -252,6 +233,30 @@ async fn authorize_carries_an_asserted_end_customer() {
 }
 
 #[tokio::test]
+async fn authorize_integration_sends_the_integration_instead_of_a_connector() {
+    let integration = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/oauth/connections/authorize"))
+        .and(body_json(json!({ "integration_id": integration })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth?state=y",
+            "expires_in": 600,
+            "expires_at": "2026-08-08T20:10:00Z",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let minted = Connectors::new(build_http(&server))
+        .authorize_integration(integration, &ConnectorAuthorizeParams::default(), None)
+        .await
+        .unwrap();
+
+    assert!(minted.authorize_url.ends_with("state=y"));
+}
+
+#[tokio::test]
 async fn authorize_sends_only_the_connector_when_given_nothing_else() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -390,84 +395,7 @@ async fn a_disabled_deployment_keeps_the_servers_wording() {
 }
 
 #[tokio::test]
-async fn connections_list_and_create_use_the_nested_path() {
-    let server = MockServer::start().await;
-    let connections_path = format!("/v1/connectors/{CONNECTOR_ID}/connections");
-    Mock::given(method("GET"))
-        .and(path(connections_path.clone()))
-        .and(query_param("limit", "25"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![connection_json()])))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path(connections_path))
-        .and(body_json(json!({
-            "access_token": "xoxb-token",
-            "subject_type": "app",
-            "scopes_granted": ["chat:write"],
-        })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(connection_json()))
-        .mount(&server)
-        .await;
-
-    let connections = Connections::new(build_http(&server));
-
-    let params = ConnectionListParams {
-        pagination: PaginationParams {
-            limit: Some(25),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let listed: Vec<_> = connections.list(connector_id(), &params).collect().await;
-    assert_eq!(listed.len(), 1);
-    let connection = listed[0].as_ref().unwrap();
-    assert_eq!(connection.subject_type, ConnectionSubjectType::Workspace);
-    // The installer is recorded apart from the subject: for a workspace
-    // install they are never the same principal.
-    assert!(connection.created_by_member_id.is_some());
-    assert_ne!(connection.created_by_member_id, connection.member_id);
-
-    let create = ConnectionCreateParams {
-        subject_type: Some(ConnectionCreateSubjectType::App),
-        scopes_granted: Some(vec!["chat:write".to_string()]),
-        ..ConnectionCreateParams::new("xoxb-token")
-    };
-    let created = connections.create(connector_id(), &create).await.unwrap();
-    assert_eq!(created.connector_id, connector_id());
-}
-
-#[tokio::test]
-async fn connections_get_and_revoke_address_one_connection() {
-    let server = MockServer::start().await;
-    let connection_path = format!("/v1/connectors/{CONNECTOR_ID}/connections/{CONNECTION_ID}");
-    Mock::given(method("GET"))
-        .and(path(connection_path.clone()))
-        .respond_with(ResponseTemplate::new(200).set_body_json(connection_json()))
-        .mount(&server)
-        .await;
-    Mock::given(method("DELETE"))
-        .and(path(connection_path))
-        .respond_with(ResponseTemplate::new(204))
-        .mount(&server)
-        .await;
-
-    let connections = Connections::new(build_http(&server));
-
-    let fetched = connections
-        .get(connector_id(), connection_id())
-        .await
-        .unwrap();
-    assert_eq!(fetched.id, connection_id());
-
-    connections
-        .revoke(connector_id(), connection_id())
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn connections_get_token_returns_a_provider_token() {
+async fn connection_token_returns_a_provider_token() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/oauth/connections/token"))
@@ -486,8 +414,8 @@ async fn connections_get_token_returns_a_provider_token() {
         .mount(&server)
         .await;
 
-    let result = Connections::new(build_http(&server))
-        .get_token(
+    let result = Connectors::new(build_http(&server))
+        .connection_token(
             connector_id(),
             &ConnectionTokenParams {
                 subject: Some(ConnectionBrokerSubjectType::User),
@@ -509,7 +437,7 @@ async fn connections_get_token_returns_a_provider_token() {
 }
 
 #[tokio::test]
-async fn connections_get_token_names_the_project_and_the_connection() {
+async fn connection_token_names_the_project_and_the_connection() {
     let server = MockServer::start().await;
     // The project rides the query string, never the closed request body.
     Mock::given(method("POST"))
@@ -526,8 +454,8 @@ async fn connections_get_token_names_the_project_and_the_connection() {
         .mount(&server)
         .await;
 
-    let result = Connections::new(build_http(&server))
-        .get_token(
+    let result = Connectors::new(build_http(&server))
+        .connection_token(
             connector_id(),
             &ConnectionTokenParams {
                 project: Some("support desk".into()),
@@ -545,7 +473,7 @@ async fn connections_get_token_names_the_project_and_the_connection() {
 }
 
 #[tokio::test]
-async fn connections_get_token_preserves_pending_authorization() {
+async fn connection_token_preserves_pending_authorization() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/oauth/connections/token"))
@@ -557,8 +485,8 @@ async fn connections_get_token_preserves_pending_authorization() {
         .mount(&server)
         .await;
 
-    let result = Connections::new(build_http(&server))
-        .get_token(connector_id(), &ConnectionTokenParams::default())
+    let result = Connectors::new(build_http(&server))
+        .connection_token(connector_id(), &ConnectionTokenParams::default())
         .await
         .unwrap();
 
@@ -568,27 +496,6 @@ async fn connections_get_token_preserves_pending_authorization() {
         }
         other => panic!("expected pending authorization, got {other:?}"),
     }
-}
-
-#[tokio::test]
-async fn the_connectors_namespace_carries_connections() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/v1/connectors/{CONNECTOR_ID}/connections/{CONNECTION_ID}"
-        )))
-        .respond_with(ResponseTemplate::new(200).set_body_json(connection_json()))
-        .mount(&server)
-        .await;
-
-    let connectors = Connectors::new(build_http(&server));
-    let fetched = connectors
-        .connections
-        .get(connector_id(), connection_id())
-        .await
-        .unwrap();
-
-    assert_eq!(fetched.connector_id, connector_id());
 }
 
 #[tokio::test]
@@ -658,7 +565,8 @@ async fn discover_oauth_posts_the_issuer_and_returns_the_registered_client() {
             "redirect_uri": "https://api.introspection.dev/v1/oauth/connections/callback",
             "client_id": "registered-client",
             "client_secret": "registered-secret",
-            "client_registration": "dynamic"
+            "client_registration": "dynamic",
+            "revocation_endpoint": "https://mcp.linear.app/revoke"
         })))
         .mount(&server)
         .await;
@@ -677,6 +585,10 @@ async fn discover_oauth_posts_the_issuer_and_returns_the_registered_client() {
     assert_eq!(
         discovered.client_registration,
         Some(ClientRegistrationMethod::Dynamic)
+    );
+    assert_eq!(
+        discovered.revocation_endpoint.as_deref(),
+        Some("https://mcp.linear.app/revoke")
     );
 }
 
@@ -702,6 +614,7 @@ async fn discover_oauth_decodes_a_provider_without_registration() {
         .unwrap();
 
     assert!(discovered.client_id.is_none());
+    assert!(discovered.revocation_endpoint.is_none());
     assert!(discovered.scopes_supported.is_empty());
     assert!(!discovered.client_id_metadata_document_supported);
     assert_eq!(
@@ -777,54 +690,6 @@ async fn authorize_carries_an_mcp_endpoint_binding() {
         .authorize(connector_id(), &params, None)
         .await
         .unwrap();
-}
-
-#[tokio::test]
-async fn connection_exposes_the_provider_app_and_account() {
-    let server = MockServer::start().await;
-    let mut body = connection_json();
-    body["provider_app"] = json!("google_sheets");
-    body["provider_account_id"] = json!("apn_abc123");
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/v1/connectors/{CONNECTOR_ID}/connections/{CONNECTION_ID}"
-        )))
-        .respond_with(ResponseTemplate::new(200).set_body_json(body))
-        .mount(&server)
-        .await;
-
-    let connections = Connections::new(build_http(&server));
-    let connection = connections
-        .get(connector_id(), connection_id())
-        .await
-        .unwrap();
-
-    assert_eq!(connection.provider_app.as_deref(), Some("google_sheets"));
-    assert_eq!(
-        connection.provider_account_id.as_deref(),
-        Some("apn_abc123")
-    );
-}
-
-#[tokio::test]
-async fn a_connection_without_provider_fields_decodes_to_none() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/v1/connectors/{CONNECTOR_ID}/connections/{CONNECTION_ID}"
-        )))
-        .respond_with(ResponseTemplate::new(200).set_body_json(connection_json()))
-        .mount(&server)
-        .await;
-
-    let connections = Connections::new(build_http(&server));
-    let connection = connections
-        .get(connector_id(), connection_id())
-        .await
-        .unwrap();
-
-    assert!(connection.provider_app.is_none());
-    assert!(connection.provider_account_id.is_none());
 }
 
 #[test]
@@ -937,30 +802,7 @@ async fn connector_calls_send_the_project_selector() {
 }
 
 #[test]
-fn connection_create_and_token_params_read_from_a_json_document() {
-    let create: ConnectionCreateParams = serde_json::from_value(json!({
-        "access_token": "xoxb-1",
-        "subject_type": "user",
-        "scopes_granted": ["chat:write"],
-    }))
-    .unwrap();
-    assert_eq!(create.access_token, "xoxb-1");
-    assert_eq!(create.subject_type, Some(ConnectionCreateSubjectType::User));
-    assert_eq!(create.refresh_token, None);
-    assert_eq!(
-        serde_json::to_value(&create).unwrap(),
-        json!({
-            "access_token": "xoxb-1",
-            "subject_type": "user",
-            "scopes_granted": ["chat:write"],
-        })
-    );
-    assert!(serde_json::from_value::<ConnectionCreateParams>(json!({
-        "access_token": "xoxb-1",
-        "acess_token_typo": "x",
-    }))
-    .is_err());
-
+fn token_params_read_from_a_json_document() {
     let token: ConnectionTokenParams = serde_json::from_value(json!({
         "connection_id": CONNECTION_ID,
         "subject": "person",

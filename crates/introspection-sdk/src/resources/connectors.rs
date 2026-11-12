@@ -1,11 +1,11 @@
-//! `client.connectors` (CP) — connectors, their connections, and the
-//! consent URL a Business hands its customer.
+//! `client.connectors` (CP) — connectors, the consent URL a Business hands
+//! its customer, and the token broker for a connector's connections.
 //!
 //! A connector is the org-level definition of a provider (Slack, Gmail,
 //! Stripe): endpoints, client credentials, requested scopes. A connection is
 //! one authorized subject underneath it — a Slack workspace that installed
-//! the app, a person, an app credential — so connections are nested here
-//! rather than standing on their own.
+//! the app, a person, an app credential — read and removed through the data
+//! plane's `client.connections()`.
 //!
 //! [`Connectors::authorize`] is the reason this namespace exists for an
 //! integrator: it mints the install link their own backend puts in front of
@@ -29,116 +29,42 @@ use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Connection, ConnectionCreateParams, ConnectionListParams, ConnectionTokenParams,
-    ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams, ConnectorAuthorization,
-    ConnectorAuthorizeParams, ConnectorCreateParams, ConnectorCustomAppSearchParams,
-    ConnectorListParams, ConnectorOAuthDiscovery, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams, ProjectSelector, StringOrUuid,
+    ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
+    ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams,
+    ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscovery,
+    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, ProjectSelector, StringOrUuid,
 };
 use crate::resources::with_project;
 
-/// `client.connectors.connections` — the authorized subjects under one
-/// connector (`/v1/connectors/{connector_id}/connections`).
-///
-/// Every method takes the connector id first: a connection is addressed
-/// through its connector, and is meaningless without it. There is no PATCH,
-/// and the platform never serializes access or refresh tokens.
-#[derive(Clone)]
-pub struct Connections {
-    http: Arc<HttpClient>,
-}
-
-impl Connections {
-    #[doc(hidden)]
-    pub fn new(http: Arc<HttpClient>) -> Self {
-        Self { http }
-    }
-
-    /// `GET /v1/connectors/{connector_id}/connections` — paginated.
-    pub fn list(&self, connector_id: Uuid, params: &ConnectionListParams) -> Paginator<Connection> {
-        let path = format!("/v1/connectors/{}/connections", connector_id);
-        Paginator::new(self.http.clone(), path, params)
-            .expect("ConnectionListParams must serialize to a JSON object")
-    }
-
-    /// `POST /v1/connectors/{connector_id}/connections` — registered mode:
-    /// store a token the caller already holds.
-    ///
-    /// For the consent flow use [`Connectors::authorize`] instead; its
-    /// callback creates the connection server-side.
-    pub async fn create(
-        &self,
-        connector_id: Uuid,
-        params: &ConnectionCreateParams,
-    ) -> ApiResult<Connection> {
-        let path = format!("/v1/connectors/{}/connections", connector_id);
-        self.http.post_json(&path, params).await
-    }
-
-    /// `GET /v1/connectors/{connector_id}/connections/{connection_id}`.
-    pub async fn get(&self, connector_id: Uuid, connection_id: Uuid) -> ApiResult<Connection> {
-        let path = format!(
-            "/v1/connectors/{}/connections/{}",
-            connector_id, connection_id
-        );
-        self.http.get_json(&path, &ProjectSelector::default()).await
-    }
-
-    /// `DELETE /v1/connectors/{connector_id}/connections/{connection_id}`.
-    ///
-    /// Named `revoke` rather than `delete` because it destroys the provider
-    /// token behind the connection: the subject must consent again through a
-    /// fresh install link. The connector and its other connections are
-    /// untouched.
-    pub async fn revoke(&self, connector_id: Uuid, connection_id: Uuid) -> ApiResult<()> {
-        let path = format!(
-            "/v1/connectors/{}/connections/{}",
-            connector_id, connection_id
-        );
-        self.http.delete_empty(&path).await
-    }
-
-    /// `POST /v1/oauth/connections/token` — resolve a provider credential.
-    /// A person-authorized connector may instead return a pending mission and
-    /// approval URL; callers must handle both [`ConnectionTokenResult`] arms.
-    pub async fn get_token(
-        &self,
-        connector_id: Uuid,
-        params: &ConnectionTokenParams,
-    ) -> ApiResult<ConnectionTokenResult> {
-        let mut body = serde_json::to_value(params).map_err(|err| {
-            IntrospectionAPIError::Decode(format!(
-                "ConnectionTokenParams must serialize to a JSON object: {err}"
-            ))
-        })?;
-        let map = body.as_object_mut().ok_or_else(|| {
-            IntrospectionAPIError::Decode(
-                "ConnectionTokenParams must serialize to a JSON object".to_string(),
-            )
-        })?;
-        map.insert(
-            "connector_id".to_string(),
-            serde_json::Value::String(connector_id.to_string()),
-        );
-        let path = with_project("/v1/oauth/connections/token", params.project.as_ref());
-        self.http.post_json(&path, &body).await
-    }
-}
-
-/// `client.connectors` namespace. Holds a CP-bound HTTP client, with
-/// [`Connections`] nested under `.connections`.
+/// `client.connectors` namespace. Holds a CP-bound HTTP client.
 #[derive(Clone)]
 pub struct Connectors {
     http: Arc<HttpClient>,
-    /// Nested `connections` namespace.
-    pub connections: Connections,
 }
 
 impl Connectors {
     #[doc(hidden)]
     pub fn new(http: Arc<HttpClient>) -> Self {
-        let connections = Connections::new(http.clone());
-        Self { http, connections }
+        Self { http }
+    }
+
+    /// `POST /v1/oauth/connections/token` — resolve a provider credential
+    /// for one of the connector's connections. A person-authorized connector
+    /// may instead return a pending mission and approval URL; callers must
+    /// handle both [`ConnectionTokenResult`] arms.
+    pub async fn connection_token(
+        &self,
+        connector_id: Uuid,
+        params: &ConnectionTokenParams,
+    ) -> ApiResult<ConnectionTokenResult> {
+        let body = with_id(
+            params,
+            "ConnectionTokenParams",
+            "connector_id",
+            connector_id,
+        )?;
+        let path = with_project("/v1/oauth/connections/token", params.project.as_ref());
+        self.http.post_json(&path, &body).await
     }
 
     /// `GET /v1/connectors` — paginated.
@@ -289,22 +215,54 @@ impl Connectors {
         project: Option<StringOrUuid>,
     ) -> ApiResult<ConnectorAuthorization> {
         // The route takes `connector_id` in the body; the SDK takes it as an
-        // argument, so merge it into the serialized params.
-        let mut body = serde_json::to_value(params).map_err(|err| {
-            IntrospectionAPIError::Decode(format!(
-                "ConnectorAuthorizeParams must serialize to a JSON object: {err}"
-            ))
-        })?;
-        let map = body.as_object_mut().ok_or_else(|| {
-            IntrospectionAPIError::Decode(
-                "ConnectorAuthorizeParams must serialize to a JSON object".to_string(),
-            )
-        })?;
-        map.insert(
-            "connector_id".to_string(),
-            serde_json::Value::String(connector_id.to_string()),
-        );
+        // argument.
+        let body = with_id(
+            params,
+            "ConnectorAuthorizeParams",
+            "connector_id",
+            connector_id,
+        )?;
         let path = with_project("/v1/oauth/connections/authorize", project.as_ref());
         self.http.post_json(&path, &body).await
     }
+
+    /// `POST /v1/oauth/connections/authorize` for an organization
+    /// integration (Google Workspace, Microsoft 365) instead of a
+    /// connector: the consent URL that installs it. Needs
+    /// `integrations:write`.
+    pub async fn authorize_integration(
+        &self,
+        integration_id: Uuid,
+        params: &ConnectorAuthorizeParams,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<ConnectorAuthorization> {
+        let body = with_id(
+            params,
+            "ConnectorAuthorizeParams",
+            "integration_id",
+            integration_id,
+        )?;
+        let path = with_project("/v1/oauth/connections/authorize", project.as_ref());
+        self.http.post_json(&path, &body).await
+    }
+}
+
+/// `params` as a JSON object with `key` set to `id`: a route that takes in
+/// its body an id the SDK takes as an argument.
+fn with_id<T: serde::Serialize>(
+    params: &T,
+    type_name: &str,
+    key: &str,
+    id: Uuid,
+) -> ApiResult<serde_json::Value> {
+    let mut body = serde_json::to_value(params).map_err(|err| {
+        IntrospectionAPIError::Decode(format!(
+            "{type_name} must serialize to a JSON object: {err}"
+        ))
+    })?;
+    let map = body.as_object_mut().ok_or_else(|| {
+        IntrospectionAPIError::Decode(format!("{type_name} must serialize to a JSON object"))
+    })?;
+    map.insert(key.to_string(), serde_json::Value::String(id.to_string()));
+    Ok(body)
 }
