@@ -4307,6 +4307,34 @@ pub struct Organization {
     /// Whether new hosted repositories are allowed.
     #[serde(default = "default_true")]
     pub hosted_git: bool,
+    /// How members sign in and who can be invited; present only where the
+    /// organization has Enterprise sign-in.
+    #[serde(default)]
+    pub sign_in: Option<SignInSettings>,
+}
+
+/// An [`Organization`]'s sign-in settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SignInSettings {
+    #[serde(default)]
+    pub passkey_requirement: PasskeyRequirement,
+    /// Whether invites are limited to the organization's domains.
+    #[serde(default)]
+    pub restrict_invites_to_domains: bool,
+}
+
+open_wire_enum! {
+    /// When an organization's members must sign in with a passkey.
+    #[derive(Default)]
+    pub enum PasskeyRequirement {
+        /// A passkey is never required.
+        #[default]
+        Off => "off",
+        /// Every member signs in with a passkey.
+        Always => "always",
+        /// Always, except members who sign in through SSO.
+        ExceptSso => "except_sso",
+    }
 }
 
 /// `POST /v1/tokens` body: a Data Plane token for one project, minted from
@@ -4894,6 +4922,10 @@ pub struct Issue {
     /// With [`IssueInclude::Comments`].
     #[serde(default)]
     pub comments: Option<Vec<IssueComment>>,
+    /// What this read left out, such as the comments beyond the include's
+    /// cap. `None` only from a server that predates it.
+    #[serde(default)]
+    pub warnings: Option<Vec<String>>,
 }
 
 impl Issue {

@@ -14,14 +14,14 @@ use introspection_sdk::{
     FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
     MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
     MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
-    ShareResourceType, StreamOptions, TagCreate, TagKind, TagListParams, TagUpdate, Task,
+    ShareResourceType, StreamOptions, Tag, TagCreate, TagKind, TagListParams, TagUpdate, Task,
     TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::steps::{expect_not_found, expect_refused, no_such_id};
-use crate::support::{assert_stable, settled, span_event_id, walk};
+use crate::support::{assert_stable, settled, span_event_id, walk, without};
 use crate::{set, Walk};
 
 /// How long the input file lives: a day outlasts the walk.
@@ -781,6 +781,13 @@ async fn metrics(sa: &IntrospectionClient, runtime: Uuid) {
     assert!(raw["data"].is_array(), "{raw}");
 }
 
+/// A new tag was never renamed; a server that predates renames sends no
+/// `archived_names`.
+fn assert_never_renamed(tag: &Tag) {
+    assert!(tag.archived_at.is_none() && tag.replaced_by.is_none());
+    assert!(tag.archived_names.as_ref().is_none_or(Vec::is_empty));
+}
+
 pub async fn telemetry_reads(w: &mut Walk) {
     let sa = w.sa();
     let member = w.member();
@@ -797,7 +804,8 @@ pub async fn telemetry_reads(w: &mut Walk) {
         }))
         .await
         .expect("create the access tag");
-    assert_stable!(tag, @r#"
+    assert_never_renamed(&tag);
+    assert_stable!(without(&tag, &["archived_names"]), @r#"
     {
       "created_at": "[timestamp]",
       "description": "the walk's tag",

@@ -47,6 +47,7 @@ fn issue_json() -> serde_json::Value {
         "updated_at": "2026-11-04T01:00:00Z",
         "display_index": 7,
         "display_key": "I-7",
+        "warnings": ["comments beyond the first 50 left out"],
         "title": "Clarify affiliation rules",
         "description": "Affiliate classifications are inconsistent.",
         "status": "waiting",
@@ -158,6 +159,10 @@ async fn list_sends_repeated_filters_and_decodes_every_field() {
     assert_eq!(first.revision, 3);
     assert_eq!(first.display_index, Some(7));
     assert_eq!(first.display_key.as_deref(), Some("I-7"));
+    assert_eq!(
+        first.warnings.as_deref(),
+        Some(&["comments beyond the first 50 left out".to_string()][..])
+    );
     assert_eq!(first.task_status, Some(TaskStatus::Idle));
     assert_eq!(first.metadata["attempts"], json!(2));
     assert_eq!(first.created_by_member_id, Some(id(MEMBER_ID)));
@@ -503,10 +508,12 @@ async fn list_filters_by_display_key() {
 }
 
 #[tokio::test]
-async fn an_issue_without_a_display_index_has_no_display_key() {
+async fn an_issue_without_a_display_index_or_warnings_decodes() {
     let mut body = issue_json();
     body["display_index"] = serde_json::Value::Null;
     body.as_object_mut().unwrap().remove("display_key");
+    body.as_object_mut().unwrap().remove("warnings");
     let issue: introspection_sdk::Issue = serde_json::from_value(body).unwrap();
     assert!(issue.display_key.is_none());
+    assert!(issue.warnings.is_none());
 }

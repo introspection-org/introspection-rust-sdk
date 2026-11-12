@@ -522,6 +522,18 @@ fn to_content(value: Value) -> insta::internals::Content {
     }
 }
 
+/// `value` as JSON without `keys`: fields a server added after the walk
+/// was recorded, absent from the recording and present live, so one
+/// snapshot holds against both. The step asserts each beside the snapshot.
+pub fn without<T: Serialize>(value: &T, keys: &[&str]) -> Value {
+    let mut value = serde_json::to_value(value).expect("snapshot JSON");
+    let map = value.as_object_mut().expect("a JSON object");
+    for key in keys {
+        map.remove(*key);
+    }
+    value
+}
+
 /// `assert_json_snapshot!` through the walk's one normalisation rule.
 /// Extra selectors (a field the walk leaves out, such as a task's platform
 /// `metadata`) are redacted first.
