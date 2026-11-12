@@ -6475,9 +6475,13 @@ pub struct RunCaller {
     pub library: Option<RunCallerLibrary>,
     #[serde(default)]
     pub page: Option<RunCallerPage>,
+    /// IANA time zone, e.g. `America/Los_Angeles`. The agent reads its
+    /// current date in it.
+    #[serde(default)]
+    pub timezone: Option<String>,
     /// Any additional fields the caller supplied (app / device / os /
-    /// campaign / network / screen / timezone / traits / custom keys)
-    /// pass through verbatim.
+    /// campaign / network / screen / traits / custom keys) pass through
+    /// verbatim.
     #[serde(default, flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -8471,6 +8475,24 @@ mod tests {
 
         assert!(body.get("from_timestamp").is_some());
         assert!(body.get("to_timestamp").is_some());
+    }
+
+    #[test]
+    fn run_caller_carries_its_timezone_both_ways() {
+        let caller = RunCaller {
+            timezone: Some("America/Los_Angeles".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&caller).unwrap(),
+            json!({"timezone": "America/Los_Angeles"})
+        );
+        let echoed: RunCaller =
+            serde_json::from_value(json!({"locale": "en-US", "timezone": "Europe/Paris"})).unwrap();
+        assert_eq!(echoed.timezone.as_deref(), Some("Europe/Paris"));
+        assert!(echoed.extra.is_empty());
+        let older: RunCaller = serde_json::from_value(json!({"locale": "en-US"})).unwrap();
+        assert!(older.timezone.is_none());
     }
 
     #[test]
