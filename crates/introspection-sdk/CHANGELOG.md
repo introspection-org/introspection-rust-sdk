@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.48.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.47.0...v0.48.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* `Connectors::connections` and the `Connections` resource (list, create, get, revoke over `/v1/connectors/{id}/connections`) are removed, with the `Connection`, `ConnectionCreateParams`, `ConnectionListParams` and `ConnectionCreateSubjectType` types; use `connections()` (`MemberConnection`) instead. The token broker moved from `connectors().connections.get_token(id, &params)` to `connectors().connection_token(id, &params)`. `MemberConnectionCreate::app` is now `Option<String>`, and `Project`, `ProjectCreateParams`, `ProjectUpdateParams`, `Organization`, `MemberConnection`, `MemberConnectionListParams`, `ConnectorOAuthDiscovery` and `EndpointMetadata` gain public fields.
+
+### Features
+
+* drop connectors.connections and model introspection-cloud's connection integrations ([#234](https://github.com/introspection-org/introspection-rust-sdk/issues/234)) ([70439b8](https://github.com/introspection-org/introspection-rust-sdk/commit/70439b80f081f1ac507ec46e1ea12909268c488c))
+
 ## [0.47.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.46.0...v0.47.0) (2026-11-12)
 
 
