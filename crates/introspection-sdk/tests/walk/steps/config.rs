@@ -15,12 +15,12 @@ use introspection_sdk::{
     RuntimeCreateParams, RuntimeListParams, RuntimeSettingListParams, RuntimeUpdateParams, Secret,
     VariableCreateParams, VariableKind, VariableUpdateParams,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::proxy::Exchange;
 use crate::steps::expect_refused;
-use crate::support::{assert_stable, settled, walk};
+use crate::support::{assert_stable, settled, walk, without};
 use crate::{set, Walk};
 
 pub async fn credential_and_variable(w: &mut Walk) {
@@ -337,10 +337,39 @@ fn baked(runtime: &Runtime) -> bool {
     )
 }
 
+/// The runtime was built from the recipe's commit; a server that predates
+/// it sends no `git_commit_sha`.
+fn assert_built_from(runtime: &Runtime, recipe_sha: &str) {
+    assert!(runtime
+        .git_commit_sha
+        .as_deref()
+        .is_none_or(|sha| sha == recipe_sha));
+}
+
+/// The runtime without what moves between the recording and a live run:
+/// `git_commit_sha`, which the recording predates, and the image metadata
+/// past its five declared fields, which is whatever the data plane reports
+/// (tool versions, say) and changes with a release.
+fn runtime_snapshot(runtime: &Runtime) -> Value {
+    const DECLARED: [&str; 5] = [
+        "image_tag",
+        "built_at",
+        "size_bytes",
+        "external_image_name",
+        "verdict_by",
+    ];
+    let mut value = without(runtime, &["git_commit_sha"]);
+    if let Some(Value::Object(metadata)) = value.get_mut("image_build_metadata") {
+        metadata.retain(|key, _| DECLARED.contains(&key.as_str()));
+    }
+    value
+}
+
 pub async fn runtime(w: &mut Walk) {
     let sa = w.sa();
     let project = w.project_id();
     let creds = set(&w.sa, "the service account");
+    let recipe_sha = set(&w.recipe, "the recipe").git_commit_sha.clone();
     let recipe = set(&w.recipe, "the recipe").id;
     let bake = Duration::from_secs(30 * 60);
     // The push versioned the group at the recipe's commit; that version is
@@ -363,7 +392,8 @@ pub async fn runtime(w: &mut Walk) {
         .into_iter()
         .find(|r| r.recipe_id == Some(recipe))
         .expect("the push-versioned runtime");
-    assert_stable!(runtime, @r#"
+    assert_built_from(&runtime, &recipe_sha);
+    assert_stable!(runtime_snapshot(&runtime), @r#"
     {
       "config_json": {
         "connectors": [

@@ -306,3 +306,40 @@ fn a_runtime_without_a_commit_reads_none() {
     let runtime: introspection_sdk::Runtime = serde_json::from_value(runtime_json()).unwrap();
     assert_eq!(runtime.git_commit_sha, None);
 }
+
+/// The image metadata is an open object: past its declared fields it holds
+/// whatever the data plane reported, which a strict decode must keep.
+#[tokio::test]
+async fn list_keeps_every_image_metadata_member() {
+    let server = MockServer::start().await;
+    let metadata = json!({
+        "image_tag": "hello-mcp-abc",
+        "built_at": "2026-11-12T17:00:00Z",
+        "size_bytes": 1024,
+        "external_image_name": "registry.example/hello-mcp",
+        "verdict_by": "2026-11-12T18:00:00Z",
+        "cli_version": "0.81.0",
+        "harbor_adapter_version": "0.16.0",
+        "sandbox_kernel": {"name": "gvisor"},
+    });
+    let mut row = runtime_json();
+    row["image_build_metadata"] = metadata.clone();
+    Mock::given(method("GET"))
+        .and(path("/v1/runtimes"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"records": [row], "count": 1, "next": null})),
+        )
+        .mount(&server)
+        .await;
+
+    let page = Runtimes::new(build_http(&server))
+        .list(&RuntimeListParams::default())
+        .next_page()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let decoded = page.records[0].image_build_metadata.as_ref().unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), metadata);
+}

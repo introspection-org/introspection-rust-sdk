@@ -7,11 +7,12 @@ use std::time::Duration;
 
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    PaginationParams, ProjectListParams, Projects, RuntimePeering, RuntimePeeringListParams,
+    DisplayIdPrefixes, PaginationParams, ProjectCreateParams, ProjectListParams,
+    ProjectUpdateParams, Projects, RuntimePeering, RuntimePeeringListParams,
 };
 use serde_json::json;
 use uuid::Uuid;
-use wiremock::matchers::{method, path, query_param, query_param_is_missing};
+use wiremock::matchers::{body_json, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const PROJECT_ID: &str = "11111111-1111-1111-1111-111111111111";
@@ -39,6 +40,7 @@ fn project_json() -> serde_json::Value {
         "slug": "support-desk",
         "description": null,
         "settings": {"theme": "dark"},
+        "display_id_prefixes": {"issue": "I", "report": "R", "observation": "F", "task": "T"},
         "created_by_member_id": "00000000-0000-0000-0000-0000000000cc",
     })
 }
@@ -63,6 +65,11 @@ async fn get_reads_a_project_by_id() {
     assert_eq!(project.name, "Support desk");
     assert!(project.description.is_none());
     assert_eq!(project.settings.unwrap()["theme"], "dark");
+    let prefixes = project.display_id_prefixes.unwrap();
+    assert_eq!(prefixes.issue.as_deref(), Some("I"));
+    assert_eq!(prefixes.report.as_deref(), Some("R"));
+    assert_eq!(prefixes.observation.as_deref(), Some("F"));
+    assert_eq!(prefixes.task.as_deref(), Some("T"));
 }
 
 #[tokio::test]
@@ -71,6 +78,7 @@ async fn get_reads_a_project_by_slug_and_tolerates_a_missing_slug() {
     let mut body = project_json();
     body.as_object_mut().unwrap().remove("slug");
     body.as_object_mut().unwrap().remove("created_by_member_id");
+    body.as_object_mut().unwrap().remove("display_id_prefixes");
     Mock::given(method("GET"))
         .and(path("/v1/projects/support%20desk"))
         .respond_with(ResponseTemplate::new(200).set_body_json(body))
@@ -85,6 +93,7 @@ async fn get_reads_a_project_by_slug_and_tolerates_a_missing_slug() {
 
     assert!(project.slug.is_none());
     assert!(project.created_by_member_id.is_none());
+    assert!(project.display_id_prefixes.is_none());
 }
 
 #[tokio::test]
@@ -308,4 +317,78 @@ async fn peerings_get_surfaces_a_peering_the_project_cannot_see() {
         .unwrap_err();
 
     assert_eq!(err.status(), Some(404));
+}
+
+#[tokio::test]
+async fn create_sends_only_the_display_id_prefixes_set() {
+    let server = MockServer::start().await;
+    let deployment_id = Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap();
+    let mut created = project_json();
+    created["display_id_prefixes"] =
+        json!({"issue": "BUG", "report": "R", "observation": "F", "task": "T"});
+    Mock::given(method("POST"))
+        .and(path("/v1/projects"))
+        .and(body_json(json!({
+            "name": "Support desk",
+            "deployment_id": deployment_id,
+            "display_id_prefixes": {"issue": "BUG"},
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let project = Projects::new(build_http(&server))
+        .create(&ProjectCreateParams {
+            display_id_prefixes: Some(DisplayIdPrefixes {
+                issue: Some("BUG".into()),
+                ..Default::default()
+            }),
+            ..ProjectCreateParams::new("Support desk", deployment_id)
+        })
+        .await
+        .unwrap();
+
+    let prefixes = project.display_id_prefixes.unwrap();
+    assert_eq!(prefixes.issue.as_deref(), Some("BUG"));
+    assert_eq!(prefixes.task.as_deref(), Some("T"));
+}
+
+#[tokio::test]
+async fn update_changes_one_prefix_and_keeps_the_rest() {
+    let server = MockServer::start().await;
+    let mut updated = project_json();
+    updated["display_id_prefixes"] =
+        json!({"issue": "I", "report": "RPT", "observation": "F", "task": "T"});
+    Mock::given(method("PATCH"))
+        .and(path("/v1/projects/support-desk"))
+        .and(body_json(json!({"display_id_prefixes": {"report": "RPT"}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(updated))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let project = Projects::new(build_http(&server))
+        .update(
+            "support-desk",
+            &ProjectUpdateParams {
+                display_id_prefixes: Some(DisplayIdPrefixes {
+                    report: Some("RPT".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        project.display_id_prefixes,
+        Some(DisplayIdPrefixes {
+            issue: Some("I".into()),
+            report: Some("RPT".into()),
+            observation: Some("F".into()),
+            task: Some("T".into()),
+        })
+    );
 }
