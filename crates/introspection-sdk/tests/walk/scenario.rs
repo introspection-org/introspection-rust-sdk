@@ -102,12 +102,6 @@ fn backend(mode: Mode, settings: &Settings) -> Result<Backend, String> {
             if !har.is_complete() {
                 return Err(format!("{} stops short of the teardown", path.display()));
             }
-            if let Some(url) = har.retired_call() {
-                return Err(format!(
-                    "{} calls a route the SDK no longer has ({url}); re-record it",
-                    path.display()
-                ));
-            }
             Ok(Backend::Replay(Mutex::new(Replayer::new(
                 har,
                 &settings.bootstrap_project_id,

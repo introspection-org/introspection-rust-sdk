@@ -12,16 +12,16 @@ use introspection_sdk::{
     ConversationItemListParams, ConversationListParams, DecidedBy, EventListParams, File,
     FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
     FileVersionListParams, IntrospectionClient, IntrospectionEventName, Lane,
-    MemberConnectionCreate, MemberConnectionListParams, MemberListParams, MetricFilter, MetricSpec,
-    MetricsQuery, MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams,
-    ShareResourceType, StreamOptions, Tag, TagCreate, TagKind, TagListParams, TagUpdate, Task,
-    TaskCreate, TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
+    MemberConnectionCreate, MemberListParams, MetricFilter, MetricSpec, MetricsQuery,
+    MissionListParams, RunFrame, RunRequest, ShareCreate, ShareListParams, ShareResourceType,
+    StreamOptions, Tag, TagCreate, TagKind, TagListParams, TagUpdate, Task, TaskCreate,
+    TaskFileRef, TaskListParams, TaskPrompt, TaskRunCreate, TaskStatus, TaskUpdate,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::steps::{expect_not_found, expect_refused, no_such_id};
-use crate::support::{assert_stable, connection_snapshot, settled, span_event_id, walk, without};
+use crate::support::{assert_stable, settled, span_event_id, walk, without};
 use crate::{set, Walk};
 
 /// How long the input file lives: a day outlasts the walk.
@@ -1081,39 +1081,9 @@ async fn dp_reads_empty(sa: &IntrospectionClient, member: &IntrospectionClient) 
             .await,
         404,
     );
-    // `/v1/connections` lists the project's connection rows: the project's own
-    // grant on the walk's connector (step 8), and no member's. Connecting an
-    // app (Pipedream) needs that provider's credentials; with none on the
-    // project, an app connect and an unknown id answer 404.
+    // Connecting an app (Pipedream) needs that provider's credentials; with
+    // none on the project, an app connect and an unknown id answer 404.
     let connections = member.connections();
-    let listed = connections
-        .list(&MemberConnectionListParams::default())
-        .collect_all(0)
-        .await
-        .expect("list connections");
-    assert!(listed.iter().all(|c| c.integration_id.is_none()));
-    let listed: Vec<_> = listed.iter().map(connection_snapshot).collect();
-    assert_stable!(listed, @r#"
-    [
-      {
-        "app": "hello-mcp",
-        "connector": {
-          "id": "[uuid]",
-          "provider": "hello-mcp",
-          "slug": "hello-mcp"
-        },
-        "created_at": "[timestamp]",
-        "created_by_member_id": "[uuid]",
-        "healthy": true,
-        "id": "[uuid]",
-        "last_verified_at": "[timestamp]",
-        "owner": "project",
-        "status": "active",
-        "subject_type": "app",
-        "updated_at": "[timestamp]"
-      }
-    ]
-    "#);
     let id: Uuid = "019a1000-0000-7000-8000-0000000000c1"
         .parse()
         .expect("a uuid");

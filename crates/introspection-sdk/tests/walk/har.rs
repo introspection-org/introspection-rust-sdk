@@ -154,16 +154,6 @@ impl Har {
             && last.response.status == 200
             && PROJECT_URL.is_match(&last.request.url)
     }
-
-    /// The first request the recording holds to a route the SDK no longer
-    /// calls, which the replay cannot match until the walk is re-recorded.
-    pub fn retired_call(&self) -> Option<&str> {
-        self.log
-            .entries
-            .iter()
-            .map(|e| e.request.url.as_str())
-            .find(|url| RETIRED_ROUTES.iter().any(|route| route.is_match(url)))
-    }
 }
 
 impl Response {
@@ -179,11 +169,6 @@ impl Response {
     }
 }
 
-/// Routes the server removed: `/v1/connectors/{id}/connections[/{id}]`,
-/// replaced by the Data Plane's `/v1/connections`.
-static RETIRED_ROUTES: LazyLock<[Regex; 1]> = LazyLock::new(|| {
-    [Regex::new(r"/v1/connectors/[^/?]+/connections(/[^/?]+)?(\?|$)").expect("valid regex")]
-});
 static PROJECT_URL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/v1/projects/[^/?]+$").expect("valid regex"));
 

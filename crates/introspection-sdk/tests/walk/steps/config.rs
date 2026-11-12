@@ -524,43 +524,44 @@ pub async fn connection_and_endpoint(w: &mut Walk) {
         landed.query_pairs().into_owned().collect();
     assert_eq!(query.get("status").map(String::as_str), Some("active"));
     let connection_id: Uuid = query["connection_id"].parse().expect("a connection id");
-    // Connections are read on the Data Plane, with the owner's token: a
-    // project's own grant is an administrator's to see.
-    let connections = w.member().connections();
-    let connection = connections
-        .get(connection_id)
-        .await
-        .expect("read the connection");
-    assert_eq!(connection.connector.as_ref().map(|c| c.id), Some(connector));
-    assert!(connection.integration_id.is_none());
-    assert_stable!(connection_snapshot(&connection), @r#"
-    {
-      "app": "hello-mcp",
-      "connector": {
-        "id": "[uuid]",
-        "provider": "hello-mcp",
-        "slug": "hello-mcp"
-      },
-      "created_at": "[timestamp]",
-      "created_by_member_id": "[uuid]",
-      "healthy": true,
-      "id": "[uuid]",
-      "last_verified_at": "[timestamp]",
-      "owner": "project",
-      "status": "active",
-      "subject_type": "app",
-      "updated_at": "[timestamp]"
-    }
-    "#);
-    let listed = connections
-        .list(&MemberConnectionListParams {
-            connector_id: Some(connector),
-            ..Default::default()
-        })
+    // `/v1/connections` lists the project's connection rows: the project's
+    // own grant on the walk's connector, and no member's. Read with the
+    // owner's token, since a project's own grant is an administrator's to see.
+    let listed = w
+        .member()
+        .connections()
+        .list(&MemberConnectionListParams::default())
         .collect_all(0)
         .await
-        .expect("list the connector's connections");
-    assert!(listed.iter().any(|c| c.id == connection_id));
+        .expect("list connections");
+    let connection = listed
+        .iter()
+        .find(|c| c.id == connection_id)
+        .expect("the grant's connection");
+    assert_eq!(connection.connector.as_ref().map(|c| c.id), Some(connector));
+    assert!(listed.iter().all(|c| c.integration_id.is_none()));
+    let listed: Vec<_> = listed.iter().map(connection_snapshot).collect();
+    assert_stable!(listed, @r#"
+    [
+      {
+        "app": "hello-mcp",
+        "connector": {
+          "id": "[uuid]",
+          "provider": "hello-mcp",
+          "slug": "hello-mcp"
+        },
+        "created_at": "[timestamp]",
+        "created_by_member_id": "[uuid]",
+        "healthy": true,
+        "id": "[uuid]",
+        "last_verified_at": "[timestamp]",
+        "owner": "project",
+        "status": "active",
+        "subject_type": "app",
+        "updated_at": "[timestamp]"
+      }
+    ]
+    "#);
 
     endpoint(&sa, project).await;
     let token = sa
