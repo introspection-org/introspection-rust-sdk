@@ -31,8 +31,8 @@ use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
 use crate::api::schemas::{
-    Automation, AutomationCreateParams, AutomationListParams, AutomationTriggerResponse,
-    AutomationUpdateParams,
+    Automation, AutomationCreateParams, AutomationListParams, AutomationTriggerParams,
+    AutomationTriggerResponse, AutomationUpdateParams,
 };
 
 /// `automations()` namespace. Holds a DP-bound HTTP client.
@@ -86,7 +86,20 @@ impl Automations {
     /// `POST /v1/automations/{id}/trigger` — run it now. Answers with the task
     /// it created or posted into; neither reads nor clears a scheduled slot.
     pub async fn trigger(&self, automation_id: Uuid) -> ApiResult<AutomationTriggerResponse> {
+        self.trigger_with(automation_id, &AutomationTriggerParams::default())
+            .await
+    }
+
+    /// `POST /v1/automations/{id}/trigger` with a body: run it now on the
+    /// given `conversation_ids` (honoured only for an
+    /// [`AutomationKind::ObservationSynthesis`](crate::AutomationKind::ObservationSynthesis)
+    /// automation). Default params send `{}`, like [`Self::trigger`].
+    pub async fn trigger_with(
+        &self,
+        automation_id: Uuid,
+        params: &AutomationTriggerParams,
+    ) -> ApiResult<AutomationTriggerResponse> {
         let path = format!("/v1/automations/{automation_id}/trigger");
-        self.http.post_json(&path, &serde_json::json!({})).await
+        self.http.post_json(&path, params).await
     }
 }

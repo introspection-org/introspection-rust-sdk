@@ -4646,6 +4646,20 @@ pub struct AutomationListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// `POST /v1/automations/{id}/trigger` body, sent by
+/// [`Automations::trigger_with`](crate::Automations::trigger_with). The
+/// default sends `{}`, the same as [`Automations::trigger`](crate::Automations::trigger).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutomationTriggerParams {
+    /// Conversations to synthesise from instead of the automation's own
+    /// selection. The server honours it only for an
+    /// [`AutomationKind::ObservationSynthesis`] automation. Not sent when
+    /// empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conversation_ids: Vec<Uuid>,
+}
+
 /// `POST /v1/automations/{id}/trigger` response. A `skipped` status carries
 /// its `reason` and records no event.
 #[serde_with::skip_serializing_none]
@@ -4658,6 +4672,10 @@ pub struct AutomationTriggerResponse {
     pub task_id: Option<Uuid>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// The run started, for an [`AutomationKind::ObservationClustering`]
+    /// automation. `None` for other kinds and from a server that predates it.
+    #[serde(default)]
+    pub run_id: Option<Uuid>,
 }
 
 // ----- issues (DP) ------------------------------------------------------------

@@ -10,9 +10,9 @@ use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
     AdvancedOptions, AutomationCondition, AutomationConditionType, AutomationCreateParams,
     AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
-    AutomationSkipReason, AutomationTriggerType, AutomationUpdateParams, Automations, ClientConfig,
-    Event, EventListParams, Events, IntrospectionClient, IntrospectionEventName, PaginationParams,
-    TaskRepoRequest,
+    AutomationSkipReason, AutomationTriggerParams, AutomationTriggerType, AutomationUpdateParams,
+    Automations, ClientConfig, Event, EventListParams, Events, IntrospectionClient,
+    IntrospectionEventName, PaginationParams, TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -470,6 +470,95 @@ async fn trigger_returns_the_task_it_ran() {
     assert_eq!(response.status, AutomationExecutionStatus::Triggered);
     assert_eq!(response.automation_id, id(AUTOMATION_ID));
     assert_eq!(response.task_id, Some(id(TASK_ID)));
+    // A server that predates `run_id` leaves it out.
+    assert_eq!(response.run_id, None);
+}
+
+#[tokio::test]
+async fn trigger_sends_an_empty_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(body_json(json!({})))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "automation_id": AUTOMATION_ID,
+        })))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let automations = Automations::new(build_http(&server));
+    automations.trigger(id(AUTOMATION_ID)).await.unwrap();
+    // Default params send no `conversation_ids` either.
+    automations
+        .trigger_with(id(AUTOMATION_ID), &AutomationTriggerParams::default())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn trigger_with_sends_the_conversation_ids() {
+    let server = MockServer::start().await;
+    let conversations = [id(TASK_ID), id(GROUP_ID)];
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(body_json(
+            json!({ "conversation_ids": [TASK_ID, GROUP_ID] }),
+        ))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "automation_id": AUTOMATION_ID,
+            "task_id": TASK_ID,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let response = Automations::new(build_http(&server))
+        .trigger_with(
+            id(AUTOMATION_ID),
+            &AutomationTriggerParams {
+                conversation_ids: conversations.to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.task_id, Some(id(TASK_ID)));
+}
+
+#[tokio::test]
+async fn a_clustering_trigger_returns_its_run() {
+    const RUN_ID: &str = "55555555-5555-7555-8555-555555555555";
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "automation_id": AUTOMATION_ID,
+            "task_id": null,
+            "reason": null,
+            "run_id": RUN_ID,
+        })))
+        .mount(&server)
+        .await;
+
+    let response = Automations::new(build_http(&server))
+        .trigger(id(AUTOMATION_ID))
+        .await
+        .unwrap();
+
+    assert_eq!(response.run_id, Some(id(RUN_ID)));
+}
+
+#[test]
+fn trigger_params_refuse_an_unknown_field() {
+    let err = serde_json::from_value::<AutomationTriggerParams>(json!({
+        "conversation_id": [TASK_ID],
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("conversation_id"), "{err}");
 }
 
 #[tokio::test]
