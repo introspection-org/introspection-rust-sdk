@@ -13,7 +13,7 @@ use introspection_sdk::{
 
 use crate::cleanup::remove_walk_resources;
 use crate::steps::{expect_not_found, expect_refused};
-use crate::support::{assert_stable, walk};
+use crate::support::{assert_stable, walk, without};
 use crate::{set, Walk};
 
 /// The owner's reads: members, an invite, the organisation and the session.
@@ -229,8 +229,8 @@ pub async fn members_and_keys(w: &mut Walk) {
         .acknowledge(key.key.id, Some(project.into()))
         .await
         .expect("acknowledge the key");
-    // The organisation's name and slug are whoever is running the walk.
-    assert_stable!(org, { ".name" => "[login's]", ".slug" => "[login's]" }, @r#"
+    // The organisation's name, slug, sign-in settings and billing are whoever is running the walk.
+    assert_stable!(without(&org, &["sign_in", "subscription_live"]), { ".name" => "[login's]", ".slug" => "[login's]" }, @r#"
     {
       "external_org_id": "[id]",
       "hosted_git": true,
