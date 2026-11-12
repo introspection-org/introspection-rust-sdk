@@ -362,6 +362,10 @@ fn runtime_snapshot(runtime: &Runtime) -> Value {
     if let Some(Value::Object(metadata)) = value.get_mut("image_build_metadata") {
         metadata.retain(|key, _| DECLARED.contains(&key.as_str()));
     }
+    // Lanes come back in the order the runtime was promoted to them.
+    if let Some(Value::Array(environments)) = value.get_mut("environments") {
+        environments.sort_by_key(|a| a.to_string());
+    }
     value
 }
 
@@ -404,8 +408,8 @@ pub async fn runtime(w: &mut Walk) {
       "created_by_member_id": "[uuid]",
       "description": "Harbor E2B task calling a development MCP server",
       "environments": [
-        "staging",
-        "production"
+        "production",
+        "staging"
       ],
       "id": "[uuid]",
       "image_build_metadata": {
