@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.47.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.46.0...v0.47.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **automations:** AutomationTriggerResponse has a new pub field, run_id, so a struct literal of it must set it.
+
+### Features
+
+* **automations:** trigger on chosen conversations, and read the clustering run id ([#228](https://github.com/introspection-org/introspection-rust-sdk/issues/228)) ([eccdace](https://github.com/introspection-org/introspection-rust-sdk/commit/eccdacee8e06138397ba60acc146aa0dce63abb6))
+
 ## [0.46.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.45.0...v0.46.0) (2026-11-12)
 
 
