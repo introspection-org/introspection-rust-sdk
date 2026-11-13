@@ -24,7 +24,7 @@
 //! - [`Members`] — `/v1/members` list, read, invite and update: the customer
 //!   members an integrator's identity assertions mint, and the `tags` and
 //!   `metadata` it labels them with.
-//! - [`Automations`] — Data Plane `/v1/automations` CRUD plus `trigger()`:
+//! - [`Routines`] — Data Plane `/v1/routines` CRUD plus `trigger()`:
 //!   scheduled prompts, one-off reminders, and platform work.
 //! - [`Issues`] — Data Plane `/v1/issues` CRUD: a project's pursuits, their
 //!   evidence, and the human requests on them.
@@ -52,7 +52,7 @@
 //! - [`Judges`] — read, and toggle or resample, the judges a Recipe declares.
 //! - [`Oidc`] — `GET /v1/oidc/me`, who the credential is.
 //!
-//! The Data Plane namespaces here (automations, issues, connections and images) are
+//! The Data Plane namespaces here (routines, issues, connections and images) are
 //! reached through [`crate::DataPlaneResources`], which the client and the
 //! runner both implement.
 //!
@@ -74,7 +74,6 @@ pub mod aauth;
 pub mod annotations;
 pub mod api_keys;
 pub mod applications;
-pub mod automations;
 pub mod connections;
 pub mod connectors;
 pub mod credentials;
@@ -91,6 +90,7 @@ pub mod projects;
 pub mod recipes;
 pub mod remotes;
 pub mod repositories;
+pub mod routines;
 pub mod runtimes;
 pub mod tags;
 pub mod tokens;
@@ -100,7 +100,6 @@ pub use aauth::{Aauth, Approvals, Missions};
 pub use annotations::Annotations;
 pub use api_keys::ApiKeys;
 pub use applications::{ApplicationIdps, ApplicationKeys, ApplicationSecrets, Applications};
-pub use automations::Automations;
 pub use connections::MemberConnections;
 pub use connectors::Connectors;
 pub use credentials::Credentials;
@@ -117,6 +116,7 @@ pub use projects::{ProjectPeerings, Projects};
 pub use recipes::Recipes;
 pub use remotes::Remotes;
 pub use repositories::{Repositories, RepositoryContents};
+pub use routines::Routines;
 pub use runtimes::{RuntimeHandle, Runtimes};
 pub use tags::Tags;
 pub use tokens::Tokens;

@@ -10,8 +10,8 @@
 //! what generic code takes (`fn f(dp: &impl DataPlaneResources)`).
 //!
 //! Which routes a call may reach is decided by the credential's scopes, not by
-//! the type. A runner a member opens for themself carries `automations:read` /
-//! `automations:write` and `connections:read` / `connections:write` /
+//! the type. A runner a member opens for themself carries `routines:read` /
+//! `routines:write` and `connections:read` / `connections:write` /
 //! `connections:delete` on top of the sandbox set; a runner opened for an
 //! asserted end customer carries only the sandbox set, or what its
 //! `RunRequest::scope` asks for.
@@ -24,7 +24,7 @@ use crate::api::shares::Shares;
 use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::client::IntrospectionClient;
-use crate::resources::{Automations, Images, MemberConnections};
+use crate::resources::{Images, MemberConnections, Routines};
 use crate::runner::Runner;
 
 #[cfg(doc)]
@@ -45,8 +45,8 @@ pub trait DataPlaneResources {
     fn events(&self) -> Events;
     /// `POST /v1/metrics`.
     fn metrics(&self) -> Metrics;
-    /// `/v1/automations`.
-    fn automations(&self) -> Automations;
+    /// `/v1/routines`.
+    fn routines(&self) -> Routines;
     /// `/v1/connections` — the apps members connected for themselves. On a
     /// runner, `create` defaults `runtime` to the runner's runtime group.
     fn connections(&self) -> MemberConnections;
@@ -75,8 +75,8 @@ macro_rules! delegate_data_plane {
             fn metrics(&self) -> Metrics {
                 <$ty>::metrics(self)
             }
-            fn automations(&self) -> Automations {
-                <$ty>::automations(self)
+            fn routines(&self) -> Routines {
+                <$ty>::routines(self)
             }
             fn connections(&self) -> MemberConnections {
                 <$ty>::connections(self)
@@ -114,8 +114,8 @@ impl DataPlaneResources for Arc<HttpClient> {
     fn metrics(&self) -> Metrics {
         Metrics::new(self.clone())
     }
-    fn automations(&self) -> Automations {
-        Automations::new(self.clone())
+    fn routines(&self) -> Routines {
+        Routines::new(self.clone())
     }
     fn connections(&self) -> MemberConnections {
         MemberConnections::new(self.clone(), None)

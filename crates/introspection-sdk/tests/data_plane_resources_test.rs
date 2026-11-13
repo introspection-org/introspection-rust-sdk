@@ -8,10 +8,9 @@ use futures::StreamExt;
 use introspection_sdk::api::RunRequest;
 use introspection_sdk::auth::{AuthSession, EmailCodeAuth, EmailCodeAuthConfig, OAuthToken};
 use introspection_sdk::{
-    AdvancedOptions, AutomationListParams, ClientConfig, ConversationListParams,
-    DataPlaneResources, EventListParams, FileListParams, IntrospectionClient,
-    IntrospectionEventName, MemberConnectionListParams, MetricSpec, MetricsQuery, Runner,
-    ShareListParams, TaskListParams,
+    AdvancedOptions, ClientConfig, ConversationListParams, DataPlaneResources, EventListParams,
+    FileListParams, IntrospectionClient, IntrospectionEventName, MemberConnectionListParams,
+    MetricSpec, MetricsQuery, RoutineListParams, Runner, ShareListParams, TaskListParams,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -34,7 +33,7 @@ async fn mount_data_plane(dp: &MockServer, bearer: &str) {
         "/v1/shares",
         "/v1/conversations",
         "/v1/events",
-        "/v1/automations",
+        "/v1/routines",
         "/v1/connections",
     ] {
         Mock::given(method("GET"))
@@ -103,8 +102,8 @@ async fn drive_every_namespace(dp: &impl DataPlaneResources) {
         .await
         .unwrap();
     assert!(dp
-        .automations()
-        .list(&AutomationListParams::default())
+        .routines()
+        .list(&RoutineListParams::default())
         .next()
         .await
         .is_none());

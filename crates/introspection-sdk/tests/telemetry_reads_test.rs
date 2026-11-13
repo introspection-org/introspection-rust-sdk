@@ -279,8 +279,8 @@ async fn an_events_read_over_several_families_repeats_event_name() {
         .mount(&dp)
         .await;
     let params = EventListParams {
-        extra_event_names: Some(vec![IntrospectionEventName::AutomationSkipped]),
-        ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+        extra_event_names: Some(vec![IntrospectionEventName::RoutineSkipped]),
+        ..EventListParams::new(IntrospectionEventName::RoutineTriggered)
     };
     let page = client(&dp)
         .events()
@@ -301,8 +301,8 @@ async fn an_events_read_over_several_families_repeats_event_name() {
     assert_eq!(
         names,
         [
-            "introspection.automation.triggered",
-            "introspection.automation.skipped"
+            "introspection.routines.triggered",
+            "introspection.routines.skipped"
         ]
     );
 }

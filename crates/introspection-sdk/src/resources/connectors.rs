@@ -176,6 +176,23 @@ impl Connectors {
         self.http.patch_json(&path, params).await
     }
 
+    /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret`: issue a
+    /// `webhook` connector a new secret, returned once in
+    /// [`Connector::signing_secret`]. The previous one is accepted until
+    /// [`Connector::previous_signing_secret_expires_at`]. Any other provider
+    /// answers `422`.
+    pub async fn rotate_signing_secret(
+        &self,
+        connector_id: Uuid,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<Connector> {
+        let params = ConnectorUpdateParams {
+            rotate_signing_secret: Some(true),
+            ..Default::default()
+        };
+        self.update(connector_id, &params, project).await
+    }
+
     /// `DELETE /v1/connectors/{id}` — soft delete.
     ///
     /// The server revokes the connector's connections as it goes.

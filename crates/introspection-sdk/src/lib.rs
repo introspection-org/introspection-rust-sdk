@@ -4,7 +4,7 @@
 //! independent surfaces, mix-and-match as needed:
 //!
 //! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
-//!    `Runner`, `tasks`, `files`, `shares`, `automations`, and telemetry
+//!    `Runner`, `tasks`, `files`, `shares`, `routines`, and telemetry
 //!    reads). Always available, no OpenTelemetry dependency. No feature flag
 //!    required. [`auth`] mints the token it takes when you have OAuth
 //!    credentials rather than an API key, and [`EmailCodeAuth`] signs a
@@ -125,12 +125,7 @@ pub use api::{
     ApiKeyUpdateParams, Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
     ApplicationIdpCreateParams, ApplicationIdpProvider, ApplicationIdpStatus, ApplicationKey,
     ApplicationListParams, ApplicationSecret, ApplicationSecretCreateParams,
-    ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, Automation,
-    AutomationCondition, AutomationConditionType, AutomationCreateParams,
-    AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
-    AutomationSkipReason, AutomationSkippedEvent, AutomationSkippedPayload,
-    AutomationTriggerParams, AutomationTriggerResponse, AutomationTriggerType,
-    AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams, BranchesQuery,
+    ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, BranchesQuery,
     BusinessMemberCreate, ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload,
     CommitsQuery, ConnectPage, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
     ConnectionMissionConstraints, ConnectionOwner, ConnectionStatus, ConnectionSubjectType,
@@ -173,19 +168,25 @@ pub use api::{
     MetricRow, MetricSpec, MetricValue, Metrics, MetricsConfig, MetricsMeta, MetricsQuery,
     MetricsResponse, MetricsWindow, NameRef, ObservationEvent, ObservationPayload,
     ObservationSynthesisCompletedEvent, ObservationSynthesisCompletedPayload,
-    ObservationSynthesisStatus, OrderTerm, Organization, Paginated, PaginationParams, Paginator,
-    PasskeyRequirement, PatternAssignmentEvent, PatternAssignmentPayload, PatternEvent,
-    PatternPayload, PolicyEntity, Project, ProjectCreateParams, ProjectListParams, ProjectSelector,
-    ProjectUpdateParams, Recipe, RecipeListParams, RecipeValidation, RecipeValidationDiagnostic,
-    RecipeValidationSeverity, RecipeValidationSpan, RecipeValidationStatus, RemotesConnectDocs,
-    Repository, RepositoryAccessGrant, RepositoryAccessParams, RepositoryBranch,
-    RepositoryBranchSort, RepositoryCommit, RepositoryCommitDetail, RepositoryCommitFile,
-    RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent, RepositoryDirectory,
-    RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams,
-    RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus,
-    ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunFrame, RunHandle,
-    RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
-    RuntimeListParams, RuntimeLlmMode, RuntimeMcpRequirement, RuntimePeering,
+    ObservationSynthesisStatus, ObservationSynthesisTriggerResult, OrderTerm, Organization,
+    Paginated, PaginationParams, Paginator, PasskeyRequirement, PatternAssignmentEvent,
+    PatternAssignmentPayload, PatternEvent, PatternPayload, PolicyEntity, Project,
+    ProjectCreateParams, ProjectListParams, ProjectSelector, ProjectUpdateParams, Recipe,
+    RecipeListParams, RecipeValidation, RecipeValidationDiagnostic, RecipeValidationSeverity,
+    RecipeValidationSpan, RecipeValidationStatus, RemotesConnectDocs, Repository,
+    RepositoryAccessGrant, RepositoryAccessParams, RepositoryBranch, RepositoryBranchSort,
+    RepositoryCommit, RepositoryCommitDetail, RepositoryCommitFile, RepositoryCommitFileStatus,
+    RepositoryCommitPerson, RepositoryContent, RepositoryDirectory, RepositoryEntry,
+    RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryMergeCommit,
+    RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
+    ResumeEntry, Routine, RoutineCondition, RoutineConditionType, RoutineCreateParams,
+    RoutineExecutionStatus, RoutineKind, RoutineListParams, RoutineMetadata, RoutineSkipReason,
+    RoutineSkippedEvent, RoutineSkippedPayload, RoutineTrigger, RoutineTriggerEventRef,
+    RoutineTriggerFilter, RoutineTriggerParams, RoutineTriggerProvider, RoutineTriggerResponse,
+    RoutineTriggerSource, RoutineTriggerSpec, RoutineTriggerType, RoutineTriggeredEvent,
+    RoutineTriggeredPayload, RoutineUpdateParams, RunCaller, RunCallerLibrary, RunCallerPage,
+    RunFrame, RunHandle, RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec,
+    Runtime, RuntimeListParams, RuntimeLlmMode, RuntimeMcpRequirement, RuntimePeering,
     RuntimePeeringListParams, RuntimeSettingListParams, RuntimeUpdateParams, SeatTier, Secret,
     ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, Shares, SignInSettings,
     SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task,
@@ -194,8 +195,9 @@ pub use api::{
     TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind,
     TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
     TelemetryGoalComponent, TimeDimension, TokenCount, TokenCreateParams, Trajectory, TypedEvent,
-    UploadSource, Variable, VariableCreateParams, VariableKind, VariableUpdateParams,
+    UploadSource, Variable, VariableCreateParams, VariableKind, VariableUpdateParams, WebhookAuth,
     WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs, MAX_COMMAND_WAIT_SECONDS,
+    WEBHOOK_CONNECTOR_PROVIDER,
 };
 // jscpd:ignore-end
 #[cfg(feature = "arrow")]
@@ -233,10 +235,10 @@ pub use resources::tags::{
 };
 pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
-    Applications, Approvals, Automations, Connectors, Credentials, Endpoints, ExperimentHandle,
-    Experiments, Images, Integrations, IssueComments, Issues, Judges, MemberConnections, Members,
-    Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
-    RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
+    Applications, Approvals, Connectors, Credentials, Endpoints, ExperimentHandle, Experiments,
+    Images, Integrations, IssueComments, Issues, Judges, MemberConnections, Members, Missions,
+    Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
+    RepositoryContents, Routines, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
