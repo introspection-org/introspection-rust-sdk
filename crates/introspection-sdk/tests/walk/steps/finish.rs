@@ -13,7 +13,7 @@ use introspection_sdk::{
 
 use crate::cleanup::remove_walk_resources;
 use crate::steps::{expect_not_found, expect_refused};
-use crate::support::{assert_stable, walk};
+use crate::support::{assert_stable, walk, without};
 use crate::{set, Walk};
 
 /// The owner's reads: members, an invite, the organisation and the session.
@@ -177,7 +177,12 @@ pub async fn members_and_keys(w: &mut Walk) {
         .await
         .expect("create a development API key");
     assert!(key.api_key.is_some(), "the plaintext key is returned once");
-    assert_stable!(key, { ".api_key" => "[omitted]" }, @r#"
+    // The platform's default scopes grow, so the walk asserts the ones `allow` grants.
+    let scopes: Vec<&str> = key.key.scope.split_whitespace().collect();
+    for scope in ["runtimes:read", "runtimes:write"] {
+        assert!(scopes.contains(&scope), "the key carries {scope}");
+    }
+    assert_stable!(key, { ".api_key" => "[omitted]", ".scope" => "[default scopes]" }, @r#"
     {
       "allow": [
         "runtimes"
@@ -195,7 +200,7 @@ pub async fn members_and_keys(w: &mut Walk) {
       "prefix": "[redacted]",
       "project_id": "[uuid]",
       "redacted_key": "[redacted]",
-      "scope": "telemetry:write projects:read repositories:read recipes:read recipes:write runtimes:read runtimes:write experiments:read experiments:write tasks:read tasks:write tasks:delete files:read files:write conversations:read events:read metrics:read shares:read shares:write shares:delete connectors:read connectors:write annotations:read approvals:read approvals:write",
+      "scope": "[default scopes]",
       "status": "active"
     }
     "#);
@@ -224,8 +229,8 @@ pub async fn members_and_keys(w: &mut Walk) {
         .acknowledge(key.key.id, Some(project.into()))
         .await
         .expect("acknowledge the key");
-    // The organisation's name and slug are whoever is running the walk.
-    assert_stable!(org, { ".name" => "[login's]", ".slug" => "[login's]" }, @r#"
+    // The organisation's name, slug, sign-in settings and billing are whoever is running the walk.
+    assert_stable!(without(&org, &["sign_in", "subscription_live"]), { ".name" => "[login's]", ".slug" => "[login's]" }, @r#"
     {
       "external_org_id": "[id]",
       "hosted_git": true,
