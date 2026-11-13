@@ -201,7 +201,22 @@ pub async fn connector(w: &mut Walk) {
         )
         .await
         .expect("create the connector");
-    assert_stable!(connector, @r#"
+    // A server that records the issuer's revocation endpoint sends it in the
+    // OAuth metadata, and an older one doesn't, so the snapshot leaves it out.
+    let mut snapshot = serde_json::to_value(&connector).expect("snapshot JSON");
+    if let Some(revocation) = snapshot
+        .pointer_mut("/metadata/oauth")
+        .and_then(Value::as_object_mut)
+        .and_then(|oauth| oauth.remove("revocation_endpoint"))
+    {
+        assert!(
+            revocation
+                .as_str()
+                .is_some_and(|url| url.starts_with("http")),
+            "the revocation endpoint is a URL: {revocation}"
+        );
+    }
+    assert_stable!(snapshot, @r#"
     {
       "agent_member_id": "[uuid]",
       "api_hosts": [
@@ -223,7 +238,6 @@ pub async fn connector(w: &mut Walk) {
           ],
           "registration_endpoint": "[url]",
           "resource": "[url]",
-          "revocation_endpoint": "[url]",
           "token_endpoint_auth_methods_supported": [
             "none"
           ]
