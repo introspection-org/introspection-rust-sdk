@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.48.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.48.0...v0.48.1) (2026-11-13)
+
+
+### Tests
+
+* **walk:** accept a connector with or without the issuer's revocation endpoint ([#238](https://github.com/introspection-org/introspection-rust-sdk/issues/238)) ([2807951](https://github.com/introspection-org/introspection-rust-sdk/commit/2807951fa5e95754e2d3c4f6f1b836b6cf9e749e))
+
 ## [0.48.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.47.0...v0.48.0) (2026-11-12)
 
 
