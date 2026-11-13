@@ -196,6 +196,7 @@ pub async fn connector(w: &mut Walk) {
                 assertion_audience: None,
                 webhook_url: None,
                 policy_entities: None,
+                webhook_auth: None,
             },
             Some(project.into()),
         )

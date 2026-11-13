@@ -11,8 +11,9 @@ use introspection_sdk::{
     AdvancedOptions, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
     IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
     RoutineCondition, RoutineConditionType, RoutineCreateParams, RoutineExecutionStatus,
-    RoutineKind, RoutineListParams, RoutineMetadata, RoutineSkipReason, RoutineTriggerParams,
-    RoutineTriggerType, RoutineUpdateParams, Routines, TaskRepoRequest,
+    RoutineKind, RoutineListParams, RoutineMetadata, RoutineSkipReason, RoutineTriggerEventRef,
+    RoutineTriggerFilter, RoutineTriggerParams, RoutineTriggerProvider, RoutineTriggerSource,
+    RoutineTriggerSpec, RoutineTriggerType, RoutineUpdateParams, Routines, TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -431,6 +432,179 @@ fn an_empty_update_serializes_to_an_empty_object() {
     );
 }
 
+const TRIGGER_ID: &str = "66666666-6666-7666-8666-666666666666";
+
+fn webhook_trigger_json() -> serde_json::Value {
+    json!({
+        "id": TRIGGER_ID,
+        "routine_id": ROUTINE_ID,
+        "org_id": "00000000-0000-0000-0000-0000000000aa",
+        "project_id": "00000000-0000-0000-0000-0000000000bb",
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z",
+        "source": "connector",
+        "provider": "webhook",
+        "connector_slug": "ci-alerts",
+        "event_types": ["alert.fired"],
+        "filter": {
+            "channel_ids": null,
+            "emoji": null,
+            "team_ids": null,
+            "to_states": null,
+            "repository_ids": null,
+            "branches": null,
+            "payload_fields": { "env": ["prod"] },
+        },
+        "parameters": { "severity": "/alert/severity" },
+        "enabled": true,
+    })
+}
+
+#[tokio::test]
+async fn create_sends_a_webhook_trigger_with_parameters() {
+    let server = MockServer::start().await;
+    let mut created = routine_json();
+    created["triggers"] = json!([webhook_trigger_json()]);
+    Mock::given(method("POST"))
+        .and(path("/v1/routines"))
+        .and(body_json(json!({
+            "name": "Triage alerts",
+            "trigger_type": "manual",
+            "prompt": "Triage the @parameters.severity alert.",
+            "runtime_group_id": GROUP_ID,
+            "triggers": [{
+                "source": "connector",
+                "provider": "webhook",
+                "connector_slug": "ci-alerts",
+                "event_types": ["alert.fired"],
+                "filter": { "payload_fields": { "env": ["prod"] } },
+                "parameters": { "severity": "/alert/severity" },
+            }],
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let routine = Routines::new(build_http(&server))
+        .create(&RoutineCreateParams {
+            prompt: Some("Triage the @parameters.severity alert.".into()),
+            runtime_group_id: Some(id(GROUP_ID)),
+            triggers: Some(vec![RoutineTriggerSpec {
+                filter: RoutineTriggerFilter {
+                    payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
+                    ..Default::default()
+                },
+                parameters: [("severity".into(), "/alert/severity".into())].into(),
+                ..RoutineTriggerSpec::connector(
+                    RoutineTriggerProvider::Webhook,
+                    "ci-alerts",
+                    ["alert.fired"],
+                )
+            }]),
+            ..RoutineCreateParams::new("Triage alerts", RoutineTriggerType::Manual)
+        })
+        .await
+        .unwrap();
+
+    let trigger = &routine.triggers[0];
+    assert_eq!(trigger.id, id(TRIGGER_ID));
+    assert_eq!(trigger.source, RoutineTriggerSource::Connector);
+    assert_eq!(trigger.provider, RoutineTriggerProvider::Webhook);
+    assert_eq!(trigger.connector_slug.as_deref(), Some("ci-alerts"));
+    assert_eq!(trigger.parameters["severity"], "/alert/severity");
+    assert!(trigger.enabled);
+}
+
+#[tokio::test]
+async fn update_keeps_a_trigger_by_id_and_adds_another() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .and(body_json(json!({
+            "triggers": [
+                {
+                    "id": TRIGGER_ID,
+                    "source": "connector",
+                    "provider": "webhook",
+                    "connector_slug": "ci-alerts",
+                    "event_types": ["alert.fired"],
+                    "filter": { "payload_fields": { "env": ["prod"] } },
+                    "parameters": { "severity": "/alert/severity" },
+                    "enabled": true,
+                },
+                {
+                    "source": "integration",
+                    "provider": "github",
+                    "event_types": ["github.pull_request.opened"],
+                    "filter": { "branches": ["main"] },
+                },
+            ],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let stored: introspection_sdk::RoutineTrigger =
+        serde_json::from_value(webhook_trigger_json()).unwrap();
+    Routines::new(build_http(&server))
+        .update(
+            id(ROUTINE_ID),
+            &RoutineUpdateParams {
+                triggers: Some(vec![
+                    stored.to_spec(),
+                    RoutineTriggerSpec {
+                        filter: RoutineTriggerFilter {
+                            branches: Some(vec!["main".into()]),
+                            ..Default::default()
+                        },
+                        ..RoutineTriggerSpec::new(
+                            RoutineTriggerProvider::Github,
+                            ["github.pull_request.opened"],
+                        )
+                    },
+                ]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[test]
+fn an_empty_trigger_list_removes_every_trigger() {
+    let params = RoutineUpdateParams {
+        triggers: Some(Vec::new()),
+        ..Default::default()
+    };
+    assert_eq!(
+        serde_json::to_value(&params).unwrap(),
+        json!({ "triggers": [] })
+    );
+}
+
+#[test]
+fn a_routine_without_triggers_reads_an_empty_list() {
+    let routine: introspection_sdk::Routine = serde_json::from_value(routine_json()).unwrap();
+    assert!(routine.triggers.is_empty());
+}
+
+#[test]
+fn an_unknown_trigger_provider_is_kept() {
+    let mut value = webhook_trigger_json();
+    value["provider"] = json!("pagerduty");
+    let trigger: introspection_sdk::RoutineTrigger = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        trigger.provider,
+        RoutineTriggerProvider::Unknown(json!("pagerduty"))
+    );
+    assert_eq!(
+        serde_json::to_value(&trigger).unwrap()["provider"],
+        json!("pagerduty")
+    );
+}
+
 #[tokio::test]
 async fn delete_soft_deletes() {
     let server = MockServer::start().await;
@@ -469,9 +643,9 @@ async fn trigger_returns_the_task_it_ran() {
     assert_eq!(response.status, RoutineExecutionStatus::Triggered);
     assert_eq!(response.routine_id, id(ROUTINE_ID));
     assert_eq!(response.task_id, Some(id(TASK_ID)));
-    // A server that predates `run_id` and `enqueued` leaves them out.
     assert_eq!(response.run_id, None);
-    assert_eq!(response.enqueued, None);
+    assert_eq!(response.result, None);
+    assert_eq!(response.synthesis_result(), None);
 }
 
 #[tokio::test]
@@ -490,7 +664,7 @@ async fn trigger_sends_an_empty_body() {
 
     let routines = Routines::new(build_http(&server));
     routines.trigger(id(ROUTINE_ID)).await.unwrap();
-    // Default params send no `conversation_ids` either.
+    // Default params send no `parameters` either.
     routines
         .trigger_with(id(ROUTINE_ID), &RoutineTriggerParams::default())
         .await
@@ -498,22 +672,26 @@ async fn trigger_sends_an_empty_body() {
 }
 
 #[tokio::test]
-async fn trigger_with_sends_the_conversation_ids() {
+async fn trigger_with_sends_the_conversation_ids_as_parameters() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
         .and(body_json(
-            json!({ "conversation_ids": ["conv-a", "conv-b"] }),
+            json!({ "parameters": { "conversation_ids": ["conv-a", "conv-b"] } }),
         ))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "triggered",
             "routine_id": ROUTINE_ID,
-            "task_id": TASK_ID,
-            "enqueued": 2,
-            "conversations": [
-                { "conversation_id": "conv-a", "completed_at": "2026-11-12T08:59:00Z" },
-                { "conversation_id": "conv-b", "completed_at": "2026-11-12T08:58:00Z" },
-            ],
+            "task_id": null,
+            "run_id": null,
+            "reason": null,
+            "result": {
+                "enqueued": 2,
+                "conversations": [
+                    { "conversation_id": "conv-a", "completed_at": "2026-11-12T08:59:00Z" },
+                    { "conversation_id": "conv-b", "completed_at": "2026-11-12T08:58:00Z" },
+                ],
+            },
         })))
         .expect(1)
         .mount(&server)
@@ -522,17 +700,15 @@ async fn trigger_with_sends_the_conversation_ids() {
     let response = Routines::new(build_http(&server))
         .trigger_with(
             id(ROUTINE_ID),
-            &RoutineTriggerParams {
-                conversation_ids: vec!["conv-a".into(), "conv-b".into()],
-            },
+            &RoutineTriggerParams::conversation_ids(["conv-a", "conv-b"]),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.task_id, Some(id(TASK_ID)));
-    assert_eq!(response.enqueued, Some(2));
+    let result = response.synthesis_result().unwrap();
+    assert_eq!(result.enqueued, Some(2));
     assert_eq!(
-        response.conversations,
+        result.conversations,
         Some(vec![
             EnqueuedConversation {
                 conversation_id: "conv-a".into(),
@@ -544,6 +720,40 @@ async fn trigger_with_sends_the_conversation_ids() {
             },
         ])
     );
+}
+
+#[tokio::test]
+async fn trigger_with_sends_a_prompt_routines_parameters() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
+        .and(body_json(json!({
+            "parameters": { "severity": "high", "alert": { "id": 7 } },
+        })))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "status": "triggered",
+            "routine_id": ROUTINE_ID,
+            "task_id": TASK_ID,
+            "run_id": null,
+            "reason": null,
+            "result": null,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let serde_json::Value::Object(parameters) = json!({ "severity": "high", "alert": { "id": 7 } })
+    else {
+        unreachable!()
+    };
+    let response = Routines::new(build_http(&server))
+        .trigger_with(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams::with_parameters(parameters),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.task_id, Some(id(TASK_ID)));
 }
 
 #[tokio::test]
@@ -568,17 +778,17 @@ async fn a_clustering_trigger_returns_its_run() {
         .unwrap();
 
     assert_eq!(response.run_id, Some(id(RUN_ID)));
-    assert_eq!(response.enqueued, None);
-    assert_eq!(response.conversations, None);
+    assert_eq!(response.synthesis_result(), None);
 }
 
 #[test]
 fn trigger_params_refuse_an_unknown_field() {
+    // The old top-level `conversation_ids` moved under `parameters`.
     let err = serde_json::from_value::<RoutineTriggerParams>(json!({
-        "conversation_id": ["conv-a"],
+        "conversation_ids": ["conv-a"],
     }))
     .unwrap_err();
-    assert!(err.to_string().contains("conversation_id"), "{err}");
+    assert!(err.to_string().contains("conversation_ids"), "{err}");
 }
 
 #[tokio::test]
@@ -678,6 +888,11 @@ async fn routine_events_decode_and_filter_by_routine_and_task() {
                     "member_id": MEMBER_ID,
                     "runtime_group_id": GROUP_ID,
                     "triggered_by_member_id": null,
+                    "event": {
+                        "trigger_id": TRIGGER_ID,
+                        "event_type": "alert.fired",
+                        "delivery_id": "webhook:msg_1",
+                    },
                 },
             })],
             None,
@@ -711,6 +926,14 @@ async fn routine_events_decode_and_filter_by_routine_and_task() {
     assert!(triggered.payload.posted);
     assert_eq!(triggered.payload.member_id, id(MEMBER_ID));
     assert_eq!(triggered.payload.triggered_by_member_id, None);
+    assert_eq!(
+        triggered.payload.event,
+        Some(RoutineTriggerEventRef {
+            trigger_id: id(TRIGGER_ID),
+            event_type: "alert.fired".into(),
+            delivery_id: "webhook:msg_1".into(),
+        })
+    );
 }
 
 #[tokio::test]
@@ -734,7 +957,11 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
         .and(path("/v1/events"))
         .and(query_param("event_name", "introspection.routines.skipped"))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(
-            vec![skipped("target_busy"), skipped("a_reason_from_the_future")],
+            vec![
+                skipped("target_busy"),
+                skipped("trigger_busy"),
+                skipped("a_reason_from_the_future"),
+            ],
             None,
         )))
         .mount(&server)
@@ -764,6 +991,7 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
         reasons,
         vec![
             RoutineSkipReason::TargetBusy,
+            RoutineSkipReason::TriggerBusy,
             RoutineSkipReason::Other("a_reason_from_the_future".into()),
         ]
     );

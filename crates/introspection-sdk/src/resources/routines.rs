@@ -11,6 +11,11 @@
 //! [`IntrospectionEventName::RoutineSkipped`] event, read through
 //! [`crate::Events`] with the `routine_id` and `task_id` filters.
 //!
+//! Beside its schedule and a manual trigger, a prompt routine that starts a
+//! task per run can run on events: its [`Routine::triggers`] listen to an
+//! integration (Slack, GitHub) or a project connector, such as a `webhook`
+//! connector, and name values to read from each event as parameters.
+//!
 //! These are Data Plane routes, gated on `routines:read` /
 //! `routines:write`; a runner a member opens for themself carries both.
 //! The API serves them to administrators only today and answers 403 to anyone
@@ -90,11 +95,10 @@ impl Routines {
             .await
     }
 
-    /// `POST /v1/routines/{id}/trigger` with a body: run it now on the
-    /// given `conversation_ids` (at most 100). Only an
-    /// [`RoutineKind::ObservationSynthesis`](crate::RoutineKind::ObservationSynthesis)
-    /// routine takes them; any other kind answers `422`. An unreadable
-    /// conversation answers `404`, one whose turn is still running `409`.
+    /// `POST /v1/routines/{id}/trigger` with a body: run it now with
+    /// [`RoutineTriggerParams::parameters`]. A prompt routine's run reads them
+    /// as `parameters.json` and `@parameters.<name>`; a platform routine reads
+    /// the keys its kind defines and answers `422` to any other.
     /// Default params send `{}`, like [`Self::trigger`].
     pub async fn trigger_with(
         &self,

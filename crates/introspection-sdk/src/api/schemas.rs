@@ -2785,11 +2785,30 @@ pub enum ConnectionBrokerSubjectType {
     Person,
 }
 
+/// How a `webhook` connector's callers authenticate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookAuth {
+    /// [Standard Webhooks](https://www.standardwebhooks.com/) signatures
+    /// (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The default.
+    StandardWebhooks,
+    /// `Authorization: Bearer <secret>`.
+    Bearer,
+    /// A mode this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// The provider slug of an inbound `webhook` connector
+/// ([`ConnectorCreateParams::webhook`]).
+pub const WEBHOOK_CONNECTOR_PROVIDER: &str = "webhook";
+
 /// A connector — the CP read model returned by every `/v1/connectors` route.
 ///
-/// `client_secret` and `signing_secret` are **write-only**: accepted on create
-/// and update, absent from every response — which is why this read model does
-/// not have them. `requires_runtime` is server-derived and is the **only**
+/// `client_secret` is **write-only**: accepted on create and update, absent
+/// from every response. `signing_secret` is too, except a `webhook`
+/// connector's, which the platform generates and returns once, on create and
+/// on [`ConnectorUpdateParams::rotate_signing_secret`]. `requires_runtime` is server-derived and is the **only**
 /// signal for whether [`ConnectorAuthorizeParams::runtime`] must be set;
 /// never hardcode a provider list.
 #[serde_with::skip_serializing_none]
@@ -2844,6 +2863,32 @@ pub struct Connector {
     /// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
     #[serde(default)]
     pub requires_runtime: bool,
+    /// How a `webhook` connector's callers authenticate; `None` for every
+    /// other provider.
+    #[serde(default)]
+    pub webhook_auth: Option<WebhookAuth>,
+    /// A rotated `webhook` connector's previous secret is still accepted
+    /// until this time.
+    #[serde(default)]
+    pub previous_signing_secret_expires_at: Option<String>,
+    /// A `webhook` connector's new secret, on its create or rotation only.
+    /// Shown once: no read returns it, and a repeat create of a live slug
+    /// returns none, since the stored one stands.
+    #[serde(default)]
+    pub signing_secret: Option<Secret>,
+}
+
+impl Connector {
+    /// Where a `webhook` connector's callers `POST`: the Control Plane's
+    /// `/v1/webhooks/connectors/{id}` under `control_plane_url` (such as
+    /// `https://api.introspection.dev`).
+    pub fn webhook_endpoint(&self, control_plane_url: &str) -> String {
+        format!(
+            "{}/v1/webhooks/connectors/{}",
+            control_plane_url.trim_end_matches('/'),
+            self.id
+        )
+    }
 }
 
 /// Filters supported by `GET /v1/connectors`.
@@ -2937,9 +2982,24 @@ pub struct ConnectorCreateParams {
     /// Cedar entities for the recipe's policies; see [`PolicyEntity`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_entities: Option<Vec<PolicyEntity>>,
+    /// For a `webhook` connector only: how callers authenticate. Defaults to
+    /// [`WebhookAuth::StandardWebhooks`] server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_auth: Option<WebhookAuth>,
 }
 
 impl ConnectorCreateParams {
+    /// An inbound `webhook` connector: `auth_mode` `static`, no hosts, scopes,
+    /// endpoints or secret of its own. The platform generates the secret and
+    /// returns it once in [`Connector::signing_secret`]; routines listen to it
+    /// by slug with [`RoutineTriggerSpec::connector`].
+    pub fn webhook(name: impl Into<String>, webhook_auth: Option<WebhookAuth>) -> Self {
+        Self {
+            webhook_auth,
+            ..Self::new(name, WEBHOOK_CONNECTOR_PROVIDER, ConnectorAuthMode::Static)
+        }
+    }
+
     /// Create params with the three required fields set and every optional
     /// field unset. Combine with struct-update syntax.
     pub fn new(
@@ -2968,6 +3028,7 @@ impl ConnectorCreateParams {
             assertion_audience: None,
             webhook_url: None,
             policy_entities: None,
+            webhook_auth: None,
         }
     }
 }
@@ -3002,6 +3063,15 @@ pub struct ConnectorUpdateParams {
     /// Replaces the connector's Cedar entities; omitted = unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_entities: Option<Vec<PolicyEntity>>,
+    /// For a `webhook` connector only: how callers authenticate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_auth: Option<WebhookAuth>,
+    /// For a `webhook` connector only: issue a new secret, returned once in
+    /// [`Connector::signing_secret`]. The previous one stays valid until
+    /// [`Connector::previous_signing_secret_expires_at`] (24 hours); rotating
+    /// again during that window ends it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotate_signing_secret: Option<bool>,
 }
 
 /// A Cedar entity a recipe's policies read, in Cedar's JSON entity format:
@@ -4377,6 +4447,183 @@ open_wire_enum! {
         TargetTaskRefused => "target_task_refused",
         /// The target task stayed mid-turn through every retry.
         TargetBusy => "target_busy",
+        /// An event reached a trigger whose previous run was still going: a
+        /// trigger runs one at a time.
+        TriggerBusy => "trigger_busy",
+    }
+}
+
+/// What a routine's event trigger listens to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutineTriggerSource {
+    /// An organization integration bound to the project (Slack, GitHub).
+    Integration,
+    /// A project connector named by [`RoutineTriggerSpec::connector_slug`],
+    /// such as a `webhook` connector.
+    Connector,
+    /// A source this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// Whose events a routine trigger listens to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutineTriggerProvider {
+    Slack,
+    /// Not accepted on a trigger until the platform forwards Linear events.
+    Linear,
+    Github,
+    /// A `webhook` connector's calls: the event type is the body's string
+    /// `type`, or `webhook.received` when it has none, and `*` matches any.
+    Webhook,
+    /// A provider this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// A trigger's filter: every key set must contain the event's value for it.
+/// Which keys a provider takes: Slack `channel_ids` and `emoji`, Linear
+/// `team_ids` and `to_states`, GitHub `repository_ids` and `branches`, a
+/// webhook `payload_fields`. `slack.message.posted` requires `channel_ids`.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutineTriggerFilter {
+    #[serde(default)]
+    pub channel_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub emoji: Option<Vec<String>>,
+    #[serde(default)]
+    pub team_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub to_states: Option<Vec<String>>,
+    #[serde(default)]
+    pub repository_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub branches: Option<Vec<String>>,
+    /// A webhook body's top-level scalars by key, each matched against the
+    /// listed values: strings as given, numbers, booleans and `null` as JSON
+    /// (`"42"`, `"true"`).
+    #[serde(default)]
+    pub payload_fields: Option<BTreeMap<String, Vec<String>>>,
+}
+
+impl RoutineTriggerFilter {
+    /// Whether no key is set, so every event of the trigger's types matches.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// One entry of a routine's `triggers` on create or update.
+///
+/// On [`RoutineUpdateParams::triggers`] the list replaces the routine's
+/// triggers: an entry with `id` keeps that trigger with the values given, one
+/// without is a new trigger, and a trigger left out is removed.
+/// [`RoutineTrigger::to_spec`] turns a stored trigger back into an entry that
+/// keeps it. Build with [`Self::new`] or [`Self::connector`].
+///
+/// `parameters` names values read from the event's body by JSON pointer
+/// (RFC 6901, such as `/alert/severity`): each `@parameters.<name>` in the
+/// prompt is replaced by its value as JSON, and the run receives them as
+/// `parameters.json`. A name is lowercase letters, digits and `_`, starting
+/// with a letter, up to 40 characters; at most 20 per trigger.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutineTriggerSpec {
+    /// An existing trigger of this routine to keep. Never set on create.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+    pub source: RoutineTriggerSource,
+    pub provider: RoutineTriggerProvider,
+    /// The project connector, for a [`RoutineTriggerSource::Connector`]
+    /// trigger only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector_slug: Option<String>,
+    /// One to 50 event types, such as `github.pull_request.opened`. A webhook
+    /// trigger takes the sender's own names, or `*` alone for any.
+    pub event_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "RoutineTriggerFilter::is_empty")]
+    pub filter: RoutineTriggerFilter,
+    /// `{name: JSON pointer}` into the event's body.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parameters: BTreeMap<String, String>,
+    /// Defaults to `true` server-side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+impl RoutineTriggerSpec {
+    /// A new trigger on an organization integration's events.
+    pub fn new(
+        provider: RoutineTriggerProvider,
+        event_types: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            id: None,
+            source: RoutineTriggerSource::Integration,
+            provider,
+            connector_slug: None,
+            event_types: event_types.into_iter().map(Into::into).collect(),
+            filter: RoutineTriggerFilter::default(),
+            parameters: BTreeMap::new(),
+            enabled: None,
+        }
+    }
+
+    /// A new trigger on a project connector's events, such as a `webhook`
+    /// connector with [`RoutineTriggerProvider::Webhook`].
+    pub fn connector(
+        provider: RoutineTriggerProvider,
+        connector_slug: impl Into<String>,
+        event_types: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            source: RoutineTriggerSource::Connector,
+            connector_slug: Some(connector_slug.into()),
+            ..Self::new(provider, event_types)
+        }
+    }
+}
+
+/// A stored event trigger of a routine ([`Routine::triggers`]).
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RoutineTrigger {
+    pub id: Uuid,
+    pub routine_id: Uuid,
+    pub org_id: Uuid,
+    pub project_id: Uuid,
+    pub created_at: String,
+    pub updated_at: String,
+    pub source: RoutineTriggerSource,
+    pub provider: RoutineTriggerProvider,
+    #[serde(default)]
+    pub connector_slug: Option<String>,
+    pub event_types: Vec<String>,
+    #[serde(default)]
+    pub filter: RoutineTriggerFilter,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl RoutineTrigger {
+    /// The entry that keeps this trigger as it is in a
+    /// [`RoutineUpdateParams::triggers`] list.
+    pub fn to_spec(&self) -> RoutineTriggerSpec {
+        RoutineTriggerSpec {
+            id: Some(self.id),
+            source: self.source.clone(),
+            provider: self.provider.clone(),
+            connector_slug: self.connector_slug.clone(),
+            event_types: self.event_types.clone(),
+            filter: self.filter.clone(),
+            parameters: self.parameters.clone(),
+            enabled: Some(self.enabled),
+        }
     }
 }
 
@@ -4484,6 +4731,9 @@ pub struct Routine {
     /// fires.
     #[serde(default)]
     pub next_trigger_at: Option<String>,
+    /// Events that start a run, beside the schedule and a manual trigger.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<RoutineTrigger>,
 }
 
 fn default_true() -> bool {
@@ -4540,6 +4790,10 @@ pub struct RoutineCreateParams {
     /// Defaults to `true` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    /// Events that start a run (at most 20), none of them with an `id`. Only
+    /// a routine without a `kind` or `task_id` takes them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triggers: Option<Vec<RoutineTriggerSpec>>,
 }
 
 impl RoutineCreateParams {
@@ -4558,6 +4812,7 @@ impl RoutineCreateParams {
             next_trigger_at: None,
             metadata: None,
             enabled: None,
+            triggers: None,
         }
     }
 }
@@ -4589,6 +4844,11 @@ pub struct RoutineUpdateParams {
     /// `false` pauses and keeps the slot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    /// Replaces the routine's triggers: an entry with an `id` keeps that
+    /// trigger, one without adds a trigger, and the rest are removed.
+    /// `Some(vec![])` removes them all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triggers: Option<Vec<RoutineTriggerSpec>>,
 }
 
 /// Filters supported by `GET /v1/routines`.
@@ -4620,14 +4880,40 @@ pub struct RoutineListParams {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoutineTriggerParams {
-    /// Conversations to synthesise from instead of the routine's own
-    /// selection, at most 100. Only an
-    /// [`RoutineKind::ObservationSynthesis`] routine takes it; any
-    /// other kind answers `422` when it is sent. A conversation the caller
-    /// cannot read answers `404`, and one whose turn is still running `409`.
-    /// Not sent when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub conversation_ids: Vec<String>,
+    /// The run's parameters: a JSON object of at most 16 KiB serialized and
+    /// 8 levels of nesting (`422` past either). A prompt routine that starts
+    /// a task receives the object as `parameters.json`, and each
+    /// `@parameters.<name>` in its prompt becomes that key's value as JSON
+    /// (`null` when absent). A platform routine reads the keys its kind
+    /// defines and answers `422` to any other:
+    /// [`RoutineKind::ObservationSynthesis`] takes `conversation_ids` (1 to
+    /// 100; see [`Self::conversation_ids()`]), and
+    /// [`RoutineKind::ObservationClustering`] takes none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+impl RoutineTriggerParams {
+    /// A trigger with these parameters.
+    pub fn with_parameters(parameters: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self {
+            parameters: Some(parameters),
+        }
+    }
+
+    /// An [`RoutineKind::ObservationSynthesis`] trigger on exactly these
+    /// conversations (1 to 100), synthesized now without waiting for them to
+    /// idle. A conversation the caller cannot read answers `404`, and one
+    /// whose turn is still running `409`.
+    pub fn conversation_ids(ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let ids: Vec<serde_json::Value> = ids
+            .into_iter()
+            .map(|id| serde_json::Value::String(id.into()))
+            .collect();
+        let mut parameters = serde_json::Map::new();
+        parameters.insert("conversation_ids".into(), serde_json::Value::Array(ids));
+        Self::with_parameters(parameters)
+    }
 }
 
 /// `POST /v1/routines/{id}/trigger` response. A `skipped` status carries
@@ -4640,27 +4926,46 @@ pub struct RoutineTriggerResponse {
     /// The task created, or posted into.
     #[serde(default)]
     pub task_id: Option<Uuid>,
-    #[serde(default)]
-    pub reason: Option<String>,
-    /// The run started, for a [`RoutineKind::ObservationClustering`]
-    /// routine. `None` for other kinds and from a server that predates it.
+    /// The run this trigger started, when it has one, such as the run a
+    /// [`RoutineKind::ObservationClustering`] routine's
+    /// `introspection.observation_clustering.run` events carry.
     #[serde(default)]
     pub run_id: Option<Uuid>,
-    /// [`RoutineKind::ObservationSynthesis`] only: the conversations sent
-    /// to the synthesis queue. Each one later gets an
-    /// `introspection.observation_synthesis.completed` event. `None` for other
-    /// kinds and from a server that predates it.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// What the run reports, by kind. Read an
+    /// [`RoutineKind::ObservationSynthesis`] result with
+    /// [`Self::synthesis_result`].
+    #[serde(default)]
+    pub result: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+impl RoutineTriggerResponse {
+    /// [`Self::result`] read as an [`RoutineKind::ObservationSynthesis`]
+    /// run's, or `None` when there is no result or it does not fit.
+    pub fn synthesis_result(&self) -> Option<ObservationSynthesisTriggerResult> {
+        let result = self.result.clone()?;
+        serde_json::from_value(serde_json::Value::Object(result)).ok()
+    }
+}
+
+/// What an [`RoutineKind::ObservationSynthesis`] trigger reports in
+/// [`RoutineTriggerResponse::result`].
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ObservationSynthesisTriggerResult {
+    /// The conversations sent to the synthesis queue. Each one later gets an
+    /// `introspection.observation_synthesis.completed` event.
     #[serde(default)]
     pub enqueued: Option<u64>,
-    /// [`RoutineKind::ObservationSynthesis`] triggered with
-    /// [`RoutineTriggerParams::conversation_ids`] only: what was queued,
-    /// per conversation. `None` otherwise and from a server that predates it.
+    /// For a trigger naming `conversation_ids`: what was queued, per
+    /// conversation.
     #[serde(default)]
     pub conversations: Option<Vec<EnqueuedConversation>>,
 }
 
 /// A conversation a synthesis trigger queued, and the end it queued it at
-/// ([`RoutineTriggerResponse::conversations`]).
+/// ([`ObservationSynthesisTriggerResult::conversations`]).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct EnqueuedConversation {
     pub conversation_id: String,
@@ -7529,7 +7834,7 @@ pub enum ObservationSynthesisStatus {
 /// one queued conversation ended, even with no observations (stream family).
 /// The conversation is the event's `conversation_id`. A trigger with
 /// `conversation_ids` reports how many it queued in
-/// [`RoutineTriggerResponse::enqueued`]; each gets one of these events.
+/// [`ObservationSynthesisTriggerResult::enqueued`]; each gets one of these events.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ObservationSynthesisCompletedPayload {
@@ -7821,7 +8126,7 @@ pub struct RoutineTriggeredPayload {
     pub prompt: Option<String>,
     pub trigger_type: RoutineTriggerType,
     /// The `next_trigger_at` a scheduled trigger claimed; `None` for a hand
-    /// trigger.
+    /// or event trigger.
     #[serde(default)]
     pub slot: Option<String>,
     /// The task created, or posted into when `posted` is true.
@@ -7834,10 +8139,24 @@ pub struct RoutineTriggeredPayload {
     /// The person who triggered it by hand.
     #[serde(default)]
     pub triggered_by_member_id: Option<Uuid>,
+    /// The event trigger it answered, for a run an event started.
+    #[serde(default)]
+    pub event: Option<RoutineTriggerEventRef>,
 }
 
-/// `introspection.routines.skipped` payload — one scheduled routine
-/// trigger that ran nothing (stream family, project-owned).
+/// The event trigger a routine run or skip answered
+/// ([`RoutineTriggeredPayload::event`], [`RoutineSkippedPayload::event`]).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RoutineTriggerEventRef {
+    pub trigger_id: Uuid,
+    pub event_type: String,
+    /// The provider event's identity within its source, which a redelivery
+    /// repeats.
+    pub delivery_id: String,
+}
+
+/// `introspection.routines.skipped` payload — one scheduled slot or event
+/// delivery that ran nothing (stream family, project-owned).
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RoutineSkippedPayload {
@@ -7849,6 +8168,11 @@ pub struct RoutineSkippedPayload {
     #[serde(default)]
     pub task_id: Option<Uuid>,
     pub reason: RoutineSkipReason,
+    /// The event trigger whose delivery was skipped, such as one that
+    /// arrived during the trigger's previous run
+    /// ([`RoutineSkipReason::TriggerBusy`]).
+    #[serde(default)]
+    pub event: Option<RoutineTriggerEventRef>,
 }
 
 /// Whole-event envelope + typed payload per family.

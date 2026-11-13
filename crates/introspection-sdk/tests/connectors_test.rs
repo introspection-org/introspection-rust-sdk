@@ -15,7 +15,7 @@ use introspection_sdk::{
     ConnectionTokenParams, ConnectionTokenResult, ConnectorAppListParams, ConnectorAuthMode,
     ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
     ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams, Connectors, RunnerIdentity,
+    ConnectorUpdateParams, Connectors, RunnerIdentity, WebhookAuth,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -822,4 +822,111 @@ fn token_params_read_from_a_json_document() {
         "project": "web",
     }))
     .is_err());
+}
+
+fn webhook_connector_json(signing_secret: Option<&str>) -> serde_json::Value {
+    let mut value = json!({
+        "id": CONNECTOR_ID,
+        "org_id": "00000000-0000-0000-0000-0000000000aa",
+        "project_id": "00000000-0000-0000-0000-0000000000bb",
+        "created_at": "2026-11-13T00:00:00Z",
+        "updated_at": "2026-11-13T00:00:00Z",
+        "slug": "ci-alerts",
+        "name": "CI alerts",
+        "provider": "webhook",
+        "auth_mode": "static",
+        "environment": "production",
+        "status": "active",
+        "requires_runtime": false,
+        "metadata": { "webhook_auth": "bearer" },
+        "webhook_auth": "bearer",
+        "previous_signing_secret_expires_at": null,
+    });
+    if let Some(secret) = signing_secret {
+        value["signing_secret"] = json!(secret);
+    }
+    value
+}
+
+#[tokio::test]
+async fn a_webhook_connector_returns_its_secret_once_on_create() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/connectors"))
+        .and(body_json(json!({
+            "name": "CI alerts",
+            "provider": "webhook",
+            "auth_mode": "static",
+            "slug": "ci-alerts",
+            "webhook_auth": "bearer",
+        })))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_json(webhook_connector_json(Some("whsec_c2VjcmV0"))),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let connector = Connectors::new(build_http(&server))
+        .create(
+            &ConnectorCreateParams {
+                slug: Some("ci-alerts".into()),
+                ..ConnectorCreateParams::webhook("CI alerts", Some(WebhookAuth::Bearer))
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(connector.webhook_auth, Some(WebhookAuth::Bearer));
+    assert_eq!(
+        connector.signing_secret.as_ref().map(|s| s.expose()),
+        Some("whsec_c2VjcmV0")
+    );
+    assert!(!format!("{connector:?}").contains("whsec_c2VjcmV0"));
+    assert_eq!(
+        connector.webhook_endpoint("https://api.example.com/"),
+        format!("https://api.example.com/v1/webhooks/connectors/{CONNECTOR_ID}")
+    );
+}
+
+#[tokio::test]
+async fn rotate_signing_secret_patches_the_flag_and_reads_the_grace_period() {
+    let server = MockServer::start().await;
+    let mut rotated = webhook_connector_json(Some("whsec_bmV3"));
+    rotated["previous_signing_secret_expires_at"] = json!("2026-11-14T00:00:00Z");
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/connectors/{CONNECTOR_ID}")))
+        .and(body_json(json!({ "rotate_signing_secret": true })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(rotated))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let connector = Connectors::new(build_http(&server))
+        .rotate_signing_secret(connector_id(), None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        connector.signing_secret.as_ref().map(|s| s.expose()),
+        Some("whsec_bmV3")
+    );
+    assert_eq!(
+        connector.previous_signing_secret_expires_at.as_deref(),
+        Some("2026-11-14T00:00:00Z")
+    );
+}
+
+#[test]
+fn a_read_carries_no_secret_and_an_unknown_auth_mode_is_kept() {
+    let mut value = webhook_connector_json(None);
+    value["webhook_auth"] = json!("hmac_v2");
+    let connector: introspection_sdk::Connector = serde_json::from_value(value).unwrap();
+    assert!(connector.signing_secret.is_none());
+    assert_eq!(
+        connector.webhook_auth,
+        Some(WebhookAuth::Unknown(json!("hmac_v2")))
+    );
 }

@@ -514,6 +514,7 @@ pub async fn routines(w: &mut Walk) {
             next_trigger_at: None,
             metadata: None,
             enabled: None,
+            triggers: None,
         })
         .await
         .expect("create the routine");

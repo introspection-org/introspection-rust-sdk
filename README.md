@@ -438,8 +438,10 @@ let fired = client.events().list(&EventListParams {
 `Routine::kind` is `None` for a routine a person created. A platform
 routine carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
 `ObservationClustering`. A kind added later decodes as `RoutineKind::Other`.
-A scheduled firing that ran nothing is recorded as an
-`introspection.routines.skipped` event with a `RoutineSkipReason`.
+A scheduled firing or event delivery that ran nothing is recorded as an
+`introspection.routines.skipped` event with a `RoutineSkipReason`. A run or
+skip an event started carries `event`: the trigger, the event type and the
+delivery id.
 
 `runner.routines()` is the same API on the runner's token. These are Data
 Plane routes (`routines:read` / `routines:write`), which a runner a
@@ -447,6 +449,78 @@ member opens for themself carries. The API serves them to administrators only
 today and answers 403 to anyone else. introspection-cloud#3137 opens them to
 members for their own routines that post into one of their own tasks. The `task_id` list filter arrives with that
 change, so it is not served yet.
+
+### Run a routine on events
+
+Beside its schedule and a manual trigger, a prompt routine that starts a task
+per run can run on events. Each of its `triggers` listens to an organization
+integration (Slack, GitHub) or a project connector. A custom webhook is a
+`webhook` connector: the platform generates its secret and returns it once, on
+create, and your system `POST`s to the connector's endpoint, signed with
+[Standard Webhooks](https://www.standardwebhooks.com/) (the default) or sent
+with `Authorization: Bearer <secret>`. A trigger's `parameters` read values
+from the event's body by JSON pointer; each `@parameters.<name>` in the prompt
+becomes that value as JSON, and the run also gets them as `parameters.json`:
+
+```rust
+use introspection_sdk::{
+    ConnectorCreateParams, RoutineCreateParams, RoutineTriggerFilter,
+    RoutineTriggerProvider, RoutineTriggerSpec, RoutineTriggerType, WebhookAuth,
+};
+
+let connector = client.connectors().create(&ConnectorCreateParams {
+    slug: Some("ci-alerts".into()),
+    ..ConnectorCreateParams::webhook("CI alerts", Some(WebhookAuth::StandardWebhooks))
+}, None).await?;
+// Shown once: no read returns it. Store it in the sending system now.
+let secret = connector.signing_secret.as_ref().expect("a new webhook connector's secret");
+let endpoint = connector.webhook_endpoint("https://api.introspection.dev");
+
+let triage = client.routines().create(&RoutineCreateParams {
+    prompt: Some("Triage the @parameters.severity alert on @parameters.service.".into()),
+    runtime_group_id: Some(runtime_group_id),
+    triggers: Some(vec![RoutineTriggerSpec {
+        // Only bodies whose top-level `env` is "prod".
+        filter: RoutineTriggerFilter {
+            payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
+            ..Default::default()
+        },
+        parameters: [
+            ("severity".into(), "/alert/severity".into()),
+            ("service".into(), "/alert/service".into()),
+        ].into(),
+        // The event type is the body's string `type`; `*` matches any.
+        ..RoutineTriggerSpec::connector(RoutineTriggerProvider::Webhook, "ci-alerts", ["alert.fired"])
+    }]),
+    ..RoutineCreateParams::new("Triage alerts", RoutineTriggerType::Manual)
+}).await?;
+```
+
+Updating `triggers` replaces the list: an entry with an `id` keeps that trigger
+(`RoutineTrigger::to_spec` builds one from a stored trigger), one without adds
+a trigger, and the rest are removed. A trigger runs one at a time: an event
+that arrives during its previous run is skipped as `trigger_busy`. Rotate the
+secret with `client.connectors().rotate_signing_secret(connector.id, None)`,
+which returns the new one once; the previous one is accepted until
+`previous_signing_secret_expires_at`, 24 hours later.
+
+A manual trigger takes the same parameters, as any JSON object of at most
+16 KiB and 8 levels deep:
+
+```rust
+use introspection_sdk::RoutineTriggerParams;
+
+let serde_json::Value::Object(parameters) =
+    serde_json::json!({ "severity": "high", "service": "billing" }) else { unreachable!() };
+let run = client.routines()
+    .trigger_with(triage.id, &RoutineTriggerParams::with_parameters(parameters))
+    .await?;
+println!("{} {:?} {:?}", run.status, run.task_id, run.result);
+```
+
+A platform routine reads the keys its kind defines: an `ObservationSynthesis`
+routine takes `conversation_ids` (`RoutineTriggerParams::conversation_ids`) and
+reports what it queued in `run.synthesis_result()`.
 
 ## Connect a member's apps
 
