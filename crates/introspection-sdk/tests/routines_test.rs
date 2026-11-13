@@ -1,5 +1,5 @@
-//! Integration tests for the automations DP surface (`client.automations()`)
-//! and the automation event families, backed by `wiremock`.
+//! Integration tests for the routines DP surface (`client.routines()`)
+//! and the routine event families, backed by `wiremock`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,19 +8,18 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    AdvancedOptions, AutomationCondition, AutomationConditionType, AutomationCreateParams,
-    AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
-    AutomationSkipReason, AutomationTriggerParams, AutomationTriggerType, AutomationUpdateParams,
-    Automations, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
+    AdvancedOptions, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
     IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
-    TaskRepoRequest,
+    RoutineCondition, RoutineConditionType, RoutineCreateParams, RoutineExecutionStatus,
+    RoutineKind, RoutineListParams, RoutineMetadata, RoutineSkipReason, RoutineTriggerParams,
+    RoutineTriggerType, RoutineUpdateParams, Routines, TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-const AUTOMATION_ID: &str = "11111111-1111-7111-8111-111111111111";
+const ROUTINE_ID: &str = "11111111-1111-7111-8111-111111111111";
 const TASK_ID: &str = "22222222-2222-7222-8222-222222222222";
 const GROUP_ID: &str = "33333333-3333-7333-8333-333333333333";
 const MEMBER_ID: &str = "44444444-4444-7444-8444-444444444444";
@@ -41,9 +40,9 @@ fn id(value: &str) -> Uuid {
     Uuid::parse_str(value).unwrap()
 }
 
-fn automation_json() -> serde_json::Value {
+fn routine_json() -> serde_json::Value {
     json!({
-        "id": AUTOMATION_ID,
+        "id": ROUTINE_ID,
         "org_id": "00000000-0000-0000-0000-0000000000aa",
         "project_id": "00000000-0000-0000-0000-0000000000bb",
         "created_at": "2026-10-04T00:00:00Z",
@@ -90,38 +89,38 @@ fn query_pairs(request: &Request) -> Vec<(String, String)> {
 async fn list_parses_the_read_model_and_its_typed_metadata() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/v1/automations"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![automation_json()], None)))
+        .and(path("/v1/routines"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![routine_json()], None)))
         .mount(&server)
         .await;
 
-    let found: Vec<_> = Automations::new(build_http(&server))
-        .list(&AutomationListParams::default())
+    let found: Vec<_> = Routines::new(build_http(&server))
+        .list(&RoutineListParams::default())
         .collect()
         .await;
 
-    let automation = found[0].as_ref().unwrap();
-    assert_eq!(automation.id, id(AUTOMATION_ID));
-    assert_eq!(automation.kind, None);
-    assert_eq!(automation.trigger_type, AutomationTriggerType::Cron);
-    assert_eq!(automation.task_id, Some(id(TASK_ID)));
-    assert_eq!(automation.runtime_group_id, Some(id(GROUP_ID)));
-    assert_eq!(automation.created_by_member_id, Some(id(MEMBER_ID)));
-    assert!(automation.can_manage);
-    assert_eq!(automation.owner_role.as_deref(), Some("operator"));
+    let routine = found[0].as_ref().unwrap();
+    assert_eq!(routine.id, id(ROUTINE_ID));
+    assert_eq!(routine.kind, None);
+    assert_eq!(routine.trigger_type, RoutineTriggerType::Cron);
+    assert_eq!(routine.task_id, Some(id(TASK_ID)));
+    assert_eq!(routine.runtime_group_id, Some(id(GROUP_ID)));
+    assert_eq!(routine.created_by_member_id, Some(id(MEMBER_ID)));
+    assert!(routine.can_manage);
+    assert_eq!(routine.owner_role.as_deref(), Some("operator"));
     assert_eq!(
-        automation.next_trigger_at.as_deref(),
+        routine.next_trigger_at.as_deref(),
         Some("2026-10-05T22:00:00Z")
     );
 
-    let metadata = automation.typed_metadata().unwrap();
+    let metadata = routine.typed_metadata().unwrap();
     assert_eq!(metadata.cron_schedules, vec!["0 9 * * 1-5".to_string()]);
     assert_eq!(metadata.timezone.as_deref(), Some("Australia/Sydney"));
     assert_eq!(metadata.repositories[0].repo, "acme/app");
     assert_eq!(metadata.repositories[0].git_ref.as_deref(), Some("main"));
     assert_eq!(
         metadata.conditions[0].condition_type,
-        AutomationConditionType::HasNewTasksSinceLastRun
+        RoutineConditionType::HasNewTasksSinceLastRun
     );
     assert_eq!(metadata.other["source"], json!({"channel": "ops"}));
 }
@@ -136,36 +135,36 @@ async fn kinds_decode_including_project_check_in_and_an_unknown_value() {
         "observation_clustering",
         "a_kind_from_the_future",
     ] {
-        let mut record = automation_json();
+        let mut record = routine_json();
         record["kind"] = json!(kind);
         record["task_id"] = json!(null);
         record["created_by_member_id"] = json!(null);
         records.push(record);
     }
     Mock::given(method("GET"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(records, None)))
         .mount(&server)
         .await;
 
-    let kinds: Vec<_> = Automations::new(build_http(&server))
-        .list(&AutomationListParams::default())
-        .map(|automation| automation.unwrap().kind)
+    let kinds: Vec<_> = Routines::new(build_http(&server))
+        .list(&RoutineListParams::default())
+        .map(|routine| routine.unwrap().kind)
         .collect()
         .await;
 
     assert_eq!(
         kinds,
         vec![
-            Some(AutomationKind::ProjectCheckIn),
-            Some(AutomationKind::ObservationSynthesis),
-            Some(AutomationKind::ObservationClustering),
-            Some(AutomationKind::Other("a_kind_from_the_future".into())),
+            Some(RoutineKind::ProjectCheckIn),
+            Some(RoutineKind::ObservationSynthesis),
+            Some(RoutineKind::ObservationClustering),
+            Some(RoutineKind::Other("a_kind_from_the_future".into())),
         ]
     );
     // An unknown kind round-trips to the value it came from.
     assert_eq!(
-        serde_json::to_value(AutomationKind::from("a_kind_from_the_future")).unwrap(),
+        serde_json::to_value(RoutineKind::from("a_kind_from_the_future")).unwrap(),
         json!("a_kind_from_the_future")
     );
 }
@@ -174,32 +173,31 @@ async fn kinds_decode_including_project_check_in_and_an_unknown_value() {
 async fn list_sends_every_filter_and_keeps_task_id_across_pages() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .and(query_param("next", "cursor-2"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![automation_json()], None)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![routine_json()], None)))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(page(vec![automation_json()], Some("cursor-2"))),
+            ResponseTemplate::new(200).set_body_json(page(vec![routine_json()], Some("cursor-2"))),
         )
         .mount(&server)
         .await;
 
-    let params = AutomationListParams {
+    let params = RoutineListParams {
         pagination: PaginationParams {
             limit: Some(1),
             next: None,
         },
-        kind: Some(AutomationKind::ProjectCheckIn),
+        kind: Some(RoutineKind::ProjectCheckIn),
         enabled: Some(true),
         scheduled: Some(false),
         task_id: Some(id(TASK_ID)),
         filters: None,
     };
-    let found: Vec<_> = Automations::new(build_http(&server))
+    let found: Vec<_> = Routines::new(build_http(&server))
         .list(&params)
         .collect()
         .await;
@@ -230,13 +228,13 @@ async fn list_sends_every_filter_and_keeps_task_id_across_pages() {
 async fn an_empty_list_params_sends_no_filters() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![], None)))
         .mount(&server)
         .await;
 
-    let _: Vec<_> = Automations::new(build_http(&server))
-        .list(&AutomationListParams::default())
+    let _: Vec<_> = Routines::new(build_http(&server))
+        .list(&RoutineListParams::default())
         .collect()
         .await;
 
@@ -245,22 +243,22 @@ async fn an_empty_list_params_sends_no_filters() {
 }
 
 #[tokio::test]
-async fn get_reads_one_automation() {
+async fn get_reads_one_routine() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(automation_json()))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
         .mount(&server)
         .await;
 
-    let automation = Automations::new(build_http(&server))
-        .get(id(AUTOMATION_ID))
+    let routine = Routines::new(build_http(&server))
+        .get(id(ROUTINE_ID))
         .await
         .unwrap();
 
-    assert_eq!(automation.id, id(AUTOMATION_ID));
+    assert_eq!(routine.id, id(ROUTINE_ID));
     assert_eq!(
-        automation.prompt.as_deref(),
+        routine.prompt.as_deref(),
         Some("Check in on the open items.")
     );
 }
@@ -269,7 +267,7 @@ async fn get_reads_one_automation() {
 async fn create_sends_only_the_set_fields() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .and(body_json(json!({
             "name": "Remind me",
             "trigger_type": "manual",
@@ -278,29 +276,29 @@ async fn create_sends_only_the_set_fields() {
             "task_id": TASK_ID,
             "next_trigger_at": "2026-10-06T09:00:00+10:00",
         })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(automation_json()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(routine_json()))
         .mount(&server)
         .await;
 
-    let automation = Automations::new(build_http(&server))
-        .create(&AutomationCreateParams {
+    let routine = Routines::new(build_http(&server))
+        .create(&RoutineCreateParams {
             prompt: Some("Follow up on the invoice.".into()),
             runtime_group_id: Some(id(GROUP_ID)),
             task_id: Some(id(TASK_ID)),
             next_trigger_at: Some("2026-10-06T09:00:00+10:00".into()),
-            ..AutomationCreateParams::new("Remind me", AutomationTriggerType::Manual)
+            ..RoutineCreateParams::new("Remind me", RoutineTriggerType::Manual)
         })
         .await
         .unwrap();
 
-    assert_eq!(automation.id, id(AUTOMATION_ID));
+    assert_eq!(routine.id, id(ROUTINE_ID));
 }
 
 #[tokio::test]
 async fn create_serializes_a_platform_kind_and_typed_metadata() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .and(body_json(json!({
             "name": "Check-in",
             "trigger_type": "cron",
@@ -313,7 +311,7 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                 "cron_schedules": ["0 9 * * 1-5"],
                 "timezone": "UTC",
                 "conditions": [
-                    {"type": "no_live_task_for_automation"},
+                    {"type": "no_live_task_for_routine"},
                     {"type": "last_run_issues_resolved", "runtime_group_id": GROUP_ID},
                 ],
                 "owner": "ops",
@@ -321,17 +319,17 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
             },
             "enabled": false,
         })))
-        .respond_with(ResponseTemplate::new(201).set_body_json(automation_json()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(routine_json()))
         .mount(&server)
         .await;
 
-    Automations::new(build_http(&server))
-        .create(&AutomationCreateParams {
+    Routines::new(build_http(&server))
+        .create(&RoutineCreateParams {
             cron_schedule: Some("0 9 * * *".into()),
-            kind: Some(AutomationKind::ProjectCheckIn),
+            kind: Some(RoutineKind::ProjectCheckIn),
             prompt: Some("How is the project going?".into()),
             runtime_group_id: Some(id(GROUP_ID)),
-            metadata: Some(AutomationMetadata {
+            metadata: Some(RoutineMetadata {
                 repositories: vec![TaskRepoRequest {
                     repo: "acme/app".into(),
                     ..Default::default()
@@ -339,10 +337,10 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                 cron_schedules: vec!["0 9 * * 1-5".into()],
                 timezone: Some("UTC".into()),
                 conditions: vec![
-                    AutomationCondition::new(AutomationConditionType::NoLiveTaskForAutomation),
-                    AutomationCondition {
+                    RoutineCondition::new(RoutineConditionType::NoLiveTaskForRoutine),
+                    RoutineCondition {
                         runtime_group_id: Some(id(GROUP_ID)),
-                        ..AutomationCondition::new(AutomationConditionType::LastRunIssuesResolved)
+                        ..RoutineCondition::new(RoutineConditionType::LastRunIssuesResolved)
                     },
                 ],
                 other: [
@@ -353,7 +351,7 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                 .collect(),
             }),
             enabled: Some(false),
-            ..AutomationCreateParams::new("Check-in", AutomationTriggerType::Cron)
+            ..RoutineCreateParams::new("Check-in", RoutineTriggerType::Cron)
         })
         .await
         .unwrap();
@@ -363,16 +361,16 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
 async fn update_sends_only_the_set_fields() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
         .and(body_json(json!({ "enabled": false })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(automation_json()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
         .mount(&server)
         .await;
 
-    Automations::new(build_http(&server))
+    Routines::new(build_http(&server))
         .update(
-            id(AUTOMATION_ID),
-            &AutomationUpdateParams {
+            id(ROUTINE_ID),
+            &RoutineUpdateParams {
                 enabled: Some(false),
                 ..Default::default()
             },
@@ -385,23 +383,23 @@ async fn update_sends_only_the_set_fields() {
 async fn update_metadata_sends_only_the_set_metadata_fields() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
         .and(body_json(json!({
             "cron_schedule": "30 8 * * *",
             "task_id": TASK_ID,
             "metadata": {"timezone": "Europe/London"},
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(automation_json()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
         .mount(&server)
         .await;
 
-    Automations::new(build_http(&server))
+    Routines::new(build_http(&server))
         .update(
-            id(AUTOMATION_ID),
-            &AutomationUpdateParams {
+            id(ROUTINE_ID),
+            &RoutineUpdateParams {
                 cron_schedule: Some("30 8 * * *".into()),
                 task_id: Some(id(TASK_ID)),
-                metadata: Some(AutomationMetadata {
+                metadata: Some(RoutineMetadata {
                     timezone: Some("Europe/London".into()),
                     ..Default::default()
                 }),
@@ -419,7 +417,7 @@ fn metadata_keeps_keys_it_does_not_name_through_a_round_trip() {
         "owner": "ops",
         "labels": ["a", "b"],
     });
-    let metadata: AutomationMetadata = serde_json::from_value(stored.clone()).unwrap();
+    let metadata: RoutineMetadata = serde_json::from_value(stored.clone()).unwrap();
     assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
     assert_eq!(metadata.other.len(), 2);
     assert_eq!(serde_json::to_value(&metadata).unwrap(), stored);
@@ -428,7 +426,7 @@ fn metadata_keeps_keys_it_does_not_name_through_a_round_trip() {
 #[test]
 fn an_empty_update_serializes_to_an_empty_object() {
     assert_eq!(
-        serde_json::to_value(AutomationUpdateParams::default()).unwrap(),
+        serde_json::to_value(RoutineUpdateParams::default()).unwrap(),
         json!({})
     );
 }
@@ -437,14 +435,14 @@ fn an_empty_update_serializes_to_an_empty_object() {
 async fn delete_soft_deletes() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
         .respond_with(ResponseTemplate::new(204))
         .expect(1)
         .mount(&server)
         .await;
 
-    Automations::new(build_http(&server))
-        .delete(id(AUTOMATION_ID))
+    Routines::new(build_http(&server))
+        .delete(id(ROUTINE_ID))
         .await
         .unwrap();
 }
@@ -453,23 +451,23 @@ async fn delete_soft_deletes() {
 async fn trigger_returns_the_task_it_ran() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "triggered",
-            "automation_id": AUTOMATION_ID,
+            "routine_id": ROUTINE_ID,
             "task_id": TASK_ID,
             "reason": null,
         })))
         .mount(&server)
         .await;
 
-    let response = Automations::new(build_http(&server))
-        .trigger(id(AUTOMATION_ID))
+    let response = Routines::new(build_http(&server))
+        .trigger(id(ROUTINE_ID))
         .await
         .unwrap();
 
-    assert_eq!(response.status, AutomationExecutionStatus::Triggered);
-    assert_eq!(response.automation_id, id(AUTOMATION_ID));
+    assert_eq!(response.status, RoutineExecutionStatus::Triggered);
+    assert_eq!(response.routine_id, id(ROUTINE_ID));
     assert_eq!(response.task_id, Some(id(TASK_ID)));
     // A server that predates `run_id` and `enqueued` leaves them out.
     assert_eq!(response.run_id, None);
@@ -480,21 +478,21 @@ async fn trigger_returns_the_task_it_ran() {
 async fn trigger_sends_an_empty_body() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
         .and(body_json(json!({})))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "triggered",
-            "automation_id": AUTOMATION_ID,
+            "routine_id": ROUTINE_ID,
         })))
         .expect(2)
         .mount(&server)
         .await;
 
-    let automations = Automations::new(build_http(&server));
-    automations.trigger(id(AUTOMATION_ID)).await.unwrap();
+    let routines = Routines::new(build_http(&server));
+    routines.trigger(id(ROUTINE_ID)).await.unwrap();
     // Default params send no `conversation_ids` either.
-    automations
-        .trigger_with(id(AUTOMATION_ID), &AutomationTriggerParams::default())
+    routines
+        .trigger_with(id(ROUTINE_ID), &RoutineTriggerParams::default())
         .await
         .unwrap();
 }
@@ -503,13 +501,13 @@ async fn trigger_sends_an_empty_body() {
 async fn trigger_with_sends_the_conversation_ids() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
         .and(body_json(
             json!({ "conversation_ids": ["conv-a", "conv-b"] }),
         ))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "triggered",
-            "automation_id": AUTOMATION_ID,
+            "routine_id": ROUTINE_ID,
             "task_id": TASK_ID,
             "enqueued": 2,
             "conversations": [
@@ -521,10 +519,10 @@ async fn trigger_with_sends_the_conversation_ids() {
         .mount(&server)
         .await;
 
-    let response = Automations::new(build_http(&server))
+    let response = Routines::new(build_http(&server))
         .trigger_with(
-            id(AUTOMATION_ID),
-            &AutomationTriggerParams {
+            id(ROUTINE_ID),
+            &RoutineTriggerParams {
                 conversation_ids: vec!["conv-a".into(), "conv-b".into()],
             },
         )
@@ -553,10 +551,10 @@ async fn a_clustering_trigger_returns_its_run() {
     const RUN_ID: &str = "55555555-5555-7555-8555-555555555555";
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "triggered",
-            "automation_id": AUTOMATION_ID,
+            "routine_id": ROUTINE_ID,
             "task_id": null,
             "reason": null,
             "run_id": RUN_ID,
@@ -564,8 +562,8 @@ async fn a_clustering_trigger_returns_its_run() {
         .mount(&server)
         .await;
 
-    let response = Automations::new(build_http(&server))
-        .trigger(id(AUTOMATION_ID))
+    let response = Routines::new(build_http(&server))
+        .trigger(id(ROUTINE_ID))
         .await
         .unwrap();
 
@@ -576,7 +574,7 @@ async fn a_clustering_trigger_returns_its_run() {
 
 #[test]
 fn trigger_params_refuse_an_unknown_field() {
-    let err = serde_json::from_value::<AutomationTriggerParams>(json!({
+    let err = serde_json::from_value::<RoutineTriggerParams>(json!({
         "conversation_id": ["conv-a"],
     }))
     .unwrap_err();
@@ -587,22 +585,22 @@ fn trigger_params_refuse_an_unknown_field() {
 async fn a_skipped_trigger_carries_its_reason() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}/trigger")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
         .respond_with(ResponseTemplate::new(202).set_body_json(json!({
             "status": "skipped",
-            "automation_id": AUTOMATION_ID,
+            "routine_id": ROUTINE_ID,
             "task_id": null,
             "reason": "The target task is archived",
         })))
         .mount(&server)
         .await;
 
-    let response = Automations::new(build_http(&server))
-        .trigger(id(AUTOMATION_ID))
+    let response = Routines::new(build_http(&server))
+        .trigger(id(ROUTINE_ID))
         .await
         .unwrap();
 
-    assert_eq!(response.status, AutomationExecutionStatus::Skipped);
+    assert_eq!(response.status, RoutineExecutionStatus::Skipped);
     assert_eq!(response.task_id, None);
     assert_eq!(
         response.reason.as_deref(),
@@ -614,15 +612,15 @@ async fn a_skipped_trigger_carries_its_reason() {
 async fn a_403_surfaces_as_an_api_error() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}")))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
         .respond_with(ResponseTemplate::new(403).set_body_json(json!({
-            "detail": "Only administrators can access automations",
+            "detail": "Only administrators can access routines",
         })))
         .mount(&server)
         .await;
 
-    let err = Automations::new(build_http(&server))
-        .get(id(AUTOMATION_ID))
+    let err = Routines::new(build_http(&server))
+        .get(id(ROUTINE_ID))
         .await
         .unwrap_err();
 
@@ -630,11 +628,11 @@ async fn a_403_surfaces_as_an_api_error() {
 }
 
 #[tokio::test]
-async fn the_client_routes_automations_to_the_data_plane() {
+async fn the_client_routes_routines_to_the_data_plane() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path(format!("/v1/automations/{AUTOMATION_ID}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(automation_json()))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
         .expect(1)
         .mount(&server)
         .await;
@@ -648,30 +646,30 @@ async fn the_client_routes_automations_to_the_data_plane() {
     ))
     .unwrap();
 
-    let automation = client.automations().get(id(AUTOMATION_ID)).await.unwrap();
-    assert_eq!(automation.name, "Daily follow-up");
+    let routine = client.routines().get(id(ROUTINE_ID)).await.unwrap();
+    assert_eq!(routine.name, "Daily follow-up");
 }
 
 #[tokio::test]
-async fn automation_events_decode_and_filter_by_automation_and_task() {
+async fn routine_events_decode_and_filter_by_routine_and_task() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/events"))
         .and(query_param(
             "event_name",
-            "introspection.automation.triggered",
+            "introspection.routines.triggered",
         ))
-        .and(query_param("automation_id", AUTOMATION_ID))
+        .and(query_param("routine_id", ROUTINE_ID))
         .and(query_param("task_id", TASK_ID))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(
             vec![json!({
                 "id": "evt_1",
                 "timestamp": "2026-10-05T22:00:01Z",
-                "event_name": "introspection.automation.triggered",
+                "event_name": "introspection.routines.triggered",
                 "runtime_group_id": GROUP_ID,
                 "payload": {
-                    "automation_id": AUTOMATION_ID,
-                    "automation_name": "Daily follow-up",
+                    "routine_id": ROUTINE_ID,
+                    "routine_name": "Daily follow-up",
                     "prompt": "Check in on the open items.",
                     "trigger_type": "cron",
                     "slot": "2026-10-05T22:00:00Z",
@@ -689,22 +687,22 @@ async fn automation_events_decode_and_filter_by_automation_and_task() {
 
     let events = Events::new(build_http(&server));
     let params = EventListParams {
-        automation_id: Some(id(AUTOMATION_ID)),
+        routine_id: Some(id(ROUTINE_ID)),
         task_id: Some(id(TASK_ID)),
-        ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+        ..EventListParams::new(IntrospectionEventName::RoutineTriggered)
     };
     let found: Vec<_> = events.list(&params).unwrap().collect().await;
 
     let event = found[0].as_ref().unwrap();
     assert_eq!(
         event.event_name(),
-        Some(IntrospectionEventName::AutomationTriggered)
+        Some(IntrospectionEventName::RoutineTriggered)
     );
-    let Event::AutomationTriggered(triggered) = event else {
-        panic!("expected AutomationTriggered, got {event:?}");
+    let Event::RoutineTriggered(triggered) = event else {
+        panic!("expected RoutineTriggered, got {event:?}");
     };
-    assert_eq!(triggered.payload.automation_id, id(AUTOMATION_ID));
-    assert_eq!(triggered.payload.trigger_type, AutomationTriggerType::Cron);
+    assert_eq!(triggered.payload.routine_id, id(ROUTINE_ID));
+    assert_eq!(triggered.payload.trigger_type, RoutineTriggerType::Cron);
     assert_eq!(
         triggered.payload.slot.as_deref(),
         Some("2026-10-05T22:00:00Z")
@@ -722,9 +720,9 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
         json!({
             "id": format!("evt_{reason}"),
             "timestamp": "2026-10-05T22:00:01Z",
-            "event_name": "introspection.automation.skipped",
+            "event_name": "introspection.routines.skipped",
             "payload": {
-                "automation_id": AUTOMATION_ID,
+                "routine_id": ROUTINE_ID,
                 "trigger_type": "manual",
                 "slot": "2026-10-05T22:00:00Z",
                 "task_id": TASK_ID,
@@ -734,10 +732,7 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
     };
     Mock::given(method("GET"))
         .and(path("/v1/events"))
-        .and(query_param(
-            "event_name",
-            "introspection.automation.skipped",
-        ))
+        .and(query_param("event_name", "introspection.routines.skipped"))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(
             vec![skipped("target_busy"), skipped("a_reason_from_the_future")],
             None,
@@ -748,7 +743,7 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
     let events = Events::new(build_http(&server));
     let found: Vec<_> = events
         .list(&EventListParams::new(
-            IntrospectionEventName::AutomationSkipped,
+            IntrospectionEventName::RoutineSkipped,
         ))
         .unwrap()
         .collect()
@@ -757,33 +752,33 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
     let reasons: Vec<_> = found
         .iter()
         .map(|event| match event.as_ref().unwrap() {
-            Event::AutomationSkipped(skipped) => {
-                assert_eq!(skipped.payload.trigger_type, AutomationTriggerType::Manual);
+            Event::RoutineSkipped(skipped) => {
+                assert_eq!(skipped.payload.trigger_type, RoutineTriggerType::Manual);
                 assert_eq!(skipped.payload.task_id, Some(id(TASK_ID)));
                 skipped.payload.reason.clone()
             }
-            other => panic!("expected AutomationSkipped, got {other:?}"),
+            other => panic!("expected RoutineSkipped, got {other:?}"),
         })
         .collect();
     assert_eq!(
         reasons,
         vec![
-            AutomationSkipReason::TargetBusy,
-            AutomationSkipReason::Other("a_reason_from_the_future".into()),
+            RoutineSkipReason::TargetBusy,
+            RoutineSkipReason::Other("a_reason_from_the_future".into()),
         ]
     );
 }
 
 #[test]
-fn automation_event_names_round_trip() {
+fn routine_event_names_round_trip() {
     for (name, wire) in [
         (
-            IntrospectionEventName::AutomationTriggered,
-            "introspection.automation.triggered",
+            IntrospectionEventName::RoutineTriggered,
+            "introspection.routines.triggered",
         ),
         (
-            IntrospectionEventName::AutomationSkipped,
-            "introspection.automation.skipped",
+            IntrospectionEventName::RoutineSkipped,
+            "introspection.routines.skipped",
         ),
     ] {
         assert_eq!(name.as_str(), wire);

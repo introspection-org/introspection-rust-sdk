@@ -378,7 +378,7 @@ pub struct Task {
     #[serde(default)]
     pub member_id: Option<Uuid>,
     #[serde(default)]
-    pub automation_id: Option<Uuid>,
+    pub routine_id: Option<Uuid>,
     #[serde(default)]
     pub runtime_id: Option<Uuid>,
     #[serde(default)]
@@ -535,7 +535,7 @@ pub struct TaskListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub statuses: Option<Vec<TaskStatus>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub require_automation_id: Option<bool>,
+    pub require_routine_id: Option<bool>,
     /// Only tasks created for this runtime.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_id: Option<Uuid>,
@@ -4305,7 +4305,7 @@ fn default_bearer() -> String {
     "bearer".to_string()
 }
 
-// ----- automations (DP) ------------------------------------------------------
+// ----- routines (DP) ------------------------------------------------------
 
 open_wire_enum! {
     /// Where an MCP endpoint's tool discovery stands.
@@ -4318,8 +4318,8 @@ open_wire_enum! {
 }
 
 open_wire_enum! {
-    /// How an automation is triggered. Immutable after create.
-    pub enum AutomationTriggerType {
+    /// How a routine is triggered. Immutable after create.
+    pub enum RoutineTriggerType {
         /// Fires on `cron_schedule` (or `metadata.cron_schedules`).
         Cron => "cron",
         /// Runs by hand, or once at a client-set `next_trigger_at` (a one-off
@@ -4329,10 +4329,10 @@ open_wire_enum! {
 }
 
 open_wire_enum! {
-    /// A platform automation kind. An automation a person created has no kind
-    /// (`Automation::kind` is `None`); any value marks a platform automation.
+    /// A platform routine kind. A routine a person created has no kind
+    /// (`Routine::kind` is `None`); any value marks a platform routine.
     /// Immutable after create.
-    pub enum AutomationKind {
+    pub enum RoutineKind {
         /// The project's default check-in. Runs as an agent task, so it carries
         /// a `prompt`.
         ProjectCheckIn => "project_check_in",
@@ -4345,17 +4345,17 @@ open_wire_enum! {
 }
 
 open_wire_enum! {
-    /// A built-in condition evaluated before an automation runs.
-    pub enum AutomationConditionType {
+    /// A built-in condition evaluated before a routine runs.
+    pub enum RoutineConditionType {
         HasNewTasksSinceLastRun => "has_new_tasks_since_last_run",
         LastRunIssuesResolved => "last_run_issues_resolved",
-        NoLiveTaskForAutomation => "no_live_task_for_automation",
+        NoLiveTaskForRoutine => "no_live_task_for_routine",
     }
 }
 
 open_wire_enum! {
-    /// Outcome of one automation execution attempt.
-    pub enum AutomationExecutionStatus {
+    /// Outcome of one routine execution attempt.
+    pub enum RoutineExecutionStatus {
         Triggered => "triggered",
         Cancelled => "cancelled",
         Failed => "failed",
@@ -4364,9 +4364,9 @@ open_wire_enum! {
 }
 
 open_wire_enum! {
-    /// Why a trigger ran nothing (`introspection.automation.skipped`).
-    pub enum AutomationSkipReason {
-        AutomationDeleted => "automation_deleted",
+    /// Why a trigger ran nothing (`introspection.routines.skipped`).
+    pub enum RoutineSkipReason {
+        RoutineDeleted => "routine_deleted",
         ExecutionBlocked => "execution_blocked",
         ConditionsNotMet => "conditions_not_met",
         NoProductionRuntime => "no_production_runtime",
@@ -4380,19 +4380,19 @@ open_wire_enum! {
     }
 }
 
-/// One condition stored in an automation's metadata.
+/// One condition stored in a routine's metadata.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AutomationCondition {
+pub struct RoutineCondition {
     #[serde(rename = "type")]
-    pub condition_type: AutomationConditionType,
+    pub condition_type: RoutineConditionType,
     #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
 }
 
-impl AutomationCondition {
+impl RoutineCondition {
     /// A condition with no runtime group.
-    pub fn new(condition_type: AutomationConditionType) -> Self {
+    pub fn new(condition_type: RoutineConditionType) -> Self {
         Self {
             condition_type,
             runtime_group_id: None,
@@ -4400,15 +4400,15 @@ impl AutomationCondition {
     }
 }
 
-/// The typed shape of an automation's `metadata` object.
+/// The typed shape of a routine's `metadata` object.
 ///
 /// The runtime group is the top-level `runtime_group_id`; the API rejects it
 /// inside metadata, so there is no field for it here. Empty lists are not
 /// sent. On update the whole object replaces the stored one.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AutomationMetadata {
-    /// Repositories a task-run automation clones.
+pub struct RoutineMetadata {
+    /// Repositories a task-run routine clones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repositories: Vec<TaskRepoRequest>,
     /// Several cron expressions; `cron_schedule` is the single-schedule form.
@@ -4418,18 +4418,18 @@ pub struct AutomationMetadata {
     #[serde(default)]
     pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub conditions: Vec<AutomationCondition>,
+    pub conditions: Vec<RoutineCondition>,
     /// Every other key, kept as sent: metadata is free-form, and a key this
     /// type does not name survives a read-modify-write.
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
 }
 
-/// A stored automation: a prompt run as an agent task, or platform work when
-/// `kind` is set. The read model of every `/v1/automations` route.
+/// A stored routine: a prompt run as an agent task, or platform work when
+/// `kind` is set. The read model of every `/v1/routines` route.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Automation {
+pub struct Routine {
     pub id: Uuid,
     pub org_id: Uuid,
     pub project_id: Uuid,
@@ -4440,34 +4440,34 @@ pub struct Automation {
     pub description: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    pub trigger_type: AutomationTriggerType,
+    pub trigger_type: RoutineTriggerType,
     #[serde(default)]
     pub cron_schedule: Option<String>,
-    /// `None` for an automation a person created; a platform automation
+    /// `None` for a routine a person created; a platform routine
     /// carries its kind.
     #[serde(default)]
-    pub kind: Option<AutomationKind>,
+    pub kind: Option<RoutineKind>,
     #[serde(default)]
     pub prompt: Option<String>,
     /// The runtime group it runs on (or clusters); `None` for
-    /// [`AutomationKind::ObservationSynthesis`].
+    /// [`RoutineKind::ObservationSynthesis`].
     #[serde(default)]
     pub runtime_group_id: Option<Uuid>,
     /// The existing task each firing posts the prompt into; `None` creates a
     /// task per firing.
     #[serde(default)]
     pub task_id: Option<Uuid>,
-    /// The person who created it; `None` on a platform automation.
+    /// The person who created it; `None` on a platform routine.
     #[serde(default)]
     pub created_by_member_id: Option<Uuid>,
-    /// Why the scheduler will not run this automation, when it will not.
+    /// Why the scheduler will not run this routine, when it will not.
     #[serde(default)]
     pub execution_blocked_reason: Option<String>,
     /// Whether the caller may change it.
     #[serde(default)]
     pub can_manage: bool,
-    /// `operator` for one that runs as a task (a person's automation or
-    /// [`AutomationKind::ProjectCheckIn`]), `None` for one that runs on the
+    /// `operator` for one that runs as a task (a person's routine or
+    /// [`RoutineKind::ProjectCheckIn`]), `None` for one that runs on the
     /// platform's own workers.
     #[serde(default)]
     pub owner_role: Option<String>,
@@ -4479,8 +4479,8 @@ pub struct Automation {
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub last_triggered_at: Option<String>,
-    /// The next slot: derived from the schedule for a cron automation,
-    /// client-set for a one-off manual automation and cleared once that slot
+    /// The next slot: derived from the schedule for a cron routine,
+    /// client-set for a one-off manual routine and cleared once that slot
     /// fires.
     #[serde(default)]
     pub next_trigger_at: Option<String>,
@@ -4490,10 +4490,10 @@ fn default_true() -> bool {
     true
 }
 
-impl Automation {
+impl Routine {
     /// `metadata` decoded into its typed shape, or `None` when it is absent
     /// or does not fit.
-    pub fn typed_metadata(&self) -> Option<AutomationMetadata> {
+    pub fn typed_metadata(&self) -> Option<RoutineMetadata> {
         let metadata = self.metadata.as_ref()?;
         let object: serde_json::Map<String, serde_json::Value> = metadata
             .iter()
@@ -4503,49 +4503,49 @@ impl Automation {
     }
 }
 
-/// `POST /v1/automations` body. Build with [`Self::new`] and struct-update
+/// `POST /v1/routines` body. Build with [`Self::new`] and struct-update
 /// syntax for the rest.
 ///
-/// A one-off reminder is a [`AutomationTriggerType::Manual`] automation with a
-/// future `next_trigger_at`; a cron automation derives its own slots and must
+/// A one-off reminder is a [`RoutineTriggerType::Manual`] routine with a
+/// future `next_trigger_at`; a cron routine derives its own slots and must
 /// not send one.
 #[derive(Debug, Clone, Serialize)]
-pub struct AutomationCreateParams {
+pub struct RoutineCreateParams {
     pub name: String,
-    pub trigger_type: AutomationTriggerType,
+    pub trigger_type: RoutineTriggerType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Required for a cron automation.
+    /// Required for a cron routine.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron_schedule: Option<String>,
-    /// Omit for a person's own automation, which then needs `prompt`.
+    /// Omit for a person's own routine, which then needs `prompt`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<AutomationKind>,
+    pub kind: Option<RoutineKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
-    /// Required unless `kind` is [`AutomationKind::ObservationSynthesis`],
+    /// Required unless `kind` is [`RoutineKind::ObservationSynthesis`],
     /// which must omit it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
-    /// An existing task each firing posts the prompt into. Only an automation
+    /// An existing task each firing posts the prompt into. Only a routine
     /// without a `kind` can set it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<Uuid>,
-    /// RFC 3339 timestamp with an offset: a manual automation's one-off slot,
+    /// RFC 3339 timestamp with an offset: a manual routine's one-off slot,
     /// which must be in the future.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_trigger_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<AutomationMetadata>,
+    pub metadata: Option<RoutineMetadata>,
     /// Defaults to `true` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }
 
-impl AutomationCreateParams {
+impl RoutineCreateParams {
     /// Create params with the required fields set and every optional field
     /// unset. Combine with struct-update syntax.
-    pub fn new(name: impl Into<String>, trigger_type: AutomationTriggerType) -> Self {
+    pub fn new(name: impl Into<String>, trigger_type: RoutineTriggerType) -> Self {
         Self {
             name: name.into(),
             trigger_type,
@@ -4562,11 +4562,11 @@ impl AutomationCreateParams {
     }
 }
 
-/// `PATCH /v1/automations/{id}` body. Only set fields are sent and `None`
+/// `PATCH /v1/routines/{id}` body. Only set fields are sent and `None`
 /// leaves a field as it is, so nothing can be cleared. `kind` and
 /// `trigger_type` are immutable; `metadata` replaces the stored object.
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct AutomationUpdateParams {
+pub struct RoutineUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4575,35 +4575,35 @@ pub struct AutomationUpdateParams {
     pub cron_schedule: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
-    /// Moves an automation that runs as a task to another runtime group.
+    /// Moves a routine that runs as a task to another runtime group.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_group_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<Uuid>,
-    /// Schedules, moves or re-arms a manual automation's one-off slot (RFC
+    /// Schedules, moves or re-arms a manual routine's one-off slot (RFC
     /// 3339 with an offset, in the future).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_trigger_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<AutomationMetadata>,
+    pub metadata: Option<RoutineMetadata>,
     /// `false` pauses and keeps the slot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }
 
-/// Filters supported by `GET /v1/automations`.
+/// Filters supported by `GET /v1/routines`.
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct AutomationListParams {
+pub struct RoutineListParams {
     #[serde(flatten)]
     pub pagination: PaginationParams,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<AutomationKind>,
+    pub kind: Option<RoutineKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// `true`: only automations with a next slot; `false`: only those without.
+    /// `true`: only routines with a next slot; `false`: only those without.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled: Option<bool>,
-    /// Only automations that post into this task. Not served until
+    /// Only routines that post into this task. Not served until
     /// introspection-cloud#3137 ships; a server without it ignores the
     /// parameter and returns the unfiltered list.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4614,15 +4614,15 @@ pub struct AutomationListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// `POST /v1/automations/{id}/trigger` body, sent by
-/// [`Automations::trigger_with`](crate::Automations::trigger_with). The
-/// default sends `{}`, the same as [`Automations::trigger`](crate::Automations::trigger).
+/// `POST /v1/routines/{id}/trigger` body, sent by
+/// [`Routines::trigger_with`](crate::Routines::trigger_with). The
+/// default sends `{}`, the same as [`Routines::trigger`](crate::Routines::trigger).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AutomationTriggerParams {
-    /// Conversations to synthesise from instead of the automation's own
+pub struct RoutineTriggerParams {
+    /// Conversations to synthesise from instead of the routine's own
     /// selection, at most 100. Only an
-    /// [`AutomationKind::ObservationSynthesis`] automation takes it; any
+    /// [`RoutineKind::ObservationSynthesis`] routine takes it; any
     /// other kind answers `422` when it is sent. A conversation the caller
     /// cannot read answers `404`, and one whose turn is still running `409`.
     /// Not sent when empty.
@@ -4630,37 +4630,37 @@ pub struct AutomationTriggerParams {
     pub conversation_ids: Vec<String>,
 }
 
-/// `POST /v1/automations/{id}/trigger` response. A `skipped` status carries
+/// `POST /v1/routines/{id}/trigger` response. A `skipped` status carries
 /// its `reason` and records no event.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AutomationTriggerResponse {
-    pub status: AutomationExecutionStatus,
-    pub automation_id: Uuid,
+pub struct RoutineTriggerResponse {
+    pub status: RoutineExecutionStatus,
+    pub routine_id: Uuid,
     /// The task created, or posted into.
     #[serde(default)]
     pub task_id: Option<Uuid>,
     #[serde(default)]
     pub reason: Option<String>,
-    /// The run started, for an [`AutomationKind::ObservationClustering`]
-    /// automation. `None` for other kinds and from a server that predates it.
+    /// The run started, for a [`RoutineKind::ObservationClustering`]
+    /// routine. `None` for other kinds and from a server that predates it.
     #[serde(default)]
     pub run_id: Option<Uuid>,
-    /// [`AutomationKind::ObservationSynthesis`] only: the conversations sent
+    /// [`RoutineKind::ObservationSynthesis`] only: the conversations sent
     /// to the synthesis queue. Each one later gets an
     /// `introspection.observation_synthesis.completed` event. `None` for other
     /// kinds and from a server that predates it.
     #[serde(default)]
     pub enqueued: Option<u64>,
-    /// [`AutomationKind::ObservationSynthesis`] triggered with
-    /// [`AutomationTriggerParams::conversation_ids`] only: what was queued,
+    /// [`RoutineKind::ObservationSynthesis`] triggered with
+    /// [`RoutineTriggerParams::conversation_ids`] only: what was queued,
     /// per conversation. `None` otherwise and from a server that predates it.
     #[serde(default)]
     pub conversations: Option<Vec<EnqueuedConversation>>,
 }
 
 /// A conversation a synthesis trigger queued, and the end it queued it at
-/// ([`AutomationTriggerResponse::conversations`]).
+/// ([`RoutineTriggerResponse::conversations`]).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct EnqueuedConversation {
     pub conversation_id: String,
@@ -7290,11 +7290,11 @@ pub enum IntrospectionEventName {
     Issue,
     Pattern,
     PatternAssignment,
-    /// One automation trigger that ran.
-    AutomationTriggered,
-    /// One scheduled automation trigger that ran nothing. Project-owned, so
+    /// One routine trigger that ran.
+    RoutineTriggered,
+    /// One scheduled routine trigger that ran nothing. Project-owned, so
     /// readable only with project-wide telemetry access.
-    AutomationSkipped,
+    RoutineSkipped,
     /// A family added after this SDK was released. Keeping the wire value
     /// makes the [`Event::Unknown`] response fallback reachable in practice.
     Unknown(String),
@@ -7313,8 +7313,8 @@ impl IntrospectionEventName {
             Self::Issue => "introspection.issue",
             Self::Pattern => "introspection.pattern",
             Self::PatternAssignment => "introspection.pattern.assignment",
-            Self::AutomationTriggered => "introspection.automation.triggered",
-            Self::AutomationSkipped => "introspection.automation.skipped",
+            Self::RoutineTriggered => "introspection.routines.triggered",
+            Self::RoutineSkipped => "introspection.routines.skipped",
             Self::Unknown(value) => value,
         }
     }
@@ -7339,8 +7339,8 @@ impl<'de> Deserialize<'de> for IntrospectionEventName {
             "introspection.issue" => Self::Issue,
             "introspection.pattern" => Self::Pattern,
             "introspection.pattern.assignment" => Self::PatternAssignment,
-            "introspection.automation.triggered" => Self::AutomationTriggered,
-            "introspection.automation.skipped" => Self::AutomationSkipped,
+            "introspection.routines.triggered" => Self::RoutineTriggered,
+            "introspection.routines.skipped" => Self::RoutineSkipped,
             _ => Self::Unknown(value),
         })
     }
@@ -7529,7 +7529,7 @@ pub enum ObservationSynthesisStatus {
 /// one queued conversation ended, even with no observations (stream family).
 /// The conversation is the event's `conversation_id`. A trigger with
 /// `conversation_ids` reports how many it queued in
-/// [`AutomationTriggerResponse::enqueued`]; each gets one of these events.
+/// [`RoutineTriggerResponse::enqueued`]; each gets one of these events.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ObservationSynthesisCompletedPayload {
@@ -7810,16 +7810,16 @@ impl IssueActivityPayload {
     }
 }
 
-/// `introspection.automation.triggered` payload — one automation trigger
+/// `introspection.routines.triggered` payload — one routine trigger
 /// that ran (stream family, owned by the task's member).
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AutomationTriggeredPayload {
-    pub automation_id: Uuid,
-    pub automation_name: String,
+pub struct RoutineTriggeredPayload {
+    pub routine_id: Uuid,
+    pub routine_name: String,
     #[serde(default)]
     pub prompt: Option<String>,
-    pub trigger_type: AutomationTriggerType,
+    pub trigger_type: RoutineTriggerType,
     /// The `next_trigger_at` a scheduled trigger claimed; `None` for a hand
     /// trigger.
     #[serde(default)]
@@ -7836,19 +7836,19 @@ pub struct AutomationTriggeredPayload {
     pub triggered_by_member_id: Option<Uuid>,
 }
 
-/// `introspection.automation.skipped` payload — one scheduled automation
+/// `introspection.routines.skipped` payload — one scheduled routine
 /// trigger that ran nothing (stream family, project-owned).
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AutomationSkippedPayload {
-    pub automation_id: Uuid,
-    pub trigger_type: AutomationTriggerType,
+pub struct RoutineSkippedPayload {
+    pub routine_id: Uuid,
+    pub trigger_type: RoutineTriggerType,
     #[serde(default)]
     pub slot: Option<String>,
-    /// Set only when the automation targets an existing task.
+    /// Set only when the routine targets an existing task.
     #[serde(default)]
     pub task_id: Option<Uuid>,
-    pub reason: AutomationSkipReason,
+    pub reason: RoutineSkipReason,
 }
 
 /// Whole-event envelope + typed payload per family.
@@ -7861,8 +7861,8 @@ pub type FeedbackEvent = TypedEvent<FeedbackPayload>;
 pub type AnnotationEvent = TypedEvent<AnnotationPayload>;
 pub type JudgementEvent = TypedEvent<JudgementPayload>;
 pub type IssueActivityEvent = TypedEvent<IssueActivityPayload>;
-pub type AutomationTriggeredEvent = TypedEvent<AutomationTriggeredPayload>;
-pub type AutomationSkippedEvent = TypedEvent<AutomationSkippedPayload>;
+pub type RoutineTriggeredEvent = TypedEvent<RoutineTriggeredPayload>;
+pub type RoutineSkippedEvent = TypedEvent<RoutineSkippedPayload>;
 
 /// One event from `GET /v1/events` — a discriminated union of the
 /// canonical platform families, tagged by the top-level `event_name`.
@@ -7893,10 +7893,10 @@ pub enum Event {
     Pattern(PatternEvent),
     #[serde(rename = "introspection.pattern.assignment")]
     PatternAssignment(PatternAssignmentEvent),
-    #[serde(rename = "introspection.automation.triggered")]
-    AutomationTriggered(AutomationTriggeredEvent),
-    #[serde(rename = "introspection.automation.skipped")]
-    AutomationSkipped(AutomationSkippedEvent),
+    #[serde(rename = "introspection.routines.triggered")]
+    RoutineTriggered(RoutineTriggeredEvent),
+    #[serde(rename = "introspection.routines.skipped")]
+    RoutineSkipped(RoutineSkippedEvent),
     /// Forward-compatible escape hatch: a row whose `event_name` this SDK
     /// build doesn't recognise. Carries the raw record verbatim.
     #[serde(untagged)]
@@ -7920,8 +7920,8 @@ impl Event {
             Self::Issue(_) => Some(IntrospectionEventName::Issue),
             Self::Pattern(_) => Some(IntrospectionEventName::Pattern),
             Self::PatternAssignment(_) => Some(IntrospectionEventName::PatternAssignment),
-            Self::AutomationTriggered(_) => Some(IntrospectionEventName::AutomationTriggered),
-            Self::AutomationSkipped(_) => Some(IntrospectionEventName::AutomationSkipped),
+            Self::RoutineTriggered(_) => Some(IntrospectionEventName::RoutineTriggered),
+            Self::RoutineSkipped(_) => Some(IntrospectionEventName::RoutineSkipped),
             Self::Unknown(_) => None,
         }
     }
@@ -7964,9 +7964,9 @@ pub struct EventListParams {
     pub trace_id: Option<String>,
     pub span_id: Option<String>,
     pub owner_key: Option<String>,
-    /// Automation triggers and skips of one automation.
-    pub automation_id: Option<Uuid>,
-    /// Automation triggers and skips: the task created or posted into.
+    /// Routine triggers and skips of one routine.
+    pub routine_id: Option<Uuid>,
+    /// Routine triggers and skips: the task created or posted into.
     pub task_id: Option<Uuid>,
     /// Judgements of one judge.
     pub judge_id: Option<Uuid>,
@@ -8015,7 +8015,7 @@ impl EventListParams {
             trace_id: None,
             span_id: None,
             owner_key: None,
-            automation_id: None,
+            routine_id: None,
             task_id: None,
             judge_id: None,
             issue_id: None,
@@ -8071,7 +8071,7 @@ impl EventListParams {
         put_str(&mut obj, "trace_id", self.trace_id.as_ref());
         put_str(&mut obj, "span_id", self.span_id.as_ref());
         put_str(&mut obj, "owner_key", self.owner_key.as_ref());
-        put_uuid(&mut obj, "automation_id", self.automation_id);
+        put_uuid(&mut obj, "routine_id", self.routine_id);
         put_uuid(&mut obj, "task_id", self.task_id);
         put_uuid(&mut obj, "judge_id", self.judge_id);
         put_uuid(&mut obj, "issue_id", self.issue_id);
@@ -9199,18 +9199,18 @@ mod tests {
     fn extra_event_names_follow_the_family_as_repeated_event_name() {
         let wire = EventListParams {
             extra_event_names: Some(vec![
-                IntrospectionEventName::AutomationSkipped,
+                IntrospectionEventName::RoutineSkipped,
                 IntrospectionEventName::Issue,
             ]),
-            ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+            ..EventListParams::new(IntrospectionEventName::RoutineTriggered)
         }
         .to_wire()
         .unwrap();
         assert_eq!(
             wire["event_name"],
             json!([
-                "introspection.automation.triggered",
-                "introspection.automation.skipped",
+                "introspection.routines.triggered",
+                "introspection.routines.skipped",
                 "introspection.issue"
             ])
         );

@@ -1,16 +1,16 @@
 //! Steps 14 to 16: a trial graded by the recipe's judge, an experiment over
-//! two versions, commands in the trial's sandbox, and an automation.
+//! two versions, commands in the trial's sandbox, and a routine.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt as _;
 use introspection_sdk::{
-    AutomationCreateParams, AutomationListParams, AutomationMetadata, AutomationTriggerType,
-    AutomationUpdateParams, EventListParams, ExperimentListParams, ImageCreate, ImageListParams,
-    ImageSource, IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams,
-    RunRequest, RunnerIdentity, Task, TaskCommand, TaskCommandListParams, TaskCommandSpec,
-    TaskCommandStatus, TaskCreate, TaskKind, TaskStatus,
+    EventListParams, ExperimentListParams, ImageCreate, ImageListParams, ImageSource,
+    IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams,
+    RoutineCreateParams, RoutineListParams, RoutineMetadata, RoutineTriggerType,
+    RoutineUpdateParams, RunRequest, RunnerIdentity, Task, TaskCommand, TaskCommandListParams,
+    TaskCommandSpec, TaskCommandStatus, TaskCreate, TaskKind, TaskStatus,
 };
 use serde_json::{json, Value};
 
@@ -495,16 +495,16 @@ pub async fn commands(w: &mut Walk) {
     }
 }
 
-pub async fn automations(w: &mut Walk) {
+pub async fn routines(w: &mut Walk) {
     let sa = w.sa();
-    let automation = sa
-        .automations()
-        .create(&AutomationCreateParams {
-            name: walk::AUTOMATION_NAME.into(),
-            trigger_type: AutomationTriggerType::Manual,
+    let routine = sa
+        .routines()
+        .create(&RoutineCreateParams {
+            name: walk::ROUTINE_NAME.into(),
+            trigger_type: RoutineTriggerType::Manual,
             prompt: Some(w.settings.second_turn()),
             runtime_group_id: set(&w.runtime, "the runtime").runtime_group_id,
-            // An automation its owner creates posts into that owner's own
+            // A routine its owner creates posts into that owner's own
             // task; the first task was archived and unarchived, which the
             // trigger still refuses, so the trial is the one it posts into.
             task_id: Some(set(&w.eval_task, "the trial").id),
@@ -516,15 +516,15 @@ pub async fn automations(w: &mut Walk) {
             enabled: None,
         })
         .await
-        .expect("create the automation");
-    assert_stable!(automation, @r#"
+        .expect("create the routine");
+    assert_stable!(routine, @r#"
     {
       "can_manage": true,
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
       "enabled": true,
       "id": "[uuid]",
-      "name": "The walk's automation",
+      "name": "The walk's routine",
       "org_id": "[uuid]",
       "owner_role": "operator",
       "project_id": "[uuid]",
@@ -537,30 +537,30 @@ pub async fn automations(w: &mut Walk) {
     }
     "#);
     let triggered = sa
-        .automations()
-        .trigger(automation.id)
+        .routines()
+        .trigger(routine.id)
         .await
-        .expect("trigger the automation");
+        .expect("trigger the routine");
     assert_stable!(triggered, @r#"
     {
-      "automation_id": "[uuid]",
+      "routine_id": "[uuid]",
       "status": "triggered",
       "task_id": "[uuid]"
     }
     "#);
-    sa.automations()
-        .get(automation.id)
+    sa.routines()
+        .get(routine.id)
         .await
-        .expect("read the automation");
+        .expect("read the routine");
     let described = sa
-        .automations()
+        .routines()
         .update(
-            automation.id,
-            &AutomationUpdateParams {
+            routine.id,
+            &RoutineUpdateParams {
                 description: Some("triggered once by the walk".into()),
                 // A member may set only `cron_schedules` and `timezone`; an
                 // administrator's free-form keys would land in `other`.
-                metadata: Some(AutomationMetadata {
+                metadata: Some(RoutineMetadata {
                     timezone: Some("UTC".into()),
                     ..Default::default()
                 }),
@@ -568,28 +568,28 @@ pub async fn automations(w: &mut Walk) {
             },
         )
         .await
-        .expect("describe the automation");
+        .expect("describe the routine");
     let metadata = described.typed_metadata().expect("typed metadata");
     assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
     let listed = sa
-        .automations()
-        .list(&AutomationListParams::default())
+        .routines()
+        .list(&RoutineListParams::default())
         .collect_all(0)
         .await
-        .expect("list automations");
-    assert!(listed.iter().any(|a| a.id == automation.id));
+        .expect("list routines");
+    assert!(listed.iter().any(|a| a.id == routine.id));
     // Its triggers and skips in one page: the two families share a row shape
     // and a visibility class, so the server merges them. The trigger's event
     // lands asynchronously, so the page is read, not counted.
     let params = EventListParams {
-        extra_event_names: Some(vec![IntrospectionEventName::AutomationSkipped]),
-        automation_id: Some(automation.id),
-        ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+        extra_event_names: Some(vec![IntrospectionEventName::RoutineSkipped]),
+        routine_id: Some(routine.id),
+        ..EventListParams::new(IntrospectionEventName::RoutineTriggered)
     };
     sa.events()
         .list(&params)
         .expect("an events paginator")
         .collect_all(0)
         .await
-        .expect("the automation's triggers and skips");
+        .expect("the routine's triggers and skips");
 }

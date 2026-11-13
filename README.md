@@ -135,7 +135,7 @@ interrupts, and cancellation.
 `IntrospectionClient` and `Runner` expose one Data Plane surface, enforced by
 the `DataPlaneResources` trait: `tasks()` (with `.runs` and `.commands`),
 `files()`, `shares()`, `conversations()`, `events()`, `metrics()`,
-`automations()`, `connections()` and `images()`. On the client they act with the client's token; on a runner, with
+`routines()`, `connections()` and `images()`. On the client they act with the client's token; on a runner, with
 its session token. Both carry the methods inherently, so a call needs no
 import, and generic code can take either:
 
@@ -158,7 +158,7 @@ connected_apps(&runner).await;
 
 The token's scopes decide which calls succeed. A runner a member opens for
 themself (no asserted `identity`, no explicit `scope`) carries
-`automations:read` / `automations:write` and `connections:read` /
+`routines:read` / `routines:write` and `connections:read` /
 `connections:write` / `connections:delete` on top of the sandbox set (tasks, files, shares, conversations, events,
 metrics). A runner opened for an asserted end customer carries the sandbox set,
 or what its `RunRequest::scope` asks for.
@@ -391,61 +391,61 @@ The list filters are `tag` (one tag) and `metadata` (up to 16 pairs, all of
 which must match). The members routes are Control Plane routes, so they need
 an org credential with `members:read` / `members:write` / `members:manage`.
 
-## Schedule automations
+## Schedule routines
 
-An automation runs a prompt as an agent task on a schedule, or once at a set
+A routine runs a prompt as an agent task on a schedule, or once at a set
 time. Set `task_id` to post each firing into an existing task instead of
-creating a new one. A one-off reminder is a `Manual` automation with a future
+creating a new one. A one-off reminder is a `Manual` routine with a future
 `next_trigger_at`:
 
 ```rust
 use introspection_sdk::{
-    AutomationCreateParams, AutomationListParams, AutomationMetadata, AutomationTriggerType,
-    AutomationUpdateParams, EventListParams, IntrospectionEventName,
+    EventListParams, IntrospectionEventName, RoutineCreateParams, RoutineListParams,
+    RoutineMetadata, RoutineTriggerType, RoutineUpdateParams,
 };
 
-let reminder = client.automations().create(&AutomationCreateParams {
+let reminder = client.routines().create(&RoutineCreateParams {
     prompt: Some("Follow up on the open invoice.".into()),
     runtime_group_id: Some(runtime_group_id),
     task_id: Some(task_id),
     next_trigger_at: Some("2026-10-06T09:00:00+10:00".into()),
-    ..AutomationCreateParams::new("Invoice reminder", AutomationTriggerType::Manual)
+    ..RoutineCreateParams::new("Invoice reminder", RoutineTriggerType::Manual)
 }).await?;
 
 // Only the fields you set are sent; `metadata` replaces the stored object.
-client.automations().update(reminder.id, &AutomationUpdateParams {
-    metadata: Some(AutomationMetadata {
+client.routines().update(reminder.id, &RoutineUpdateParams {
+    metadata: Some(RoutineMetadata {
         timezone: Some("Australia/Sydney".into()),
         ..Default::default()
     }),
     ..Default::default()
 }).await?;
 
-let run = client.automations().trigger(reminder.id).await?;
+let run = client.routines().trigger(reminder.id).await?;
 println!("{} {:?}", run.status, run.task_id);
 
-// The automations that post into one task, and what each firing did.
-let mut automations = client.automations().list(&AutomationListParams {
+// The routines that post into one task, and what each firing did.
+let mut routines = client.routines().list(&RoutineListParams {
     task_id: Some(task_id),
     ..Default::default()
 });
 let fired = client.events().list(&EventListParams {
-    automation_id: Some(reminder.id),
-    ..EventListParams::new(IntrospectionEventName::AutomationTriggered)
+    routine_id: Some(reminder.id),
+    ..EventListParams::new(IntrospectionEventName::RoutineTriggered)
 })?;
 ```
 
-`Automation::kind` is `None` for an automation a person created. A platform
-automation carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
-`ObservationClustering`. A kind added later decodes as `AutomationKind::Other`.
+`Routine::kind` is `None` for a routine a person created. A platform
+routine carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
+`ObservationClustering`. A kind added later decodes as `RoutineKind::Other`.
 A scheduled firing that ran nothing is recorded as an
-`introspection.automation.skipped` event with an `AutomationSkipReason`.
+`introspection.routines.skipped` event with a `RoutineSkipReason`.
 
-`runner.automations()` is the same API on the runner's token. These are Data
-Plane routes (`automations:read` / `automations:write`), which a runner a
+`runner.routines()` is the same API on the runner's token. These are Data
+Plane routes (`routines:read` / `routines:write`), which a runner a
 member opens for themself carries. The API serves them to administrators only
 today and answers 403 to anyone else. introspection-cloud#3137 opens them to
-members for their own automations that post into one of their own tasks. The `task_id` list filter arrives with that
+members for their own routines that post into one of their own tasks. The `task_id` list filter arrives with that
 change, so it is not served yet.
 
 ## Connect a member's apps

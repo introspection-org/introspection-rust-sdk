@@ -4,7 +4,7 @@
 //! independent surfaces, mix-and-match as needed:
 //!
 //! 1. [`IntrospectionClient`] — REST surface (`runtimes`, `experiments`,
-//!    `Runner`, `tasks`, `files`, `shares`, `automations`, and telemetry
+//!    `Runner`, `tasks`, `files`, `shares`, `routines`, and telemetry
 //!    reads). Always available, no OpenTelemetry dependency. No feature flag
 //!    required. [`auth`] mints the token it takes when you have OAuth
 //!    credentials rather than an API key, and [`EmailCodeAuth`] signs a
@@ -125,12 +125,7 @@ pub use api::{
     ApiKeyUpdateParams, Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
     ApplicationIdpCreateParams, ApplicationIdpProvider, ApplicationIdpStatus, ApplicationKey,
     ApplicationListParams, ApplicationSecret, ApplicationSecretCreateParams,
-    ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, Automation,
-    AutomationCondition, AutomationConditionType, AutomationCreateParams,
-    AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
-    AutomationSkipReason, AutomationSkippedEvent, AutomationSkippedPayload,
-    AutomationTriggerParams, AutomationTriggerResponse, AutomationTriggerType,
-    AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams, BranchesQuery,
+    ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, BranchesQuery,
     BusinessMemberCreate, ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload,
     CommitsQuery, ConnectPage, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
     ConnectionMissionConstraints, ConnectionOwner, ConnectionStatus, ConnectionSubjectType,
@@ -183,7 +178,11 @@ pub use api::{
     RepositoryCommitFileStatus, RepositoryCommitPerson, RepositoryContent, RepositoryDirectory,
     RepositoryEntry, RepositoryEntryType, RepositoryFile, RepositoryListParams,
     RepositoryMergeCommit, RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus,
-    ResourceShare, ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunFrame, RunHandle,
+    ResourceShare, ResumeEntry, Routine, RoutineCondition, RoutineConditionType,
+    RoutineCreateParams, RoutineExecutionStatus, RoutineKind, RoutineListParams, RoutineMetadata,
+    RoutineSkipReason, RoutineSkippedEvent, RoutineSkippedPayload, RoutineTriggerParams,
+    RoutineTriggerResponse, RoutineTriggerType, RoutineTriggeredEvent, RoutineTriggeredPayload,
+    RoutineUpdateParams, RunCaller, RunCallerLibrary, RunCallerPage, RunFrame, RunHandle,
     RunRequest, RunnerContext, RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime,
     RuntimeListParams, RuntimeLlmMode, RuntimeMcpRequirement, RuntimePeering,
     RuntimePeeringListParams, RuntimeSettingListParams, RuntimeUpdateParams, SeatTier, Secret,
@@ -233,10 +232,10 @@ pub use resources::tags::{
 };
 pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
-    Applications, Approvals, Automations, Connectors, Credentials, Endpoints, ExperimentHandle,
-    Experiments, Images, Integrations, IssueComments, Issues, Judges, MemberConnections, Members,
-    Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
-    RepositoryContents, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
+    Applications, Approvals, Connectors, Credentials, Endpoints, ExperimentHandle, Experiments,
+    Images, Integrations, IssueComments, Issues, Judges, MemberConnections, Members, Missions,
+    Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
+    RepositoryContents, Routines, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};

@@ -14,7 +14,7 @@
 //!   [`Conversation`] resource; item reads return OTel GenAI spans
 //!   ([`GenAiSpan`]).
 //!
-//! These, with [`crate::Automations`] and
+//! These, with [`crate::Routines`] and
 //! [`crate::MemberConnections`], make up [`crate::DataPlaneResources`], which both
 //! [`crate::IntrospectionClient`] and [`crate::Runner`] implement.
 //!
@@ -222,12 +222,7 @@ pub use schemas::{
     ApiKeyUpdateParams, Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
     ApplicationIdpCreateParams, ApplicationIdpProvider, ApplicationIdpStatus, ApplicationKey,
     ApplicationListParams, ApplicationSecret, ApplicationSecretCreateParams,
-    ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, Automation,
-    AutomationCondition, AutomationConditionType, AutomationCreateParams,
-    AutomationExecutionStatus, AutomationKind, AutomationListParams, AutomationMetadata,
-    AutomationSkipReason, AutomationSkippedEvent, AutomationSkippedPayload,
-    AutomationTriggerParams, AutomationTriggerResponse, AutomationTriggerType,
-    AutomationTriggeredEvent, AutomationTriggeredPayload, AutomationUpdateParams, BranchesQuery,
+    ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, BranchesQuery,
     BusinessMemberCreate, ClientRegistrationMethod, ClusteringRunEvent, ClusteringRunPayload,
     CommitsQuery, ConnectPage, ConnectionAuthorizationPending, ConnectionBrokerSubjectType,
     ConnectionMissionConstraints, ConnectionOwner, ConnectionStatus, ConnectionSubjectType,
@@ -274,19 +269,23 @@ pub use schemas::{
     RepositoryCommitPerson, RepositoryContent, RepositoryDirectory, RepositoryEntry,
     RepositoryEntryType, RepositoryFile, RepositoryListParams, RepositoryMergeCommit,
     RepositoryMergeCreate, RepositoryProvider, RepositoryProvisioningStatus, ResourceShare,
-    ResumeEntry, RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext,
-    RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode,
-    RuntimeMcpRequirement, RuntimePeering, RuntimePeeringListParams, RuntimeSettingListParams,
-    RuntimeUpdateParams, SeatTier, Secret, ShareCreate, ShareListParams, ShareResourceType,
-    ShareUpdate, SignInSettings, SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions,
-    TaskCancelResponse, TaskCommand, TaskCommandKind, TaskCommandListParams, TaskCommandSpec,
-    TaskCommandStatus, TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams,
-    TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse,
-    TaskRunResume, TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension,
-    TokenCreateParams, Trajectory, TrajectoryAssistantRecord, TrajectoryMetaRecord,
-    TrajectoryReasoningRecord, TrajectoryRecord, TrajectoryToolCall, TrajectoryToolRecord,
-    TrajectoryUserRecord, TypedEvent, Variable, VariableCreateParams, VariableKind,
-    VariableUpdateParams, WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs,
+    ResumeEntry, Routine, RoutineCondition, RoutineConditionType, RoutineCreateParams,
+    RoutineExecutionStatus, RoutineKind, RoutineListParams, RoutineMetadata, RoutineSkipReason,
+    RoutineSkippedEvent, RoutineSkippedPayload, RoutineTriggerParams, RoutineTriggerResponse,
+    RoutineTriggerType, RoutineTriggeredEvent, RoutineTriggeredPayload, RoutineUpdateParams,
+    RunCaller, RunCallerLibrary, RunCallerPage, RunRequest, RunnerContext, RunnerDeployment,
+    RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode, RuntimeMcpRequirement,
+    RuntimePeering, RuntimePeeringListParams, RuntimeSettingListParams, RuntimeUpdateParams,
+    SeatTier, Secret, ShareCreate, ShareListParams, ShareResourceType, ShareUpdate, SignInSettings,
+    SortDirection, SseEvent, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse,
+    TaskCommand, TaskCommandKind, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus,
+    TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
+    TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume,
+    TaskStatus, TaskUpdate, TelemetryGoalComponent, TimeDimension, TokenCreateParams, Trajectory,
+    TrajectoryAssistantRecord, TrajectoryMetaRecord, TrajectoryReasoningRecord, TrajectoryRecord,
+    TrajectoryToolCall, TrajectoryToolRecord, TrajectoryUserRecord, TypedEvent, Variable,
+    VariableCreateParams, VariableKind, VariableUpdateParams, WsAuthenticationDocs, WsFrameDocs,
+    WsMessageProtocolDocs,
 };
 // The project-authoring writes, behind the `authoring` feature.
 #[cfg(feature = "authoring")]

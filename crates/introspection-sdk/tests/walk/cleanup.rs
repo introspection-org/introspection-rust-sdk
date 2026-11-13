@@ -5,9 +5,9 @@
 use futures::StreamExt as _;
 use introspection_sdk::api::ApiResult;
 use introspection_sdk::{
-    ApiKeyDeleteParams, ApiKeyListParams, AutomationListParams, ConnectorListParams,
-    EndpointListParams, ExperimentListParams, FileListParams, IntrospectionClient,
-    RecipeListParams, RepositoryListParams, RuntimeListParams, RuntimeSettingListParams,
+    ApiKeyDeleteParams, ApiKeyListParams, ConnectorListParams, EndpointListParams,
+    ExperimentListParams, FileListParams, IntrospectionClient, RecipeListParams,
+    RepositoryListParams, RoutineListParams, RuntimeListParams, RuntimeSettingListParams,
     ShareListParams, ShareResourceType, StringOrUuid, TagKind, TaskListParams,
 };
 use uuid::Uuid;
@@ -30,15 +30,15 @@ pub async fn remove_walk_resources(w: &Walk, dp: &IntrospectionClient) {
     let member = w.member();
     let project = w.project_id();
     remove_api_keys(&owner, project).await;
-    let mut automations = member.automations().list(&AutomationListParams::default());
-    while let Some(a) = automations.next().await {
-        let a = a.expect("list automations");
-        if a.name == walk::AUTOMATION_NAME {
+    let mut routines = member.routines().list(&RoutineListParams::default());
+    while let Some(a) = routines.next().await {
+        let a = a.expect("list routines");
+        if a.name == walk::ROUTINE_NAME {
             member
-                .automations()
+                .routines()
                 .delete(a.id)
                 .await
-                .expect("delete automation");
+                .expect("delete routine");
         }
     }
     ignore_404(member.tags().delete(TagKind::Access, walk::TAG_NAME).await);

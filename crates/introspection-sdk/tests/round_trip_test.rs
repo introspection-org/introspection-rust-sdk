@@ -157,21 +157,13 @@ const TYPED: &[(&str, &str, Check)] = &[
         r"^/v1/applications/[^/]+/secrets$",
         round_trip::<ApplicationSecret>,
     ),
-    (
-        "GET",
-        r"^/v1/automations$",
-        round_trip::<Paginated<Automation>>,
-    ),
-    ("POST", r"^/v1/automations$", round_trip::<Automation>),
-    (
-        "GET|PATCH",
-        r"^/v1/automations/[^/]+$",
-        round_trip::<Automation>,
-    ),
+    ("GET", r"^/v1/routines$", round_trip::<Paginated<Routine>>),
+    ("POST", r"^/v1/routines$", round_trip::<Routine>),
+    ("GET|PATCH", r"^/v1/routines/[^/]+$", round_trip::<Routine>),
     (
         "POST",
-        r"^/v1/automations/[^/]+/trigger$",
-        round_trip::<AutomationTriggerResponse>,
+        r"^/v1/routines/[^/]+/trigger$",
+        round_trip::<RoutineTriggerResponse>,
     ),
     (
         "GET",
