@@ -7086,7 +7086,16 @@ impl ConversationItemInclude {
 #[derive(Debug, Clone, Default)]
 pub struct ConversationItemListParams {
     pub limit: Option<u32>,
+    /// The opaque `next` of an earlier page. A token from an
+    /// [`SortDirection::Asc`] read is only valid with `Asc` again, and the
+    /// paginator sends the same `direction` on every page.
     pub next: Option<String>,
+    /// Read order. Unset is the server default: newest-first, or forward from
+    /// the anchor of a `from_compaction` read. [`SortDirection::Asc`] reads
+    /// oldest-first from the conversation start; with `from_compaction` it
+    /// pages forward from the anchor and [`SortDirection::Desc`] backward from
+    /// it.
+    pub direction: Option<SortDirection>,
     pub start_date: Option<String>,
     pub end_date: Option<String>,
     pub include: Vec<ConversationItemInclude>,
@@ -9704,7 +9713,11 @@ impl ConversationExportInclude {
 /// Query params for `GET /v1/conversations/{id}/export`.
 ///
 /// The export is assembled server-side over the whole conversation, so there
-/// is no cursor or page bound here: every field filters what gets assembled.
+/// is no page bound here: every field but `direction` and `next` filters what
+/// gets assembled. Those two make the export resumable: an oldest-first export
+/// answers the cursor to resume after it, which
+/// [`Conversations::export_resumable`](crate::api::Conversations::export_resumable)
+/// returns.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ConversationExportParams {
     /// Agent selector: `"root"` for the depth-zero transcript, an exact agent
@@ -9736,6 +9749,20 @@ pub struct ConversationExportParams {
     /// Span expansions, sent as a repeated `include`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<ConversationExportInclude>,
+    /// Export order. [`SortDirection::Asc`] exports oldest-first, from the
+    /// conversation start (or after `next`) up to the latest item that existed
+    /// when the request began, and answers the cursor to resume after it.
+    /// Unset, a span export is newest-first. The trajectory formats export
+    /// oldest-first only, so the server answers `400` for
+    /// [`SortDirection::Desc`] with them or with `next`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<SortDirection>,
+    /// Resume an oldest-first export after this cursor: an earlier export's
+    /// `X-Next-Cursor`, or the `next` of an oldest-first item read.
+    /// Implies `direction=asc`. The cursor is opaque: pass it back exactly as
+    /// it was received.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
 }
 
 impl ConversationExportParams {
@@ -9764,6 +9791,12 @@ impl ConversationExportParams {
         for include in &self.include {
             push("include", Some(include.as_str().to_string()));
         }
+        push(
+            "direction",
+            self.direction
+                .map(|direction| direction.as_str().to_string()),
+        );
+        push("next", self.next.clone());
         query
     }
 }

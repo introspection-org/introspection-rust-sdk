@@ -126,6 +126,7 @@
 //! | `GET    /v1/shares/{id}` | [`Shares::get`] |
 //! | `PATCH  /v1/shares/{id}` | [`Shares::update`] |
 //! | `DELETE /v1/shares/{id}` | [`Shares::delete`] |
+//! | `GET /v1/conversations/{id}/export` | [`Conversations::export_resumable`] *(resume cursor)* / [`Conversations::export_stream`] |
 //! | `GET /v1/conversations/{id}/items` | [`ConversationItems::list`] *(stream or `next_page`)* |
 //! | `GET /v1/conversations/{id}/items/{item_id}` | [`ConversationItems::get`] |
 //!
@@ -299,4 +300,7 @@ pub use schemas::{
 pub use shares::Shares;
 pub use sse::{parse_sse_response, parse_sse_response_with_limit, DEFAULT_MAX_SSE_FRAME_BYTES};
 pub use tasks::{RunHandle, TaskCommands, TaskRuns, Tasks, MAX_COMMAND_WAIT_SECONDS};
-pub use telemetry::{ConversationExportFormat, Conversations, Events, Metrics};
+pub use telemetry::{
+    ConversationExport, ConversationExportFormat, Conversations, Events, Metrics,
+    NEXT_CURSOR_HEADER,
+};

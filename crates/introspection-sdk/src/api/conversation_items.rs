@@ -234,6 +234,11 @@ fn list_query(params: &ConversationItemListParams) -> Vec<(String, String)> {
     let mut query = Vec::new();
     push_opt(&mut query, "limit", params.limit);
     push_opt_ref(&mut query, "next", params.next.as_deref());
+    push_opt_ref(
+        &mut query,
+        "direction",
+        params.direction.map(|direction| direction.as_str()),
+    );
     push_opt_ref(&mut query, "start_date", params.start_date.as_deref());
     push_opt_ref(&mut query, "end_date", params.end_date.as_deref());
     for include in &params.include {
