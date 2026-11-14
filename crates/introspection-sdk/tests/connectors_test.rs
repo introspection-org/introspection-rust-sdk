@@ -15,7 +15,7 @@ use introspection_sdk::{
     ConnectionTokenParams, ConnectionTokenResult, ConnectorAppListParams, ConnectorAuthMode,
     ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
     ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams, Connectors, RunnerIdentity, WebhookAuth,
+    ConnectorUpdateParams, Connectors, RunnerIdentity, SigningSecretStatus, WebhookAuth,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -840,7 +840,9 @@ fn webhook_connector_json(signing_secret: Option<&str>) -> serde_json::Value {
         "requires_runtime": false,
         "metadata": { "webhook_auth": "bearer" },
         "webhook_auth": "bearer",
-        "previous_signing_secret_expires_at": null,
+        "signing_secrets": [
+            { "id": "1a2b3c4d", "created_at": "2026-11-13T00:00:00Z", "status": "current" },
+        ],
     });
     if let Some(secret) = signing_secret {
         value["signing_secret"] = json!(secret);
@@ -892,10 +894,13 @@ async fn a_webhook_connector_returns_its_secret_once_on_create() {
 }
 
 #[tokio::test]
-async fn rotate_signing_secret_patches_the_flag_and_reads_the_grace_period() {
+async fn rotate_signing_secret_patches_the_flag_and_lists_both_secrets() {
     let server = MockServer::start().await;
     let mut rotated = webhook_connector_json(Some("whsec_bmV3"));
-    rotated["previous_signing_secret_expires_at"] = json!("2026-11-14T00:00:00Z");
+    rotated["signing_secrets"] = json!([
+        { "id": "5e6f7a8b", "created_at": "2026-11-14T00:00:00Z", "status": "current" },
+        { "id": "1a2b3c4d", "created_at": "2026-11-13T00:00:00Z", "status": "previous" },
+    ]);
     Mock::given(method("PATCH"))
         .and(path(format!("/v1/connectors/{CONNECTOR_ID}")))
         .and(body_json(json!({ "rotate_signing_secret": true })))
@@ -913,9 +918,42 @@ async fn rotate_signing_secret_patches_the_flag_and_reads_the_grace_period() {
         connector.signing_secret.as_ref().map(|s| s.expose()),
         Some("whsec_bmV3")
     );
+    let secrets = connector.signing_secrets.unwrap();
     assert_eq!(
-        connector.previous_signing_secret_expires_at.as_deref(),
-        Some("2026-11-14T00:00:00Z")
+        secrets
+            .iter()
+            .map(|s| (s.id.as_str(), s.status.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("5e6f7a8b", SigningSecretStatus::Current),
+            ("1a2b3c4d", SigningSecretStatus::Previous),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn revoke_previous_signing_secret_patches_the_flag() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/connectors/{CONNECTOR_ID}")))
+        .and(body_json(json!({ "revoke_previous_signing_secret": true })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_connector_json(None)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let connector = Connectors::new(build_http(&server))
+        .revoke_previous_signing_secret(connector_id(), None)
+        .await
+        .unwrap();
+
+    assert!(connector.signing_secret.is_none());
+    let secrets = connector.signing_secrets.unwrap();
+    assert_eq!(secrets.len(), 1);
+    assert_eq!(secrets[0].status, SigningSecretStatus::Current);
+    assert_eq!(
+        secrets[0].created_at.as_deref(),
+        Some("2026-11-13T00:00:00Z")
     );
 }
 

@@ -14,7 +14,8 @@
 //! Beside its schedule and a manual trigger, a prompt routine that starts a
 //! task per run can run on events: its [`Routine::triggers`] listen to an
 //! integration (Slack, GitHub) or a project connector, such as a `webhook`
-//! connector, and name values to read from each event as parameters.
+//! connector, and each event-started run reads the event's body as its
+//! parameters.
 //!
 //! These are Data Plane routes, gated on `routines:read` /
 //! `routines:write`; a runner a member opens for themself carries both.

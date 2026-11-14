@@ -455,13 +455,12 @@ fn webhook_trigger_json() -> serde_json::Value {
             "branches": null,
             "payload_fields": { "env": ["prod"] },
         },
-        "parameters": { "severity": "/alert/severity" },
         "enabled": true,
     })
 }
 
 #[tokio::test]
-async fn create_sends_a_webhook_trigger_with_parameters() {
+async fn create_sends_a_webhook_trigger() {
     let server = MockServer::start().await;
     let mut created = routine_json();
     created["triggers"] = json!([webhook_trigger_json()]);
@@ -478,7 +477,6 @@ async fn create_sends_a_webhook_trigger_with_parameters() {
                 "connector_slug": "ci-alerts",
                 "event_types": ["alert.fired"],
                 "filter": { "payload_fields": { "env": ["prod"] } },
-                "parameters": { "severity": "/alert/severity" },
             }],
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(created))
@@ -495,7 +493,6 @@ async fn create_sends_a_webhook_trigger_with_parameters() {
                     payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
                     ..Default::default()
                 },
-                parameters: [("severity".into(), "/alert/severity".into())].into(),
                 ..RoutineTriggerSpec::connector(
                     RoutineTriggerProvider::Webhook,
                     "ci-alerts",
@@ -512,7 +509,6 @@ async fn create_sends_a_webhook_trigger_with_parameters() {
     assert_eq!(trigger.source, RoutineTriggerSource::Connector);
     assert_eq!(trigger.provider, RoutineTriggerProvider::Webhook);
     assert_eq!(trigger.connector_slug.as_deref(), Some("ci-alerts"));
-    assert_eq!(trigger.parameters["severity"], "/alert/severity");
     assert!(trigger.enabled);
 }
 
@@ -530,7 +526,6 @@ async fn update_keeps_a_trigger_by_id_and_adds_another() {
                     "connector_slug": "ci-alerts",
                     "event_types": ["alert.fired"],
                     "filter": { "payload_fields": { "env": ["prod"] } },
-                    "parameters": { "severity": "/alert/severity" },
                     "enabled": true,
                 },
                 {

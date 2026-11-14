@@ -458,9 +458,12 @@ integration (Slack, GitHub) or a project connector. A custom webhook is a
 `webhook` connector: the platform generates its secret and returns it once, on
 create, and your system `POST`s to the connector's endpoint, signed with
 [Standard Webhooks](https://www.standardwebhooks.com/) (the default) or sent
-with `Authorization: Bearer <secret>`. A trigger's `parameters` read values
-from the event's body by JSON pointer; each `@parameters.<name>` in the prompt
-becomes that value as JSON, and the run also gets them as `parameters.json`:
+with `Authorization: Bearer <secret>`. An event-started run's parameters are
+the event's body: the run gets it as `parameters.json` (any JSON; a body that
+is not JSON arrives as a JSON string), and each `@parameters.<key>` in the
+prompt becomes that top-level key's value as JSON, the same as a manual run's
+parameters. The run also gets `trigger/event.json` (provider, type, delivery
+id, time):
 
 ```rust
 use introspection_sdk::{
@@ -485,10 +488,6 @@ let triage = client.routines().create(&RoutineCreateParams {
             payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
             ..Default::default()
         },
-        parameters: [
-            ("severity".into(), "/alert/severity".into()),
-            ("service".into(), "/alert/service".into()),
-        ].into(),
         // The event type is the body's string `type`; `*` matches any.
         ..RoutineTriggerSpec::connector(RoutineTriggerProvider::Webhook, "ci-alerts", ["alert.fired"])
     }]),
@@ -499,10 +498,22 @@ let triage = client.routines().create(&RoutineCreateParams {
 Updating `triggers` replaces the list: an entry with an `id` keeps that trigger
 (`RoutineTrigger::to_spec` builds one from a stored trigger), one without adds
 a trigger, and the rest are removed. A trigger runs one at a time: an event
-that arrives during its previous run is skipped as `trigger_busy`. Rotate the
-secret with `client.connectors().rotate_signing_secret(connector.id, None)`,
-which returns the new one once; the previous one is accepted until
-`previous_signing_secret_expires_at`, 24 hours later.
+that arrives during its previous run is skipped as `trigger_busy`.
+
+A webhook connector accepts at most two secrets, listed without their material
+in `connector.signing_secrets` (`id`, a fingerprint, `created_at` and
+`status`, `Current` or `Previous`). Rotate with
+`client.connectors().rotate_signing_secret(connector.id, None)`, which returns
+the new secret once; the old one stays valid as the previous secret until the
+next rotation, or until you stop it with
+`client.connectors().revoke_previous_signing_secret(connector.id, None)` once
+every sender has the new one.
+
+Sign a request with an official
+[`standardwebhooks`](https://github.com/standard-webhooks/standard-webhooks)
+library, such as `new Webhook(secret).sign(id, date, body)` in JavaScript or
+`Webhook(secret).sign(msg_id, timestamp, data)` in Python, and send its
+signature as `webhook-signature` beside `webhook-id` and `webhook-timestamp`.
 
 A manual trigger takes the same parameters, as any JSON object of at most
 16 KiB and 8 levels deep:

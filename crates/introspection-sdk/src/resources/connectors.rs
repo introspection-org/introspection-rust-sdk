@@ -178,9 +178,11 @@ impl Connectors {
 
     /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret`: issue a
     /// `webhook` connector a new secret, returned once in
-    /// [`Connector::signing_secret`]. The previous one is accepted until
-    /// [`Connector::previous_signing_secret_expires_at`]. Any other provider
-    /// answers `422`.
+    /// [`Connector::signing_secret`]. The current one becomes the previous
+    /// and is accepted until the next rotation or
+    /// [`Self::revoke_previous_signing_secret`]; a previous one already held
+    /// is retired, so at most two are valid. Any other provider answers
+    /// `422`.
     pub async fn rotate_signing_secret(
         &self,
         connector_id: Uuid,
@@ -188,6 +190,22 @@ impl Connectors {
     ) -> ApiResult<Connector> {
         let params = ConnectorUpdateParams {
             rotate_signing_secret: Some(true),
+            ..Default::default()
+        };
+        self.update(connector_id, &params, project).await
+    }
+
+    /// `PATCH /v1/connectors/{id}` with `revoke_previous_signing_secret`:
+    /// stop accepting a `webhook` connector's previous secret now, leaving
+    /// only the current one in [`Connector::signing_secrets`]. With no
+    /// previous secret it changes nothing. Any other provider answers `422`.
+    pub async fn revoke_previous_signing_secret(
+        &self,
+        connector_id: Uuid,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<Connector> {
+        let params = ConnectorUpdateParams {
+            revoke_previous_signing_secret: Some(true),
             ..Default::default()
         };
         self.update(connector_id, &params, project).await

@@ -2867,15 +2867,40 @@ pub struct Connector {
     /// other provider.
     #[serde(default)]
     pub webhook_auth: Option<WebhookAuth>,
-    /// A rotated `webhook` connector's previous secret is still accepted
-    /// until this time.
+    /// A `webhook` connector's accepted secrets, current first, described
+    /// without their material; `None` for every other provider. At most two:
+    /// the current and, after a rotation, the previous.
     #[serde(default)]
-    pub previous_signing_secret_expires_at: Option<String>,
+    pub signing_secrets: Option<Vec<SigningSecret>>,
     /// A `webhook` connector's new secret, on its create or rotation only.
     /// Shown once: no read returns it, and a repeat create of a live slug
     /// returns none, since the stored one stands.
     #[serde(default)]
     pub signing_secret: Option<Secret>,
+}
+
+/// Whether a [`SigningSecret`] is a `webhook` connector's current secret or
+/// the previous one it still accepts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SigningSecretStatus {
+    Current,
+    Previous,
+    /// A status this SDK does not know yet.
+    #[serde(other)]
+    Other,
+}
+
+/// One secret a `webhook` connector accepts ([`Connector::signing_secrets`]).
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SigningSecret {
+    /// A fingerprint of the secret: the first 8 hex digits of its SHA-256.
+    /// It names the secret a sender holds without revealing it.
+    pub id: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    pub status: SigningSecretStatus,
 }
 
 impl Connector {
@@ -3067,11 +3092,16 @@ pub struct ConnectorUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_auth: Option<WebhookAuth>,
     /// For a `webhook` connector only: issue a new secret, returned once in
-    /// [`Connector::signing_secret`]. The previous one stays valid until
-    /// [`Connector::previous_signing_secret_expires_at`] (24 hours); rotating
-    /// again during that window ends it.
+    /// [`Connector::signing_secret`]. The current one becomes the previous
+    /// and stays valid until the next rotation or
+    /// [`Self::revoke_previous_signing_secret`]; a connector accepts at most
+    /// two.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rotate_signing_secret: Option<bool>,
+    /// For a `webhook` connector only: stop accepting its previous secret
+    /// now. Sent with [`Self::rotate_signing_secret`] it is a `422`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoke_previous_signing_secret: Option<bool>,
 }
 
 /// A Cedar entity a recipe's policies read, in Cedar's JSON entity format:
@@ -4524,11 +4554,10 @@ impl RoutineTriggerFilter {
 /// [`RoutineTrigger::to_spec`] turns a stored trigger back into an entry that
 /// keeps it. Build with [`Self::new`] or [`Self::connector`].
 ///
-/// `parameters` names values read from the event's body by JSON pointer
-/// (RFC 6901, such as `/alert/severity`): each `@parameters.<name>` in the
-/// prompt is replaced by its value as JSON, and the run receives them as
-/// `parameters.json`. A name is lowercase letters, digits and `_`, starting
-/// with a letter, up to 40 characters; at most 20 per trigger.
+/// A trigger declares no parameters: an event-started run's parameters are
+/// the event's body, received as `parameters.json`, and each
+/// `@parameters.<key>` in the prompt reads one of its top-level keys, as a
+/// manual run's [`RoutineTriggerParams::parameters`] do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoutineTriggerSpec {
@@ -4546,9 +4575,6 @@ pub struct RoutineTriggerSpec {
     pub event_types: Vec<String>,
     #[serde(default, skip_serializing_if = "RoutineTriggerFilter::is_empty")]
     pub filter: RoutineTriggerFilter,
-    /// `{name: JSON pointer}` into the event's body.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub parameters: BTreeMap<String, String>,
     /// Defaults to `true` server-side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -4567,7 +4593,6 @@ impl RoutineTriggerSpec {
             connector_slug: None,
             event_types: event_types.into_iter().map(Into::into).collect(),
             filter: RoutineTriggerFilter::default(),
-            parameters: BTreeMap::new(),
             enabled: None,
         }
     }
@@ -4604,8 +4629,6 @@ pub struct RoutineTrigger {
     pub event_types: Vec<String>,
     #[serde(default)]
     pub filter: RoutineTriggerFilter,
-    #[serde(default)]
-    pub parameters: BTreeMap<String, String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -4621,7 +4644,6 @@ impl RoutineTrigger {
             connector_slug: self.connector_slug.clone(),
             event_types: self.event_types.clone(),
             filter: self.filter.clone(),
-            parameters: self.parameters.clone(),
             enabled: Some(self.enabled),
         }
     }
