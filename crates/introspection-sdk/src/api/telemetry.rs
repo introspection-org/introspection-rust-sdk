@@ -143,6 +143,47 @@ where
 #[cfg(feature = "arrow")]
 use crate::api::arrow::{decode_arrow_response, ArrowPage, ARROW_STREAM_ACCEPT};
 
+/// The response header that carries the opaque cursor to pass as `next`: an
+/// oldest-first conversation export's resume cursor (for
+/// [`ConversationExportParams::next`]), and an Arrow list page's next-page
+/// cursor.
+pub const NEXT_CURSOR_HEADER: &str = "x-next-cursor";
+
+/// What [`Conversations::export_resumable`] answered.
+///
+/// The cursor is opaque: it embeds a nanosecond timestamp, but pass it back
+/// exactly as it was received rather than parsing it.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ConversationExport<S> {
+    /// `200`: the export body, streamed as it arrives. `next` is the
+    /// `X-Next-Cursor` cursor, which the server answers for an
+    /// oldest-first export (or any request with `next`); a newest-first export
+    /// carries none.
+    Body {
+        /// The response bytes, passed through unbuffered.
+        body: S,
+        /// The cursor to resume after this export.
+        next: Option<String>,
+    },
+    /// `204 No Content`: nothing is newer than the `next` that was sent.
+    /// `next` echoes that cursor, to pass again on the following attempt.
+    NothingNewer {
+        /// The same cursor, echoed by the server.
+        next: String,
+    },
+}
+
+impl<S> ConversationExport<S> {
+    /// The cursor to resume after this export, whichever way it answered.
+    pub fn next(&self) -> Option<&str> {
+        match self {
+            Self::Body { next, .. } => next.as_deref(),
+            Self::NothingNewer { next } => Some(next),
+        }
+    }
+}
+
 /// `runner.conversations.*` — `GET /v1/conversations` (append-only
 /// `otel_traces`).
 #[derive(Clone)]
@@ -263,6 +304,10 @@ impl Conversations {
     /// [`ConversationExportFormat::JsonLines`] the bytes are JSON lines: one
     /// GenAI span per line, each line a complete JSON object. The server walks storage in bounded pages; this stream passes
     /// each response chunk through as it arrives.
+    ///
+    /// This drops the response headers, so it cannot return the resume cursor
+    /// of an oldest-first export, and a resumed export with nothing newer
+    /// (`204`) is an empty stream. Use [`Self::export_resumable`] for those.
     pub async fn export_stream(
         &self,
         conversation_id: &str,
@@ -280,6 +325,58 @@ impl Conversations {
         Ok(response
             .bytes_stream()
             .map(|chunk| chunk.map_err(IntrospectionAPIError::from)))
+    }
+
+    /// [`Self::export_stream`] with the resume cursor: `GET
+    /// /v1/conversations/{id}/export` in any `format`, returning the
+    /// `X-Next-Cursor` header alongside the streamed body.
+    ///
+    /// Set [`ConversationExportParams::direction`] to
+    /// [`SortDirection::Asc`](crate::api::SortDirection::Asc) for an
+    /// oldest-first export, and pass the returned cursor as
+    /// [`ConversationExportParams::next`] to resume after it. The header is
+    /// read before the body streams. A resumed export with nothing newer
+    /// answers `204`, returned as [`ConversationExport::NothingNewer`] with the
+    /// cursor the server echoed (or, if it echoed none, the one that was sent).
+    pub async fn export_resumable(
+        &self,
+        conversation_id: &str,
+        format: ConversationExportFormat,
+        params: &ConversationExportParams,
+    ) -> ApiResult<ConversationExport<impl Stream<Item = ApiResult<Bytes>>>> {
+        let response = self
+            .http
+            .get_raw(
+                &Self::export_path(conversation_id),
+                &params.to_wire(),
+                Some(format.accept()),
+            )
+            .await?;
+        let next = match response.headers().get(NEXT_CURSOR_HEADER) {
+            Some(value) => Some(
+                value
+                    .to_str()
+                    .map_err(|_| {
+                        IntrospectionAPIError::Decode(format!(
+                            "the export's {NEXT_CURSOR_HEADER} header is not visible ASCII"
+                        ))
+                    })?
+                    .to_string(),
+            ),
+            None => None,
+        };
+        if response.status() == reqwest::StatusCode::NO_CONTENT {
+            let next = next.or_else(|| params.next.clone()).ok_or_else(|| {
+                IntrospectionAPIError::Decode(format!(
+                    "the export answered 204 without an {NEXT_CURSOR_HEADER} cursor"
+                ))
+            })?;
+            return Ok(ConversationExport::NothingNewer { next });
+        }
+        let body = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(IntrospectionAPIError::from));
+        Ok(ConversationExport::Body { body, next })
     }
 
     /// `GET /v1/conversations` with `Accept: application/vnd.apache.arrow.stream`

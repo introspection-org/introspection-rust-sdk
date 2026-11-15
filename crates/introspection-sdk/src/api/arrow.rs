@@ -52,7 +52,7 @@ impl ArrowPage {
 
 /// Decode a 2xx Arrow-stream [`Response`] into an [`ArrowPage`].
 pub(crate) async fn decode_arrow_response(res: Response) -> ApiResult<ArrowPage> {
-    let next = header_str(res.headers(), "x-next-cursor");
+    let next = header_str(res.headers(), crate::api::telemetry::NEXT_CURSOR_HEADER);
     let count = header_u64(res.headers(), "x-result-count");
     let total_count = header_u64(res.headers(), "x-total-count");
     let truncated = header_str(res.headers(), "x-truncated")

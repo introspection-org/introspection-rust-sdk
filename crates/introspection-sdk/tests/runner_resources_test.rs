@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use introspection_sdk::api::{
-    ConversationContains, ConversationExportFormat, ConversationExportParams,
+    ConversationContains, ConversationExport, ConversationExportFormat, ConversationExportParams,
     ConversationItemGetParams, ConversationItemInclude, ConversationItemListParams,
     ConversationListParams, Conversations, Dimension, Event, EventListParams, Events,
     FileCreateText, FileListParams, FileUpdate, FileUpload, FileVersionCreateText,
@@ -1312,6 +1312,86 @@ async fn conversation_items_list_exposes_page_metadata_and_opaque_next() {
     assert!(pages.next_page().await.unwrap().is_none());
 }
 
+#[tokio::test]
+async fn conversation_items_list_sends_asc_on_every_page_and_passes_next_through() {
+    let server = MockServer::start().await;
+    let conversations = Conversations::new(build_http(&server));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param("direction", "asc"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-1")],
+            "first_id": "span-1",
+            "last_id": "span-1",
+            "has_more": true,
+            "next": NEXT_CURSOR
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param("direction", "asc"))
+        .and(query_param("next", NEXT_CURSOR))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [conversation_item("span-2")],
+            "first_id": "span-2",
+            "last_id": "span-2",
+            "has_more": false,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut pages = conversations
+        .items
+        .list(
+            "conv-1",
+            &ConversationItemListParams {
+                direction: Some(SortDirection::Asc),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let first = pages.next_page().await.unwrap().unwrap();
+    assert_eq!(first.next.as_deref(), Some(NEXT_CURSOR));
+    let second = pages.next_page().await.unwrap().unwrap();
+    assert_eq!(second.data[0].span_id.as_deref(), Some("span-2"));
+}
+
+#[tokio::test]
+async fn conversation_items_list_leaves_direction_to_the_server_when_unset() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/items"))
+        .and(query_param_is_missing("direction"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [],
+            "has_more": false,
+            "next": null
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = Conversations::new(build_http(&server))
+        .items
+        .list("conv-1", &ConversationItemListParams::default())
+        .unwrap()
+        .next_page()
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(page.data.is_empty());
+}
+
 /// Lists items with `contains` and checks each value reaches the query string
 /// exactly as `wire` spells it, with no `operation_name`.
 async fn assert_items_list_sends_contains(contains: Vec<ConversationContains>, wire: &[&str]) {
@@ -2235,6 +2315,149 @@ async fn conversations_export_stream_preserves_bytes_headers_and_filters() {
     let chunks: Vec<bytes::Bytes> = stream.try_collect().await.unwrap();
 
     assert_eq!(chunks.concat(), body);
+}
+
+/// A resume cursor as the server spells one: base64 with the characters a
+/// query string must escape, so a cursor re-encoded or parsed on the way
+/// through would not match.
+const RESUME_CURSOR: &str = "eyJ0IjoiMTc5NDUyNzcwNTA3NDAwMDAwMSIsImQiOiJhc2MifQ+/==";
+const NEXT_CURSOR: &str = "eyJ0IjoiMTc5NDUyNzcwNTA3NDAwMDAwOSIsImQiOiJhc2MifQ+/==";
+
+#[tokio::test]
+async fn conversations_export_resumable_sends_direction_and_next_and_returns_the_header() {
+    use futures::TryStreamExt;
+
+    let server = MockServer::start().await;
+    let body = format!("{}\n", conversation_item("span-9"));
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(header("accept", "application/x-ndjson"))
+        .and(query_param("direction", "asc"))
+        .and(query_param("next", RESUME_CURSOR))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Next-Cursor", NEXT_CURSOR)
+                .set_body_raw(body.clone(), "application/x-ndjson"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let export = Conversations::new(build_http(&server))
+        .export_resumable(
+            "conv-1",
+            ConversationExportFormat::JsonLines,
+            &ConversationExportParams {
+                direction: Some(SortDirection::Asc),
+                next: Some(RESUME_CURSOR.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(export.next(), Some(NEXT_CURSOR));
+    let ConversationExport::Body { body: stream, next } = export else {
+        panic!("a 200 export is a body");
+    };
+    assert_eq!(next.as_deref(), Some(NEXT_CURSOR));
+    let chunks: Vec<bytes::Bytes> = stream.try_collect().await.unwrap();
+    assert_eq!(chunks.concat(), body.as_bytes());
+}
+
+#[tokio::test]
+async fn conversations_export_resumable_returns_nothing_newer_on_204() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(query_param("next", RESUME_CURSOR))
+        .and(query_param_is_missing("direction"))
+        .respond_with(ResponseTemplate::new(204).insert_header("X-Next-Cursor", RESUME_CURSOR))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let export = Conversations::new(build_http(&server))
+        .export_resumable(
+            "conv-1",
+            ConversationExportFormat::JsonLines,
+            &ConversationExportParams {
+                next: Some(RESUME_CURSOR.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    match export {
+        ConversationExport::NothingNewer { next } => assert_eq!(next, RESUME_CURSOR),
+        ConversationExport::Body { .. } => panic!("a 204 is nothing newer, not a body"),
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn conversations_export_resumable_without_a_cursor_sends_neither_param() {
+    use futures::TryStreamExt;
+
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(query_param_is_missing("direction"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("", "application/x-ndjson"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let export = Conversations::new(build_http(&server))
+        .export_resumable(
+            "conv-1",
+            ConversationExportFormat::JsonLines,
+            &ConversationExportParams::default(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(export.next(), None);
+    let ConversationExport::Body { body, .. } = export else {
+        panic!("a 200 export is a body");
+    };
+    let chunks: Vec<bytes::Bytes> = body.try_collect().await.unwrap();
+    assert!(chunks.concat().is_empty());
+}
+
+#[tokio::test]
+async fn conversations_export_resumable_surfaces_a_400_as_an_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/conversations/conv-1/export"))
+        .and(query_param("direction", "desc"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "detail": "trajectory formats, from_compaction and next export oldest-first only"
+        })))
+        .mount(&server)
+        .await;
+
+    let result = Conversations::new(build_http(&server))
+        .export_resumable(
+            "conv-1",
+            ConversationExportFormat::Trajectory,
+            &ConversationExportParams {
+                direction: Some(SortDirection::Desc),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(IntrospectionAPIError::Http { status: 400, .. })
+    ));
 }
 
 #[tokio::test]
