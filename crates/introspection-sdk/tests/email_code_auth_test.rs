@@ -413,7 +413,7 @@ async fn the_client_targets_the_sessions_data_plane() {
     let cp = MockServer::start().await;
     let dp = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/v1/automations"))
+        .and(path("/v1/routines"))
         .and(header("authorization", "Bearer at1"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -426,7 +426,7 @@ async fn the_client_targets_the_sessions_data_plane() {
     let auth = signed_in(&cp, &dp.uri()).await;
     let client = auth.client(None).await.unwrap();
     let page = client
-        .automations()
+        .routines()
         .list(&Default::default())
         .next_page()
         .await

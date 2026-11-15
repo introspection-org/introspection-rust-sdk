@@ -462,7 +462,7 @@ impl Body {
     ///
     /// - An empty JSON object matches a recorded empty body. The Rust SDK
     ///   posts `{}` to three bodiless actions (a run's `/cancel`, an
-    ///   automation's `/trigger`, an API key's `/acknowledge`) where the JS
+    ///   routine's `/trigger`, an API key's `/acknowledge`) where the JS
     ///   SDK sends nothing.
     /// - A multipart body matches a recorded empty one. Polly in Node
     ///   records a `FormData` body as an empty `text/plain` entry, so the JS
@@ -641,19 +641,15 @@ mod tests {
 
     #[test]
     fn an_empty_object_matches_a_bodiless_recording_and_nothing_else() {
-        let recorded = json("POST", "http://localhost:8002/v1/automations/a/trigger", "");
+        let recorded = json("POST", "http://localhost:8002/v1/routines/a/trigger", "");
         assert!(matches(
-            &json(
-                "POST",
-                "http://localhost:8002/v1/automations/a/trigger",
-                "{}"
-            ),
+            &json("POST", "http://localhost:8002/v1/routines/a/trigger", "{}"),
             &recorded
         ));
         assert!(!matches(
             &json(
                 "POST",
-                "http://localhost:8002/v1/automations/a/trigger",
+                "http://localhost:8002/v1/routines/a/trigger",
                 r#"{"x":1}"#
             ),
             &recorded

@@ -26,10 +26,10 @@ use crate::api::tasks::Tasks;
 use crate::api::telemetry::{Conversations, Events, Metrics};
 use crate::dev_target;
 use crate::resources::{
-    Aauth, Annotations, ApiKeys, Applications, Automations, Connectors, Credentials, Endpoints,
+    Aauth, Annotations, ApiKeys, Applications, Connectors, Credentials, Endpoints,
     ExperimentHandle, Experiments, Images, Integrations, Issues, Judges, MemberConnections,
-    Members, Oidc, Organizations, Projects, Recipes, Remotes, Repositories, RuntimeHandle,
-    Runtimes, Tags, Tokens, Variables,
+    Members, Oidc, Organizations, Projects, Recipes, Remotes, Repositories, Routines,
+    RuntimeHandle, Runtimes, Tags, Tokens, Variables,
 };
 use crate::types::{self, ClientConfig};
 
@@ -315,9 +315,9 @@ impl IntrospectionClient {
         Metrics::new(self.dp_http.clone())
     }
 
-    /// Data Plane `/v1/automations` CRUD and `trigger()`.
-    pub fn automations(&self) -> Automations {
-        Automations::new(self.dp_http.clone())
+    /// Data Plane `/v1/routines` CRUD and `trigger()`.
+    pub fn routines(&self) -> Routines {
+        Routines::new(self.dp_http.clone())
     }
 
     /// Data Plane `/v1/issues` CRUD, with human requests through `update()`.

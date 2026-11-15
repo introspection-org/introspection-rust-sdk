@@ -36,7 +36,7 @@ pub mod walk {
     pub const APPLICATION_NAME: &str = "sdk-coverage-walk";
     pub const TAG_NAME: &str = "walk";
     pub const API_KEY_NAME: &str = "walk";
-    pub const AUTOMATION_NAME: &str = "The walk's automation";
+    pub const ROUTINE_NAME: &str = "The walk's routine";
     pub const EXPERIMENT_NAMES: [&str; 2] =
         ["The walk's experiment", "The walk's cancelled experiment"];
     pub const CREDENTIAL_NAME: &str = "WALK_SECRET";

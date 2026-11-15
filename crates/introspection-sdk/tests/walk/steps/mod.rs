@@ -48,7 +48,7 @@ const STEPS: [(u32, &str, Step); 19] = [
     step!(13, "telemetry reads", work::telemetry_reads),
     step!(14, "eval", eval::eval),
     step!(15, "commands", eval::commands),
-    step!(16, "automations", eval::automations),
+    step!(16, "routines", eval::routines),
     step!(17, "access", access::access),
     step!(18, "members and keys", finish::members_and_keys),
     step!(19, "teardown", finish::teardown),
