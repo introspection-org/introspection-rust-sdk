@@ -461,8 +461,8 @@ Beside its schedule and a manual trigger, a prompt routine that starts a task
 per run can run on events. Each of its `triggers` listens to an organization
 integration (Slack, GitHub) or a project connector. A custom webhook is a
 `webhook` connector. Create issues it no secret; issue the first with
-`issue_signing_secret`, naming its type, and the platform generates it and
-returns it once. Your system then `POST`s to the connector's endpoint, signed
+`client.connectors().secrets.create`, naming its type, and the platform
+generates it and returns it once. Your system then `POST`s to the connector's endpoint, signed
 with [Standard Webhooks](https://www.standardwebhooks.com/) (a `whsec_...`
 secret) or sent with `Authorization: Bearer <whtok_...>`. An event-started run's parameters are
 the event's body: the run gets it as `parameters.json` (any JSON; a body that
@@ -481,11 +481,11 @@ let connector = client.connectors().create(&ConnectorCreateParams {
     slug: Some("ci-alerts".into()),
     ..ConnectorCreateParams::webhook("CI alerts")
 }, None).await?;
-let issued = client.connectors()
-    .issue_signing_secret(connector.id, WebhookSecretType::StandardWebhooks, None)
+let issued = client.connectors().secrets
+    .create(connector.id, Some(WebhookSecretType::StandardWebhooks), None)
     .await?;
 // Shown once: no read returns it. Store it in the sending system now.
-let secret = issued.signing_secret.as_ref().expect("the issued secret");
+let secret = issued.secret.expose();
 let endpoint = connector.webhook_endpoint("https://api.introspection.dev");
 
 let triage = client.routines().create(&RoutineCreateParams {
@@ -509,17 +509,19 @@ Updating `triggers` replaces the list: an entry with an `id` keeps that trigger
 a trigger, and the rest are removed. A trigger runs one at a time: an event
 that arrives during its previous run is skipped as `trigger_busy`.
 
-A webhook connector accepts at most two secrets, listed without their material
-in `connector.signing_secrets` (`id`, a fingerprint used as the kid,
-`secret_type`, `created_at` and `status`, `Current` or `Previous`). Rotate with
-`client.connectors().rotate_signing_secret(connector.id, None)`, which keeps
-the type and returns the new secret once; the old one stays valid as the
-previous secret until you stop it with
-`client.connectors().revoke_signing_secret(connector.id, kid, None)` once every
-sender has the new one. With two live a rotation answers `409`, so revoke one
-first. The current secret can be revoked only when no previous one is live,
-and revoking the last leaves the endpoint refusing every call. To change the
-type, revoke every secret, then issue one of the other type.
+A webhook connector accepts at most two secrets, both of one type. List them
+without their material with
+`client.connectors().secrets.list(connector.id, &PaginationParams::default(), None)`:
+each `WebhookSecret` has an `id` (a fingerprint used as the kid),
+`secret_type`, `status` (`Current` or `Previous`) and `created_at`, current
+first. Rotate with `client.connectors().secrets.create(connector.id, None, None)`,
+which keeps the type and returns the new secret once; the old one stays valid
+as the previous secret until you stop it with
+`client.connectors().secrets.delete(connector.id, kid, None)` once every sender
+has the new one. With two live a create answers `409`, so delete one first.
+The current secret can be deleted only when no previous one is live, and
+deleting the last leaves the endpoint refusing every call. To change the type,
+delete every secret, then create one of the other type.
 
 Sign a request with an official
 [`standardwebhooks`](https://github.com/standard-webhooks/standard-webhooks)

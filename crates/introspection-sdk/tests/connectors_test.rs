@@ -15,8 +15,8 @@ use introspection_sdk::{
     ConnectionTokenParams, ConnectionTokenResult, ConnectorAppListParams, ConnectorAuthMode,
     ConnectorAuthorizeBinding, ConnectorAuthorizeParams, ConnectorCreateParams,
     ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscoveryParams,
-    ConnectorUpdateParams, Connectors, RunnerIdentity, SigningSecretRotation, SigningSecretStatus,
-    WebhookSecretType,
+    ConnectorUpdateParams, Connectors, PaginationParams, RunnerIdentity, StringOrUuid,
+    WebhookSecretStatus, WebhookSecretType,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -825,11 +825,8 @@ fn token_params_read_from_a_json_document() {
     .is_err());
 }
 
-fn webhook_connector_json(
-    signing_secrets: serde_json::Value,
-    signing_secret: Option<&str>,
-) -> serde_json::Value {
-    let mut value = json!({
+fn webhook_connector_json() -> serde_json::Value {
+    json!({
         "id": CONNECTOR_ID,
         "org_id": "00000000-0000-0000-0000-0000000000aa",
         "project_id": "00000000-0000-0000-0000-0000000000bb",
@@ -842,12 +839,20 @@ fn webhook_connector_json(
         "environment": "production",
         "status": "active",
         "requires_runtime": false,
-        "signing_secrets": signing_secrets,
-    });
-    if let Some(secret) = signing_secret {
-        value["signing_secret"] = json!(secret);
-    }
-    value
+    })
+}
+
+fn secret_json(id: &str, secret_type: &str, status: &str) -> serde_json::Value {
+    json!({
+        "id": id,
+        "type": secret_type,
+        "status": status,
+        "created_at": "2026-11-13T00:00:00Z",
+    })
+}
+
+fn secrets_path() -> String {
+    format!("/v1/connectors/{CONNECTOR_ID}/secrets")
 }
 
 #[tokio::test]
@@ -861,9 +866,7 @@ async fn a_webhook_connector_is_created_without_a_secret() {
             "auth_mode": "static",
             "slug": "ci-alerts",
         })))
-        .respond_with(
-            ResponseTemplate::new(201).set_body_json(webhook_connector_json(json!([]), None)),
-        )
+        .respond_with(ResponseTemplate::new(201).set_body_json(webhook_connector_json()))
         .expect(1)
         .mount(&server)
         .await;
@@ -879,8 +882,6 @@ async fn a_webhook_connector_is_created_without_a_secret() {
         .await
         .unwrap();
 
-    assert!(connector.signing_secret.is_none());
-    assert_eq!(connector.signing_secrets, Some(vec![]));
     assert_eq!(
         connector.webhook_endpoint("https://api.example.com/"),
         format!("https://api.example.com/v1/webhooks/connectors/{CONNECTOR_ID}")
@@ -888,63 +889,37 @@ async fn a_webhook_connector_is_created_without_a_secret() {
 }
 
 #[tokio::test]
-async fn issue_signing_secret_names_its_type_and_returns_it_once() {
+async fn secrets_list_pages_current_first_with_the_project() {
     let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/connectors/{CONNECTOR_ID}")))
-        .and(body_json(
-            json!({ "rotate_signing_secret": { "type": "bearer" } }),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_connector_json(
-            json!([{ "id": "1a2b3c4d", "type": "bearer", "created_at": "2026-11-13T00:00:00Z", "status": "current" }]),
-            Some("whtok_c2VjcmV0"),
-        )))
+    Mock::given(method("GET"))
+        .and(path(secrets_path()))
+        .and(query_param("limit", "10"))
+        .and(query_param("project", "web"))
+        .and(query_param_is_missing("next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(vec![
+            secret_json("5e6f7a8b", "standard_webhooks", "current"),
+            secret_json("1a2b3c4d", "standard_webhooks", "previous"),
+        ])))
         .expect(1)
         .mount(&server)
         .await;
 
-    let connector = Connectors::new(build_http(&server))
-        .issue_signing_secret(connector_id(), WebhookSecretType::Bearer, None)
+    let secrets: Vec<_> = Connectors::new(build_http(&server))
+        .secrets
+        .list(
+            connector_id(),
+            &PaginationParams {
+                limit: Some(10),
+                next: None,
+            },
+            Some(StringOrUuid::String("web".into())),
+        )
+        .collect::<Vec<_>>()
         .await
+        .into_iter()
+        .collect::<Result<_, _>>()
         .unwrap();
 
-    assert_eq!(
-        connector.signing_secret.as_ref().map(|s| s.expose()),
-        Some("whtok_c2VjcmV0")
-    );
-    assert!(!format!("{connector:?}").contains("whtok_c2VjcmV0"));
-    let secrets = connector.signing_secrets.unwrap();
-    assert_eq!(secrets[0].secret_type, WebhookSecretType::Bearer);
-    assert_eq!(secrets[0].status, SigningSecretStatus::Current);
-}
-
-#[tokio::test]
-async fn rotate_signing_secret_sends_true_and_lists_both_secrets() {
-    let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/connectors/{CONNECTOR_ID}")))
-        .and(body_json(json!({ "rotate_signing_secret": true })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_connector_json(
-            json!([
-                { "id": "5e6f7a8b", "type": "standard_webhooks", "created_at": "2026-11-14T00:00:00Z", "status": "current" },
-                { "id": "1a2b3c4d", "type": "standard_webhooks", "created_at": "2026-11-13T00:00:00Z", "status": "previous" },
-            ]),
-            Some("whsec_bmV3"),
-        )))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let connector = Connectors::new(build_http(&server))
-        .rotate_signing_secret(connector_id(), None)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        connector.signing_secret.as_ref().map(|s| s.expose()),
-        Some("whsec_bmV3")
-    );
-    let secrets = connector.signing_secrets.unwrap();
     assert_eq!(
         secrets
             .iter()
@@ -954,70 +929,164 @@ async fn rotate_signing_secret_sends_true_and_lists_both_secrets() {
             (
                 "5e6f7a8b",
                 WebhookSecretType::StandardWebhooks,
-                SigningSecretStatus::Current
+                WebhookSecretStatus::Current
             ),
             (
                 "1a2b3c4d",
                 WebhookSecretType::StandardWebhooks,
-                SigningSecretStatus::Previous
+                WebhookSecretStatus::Previous
             ),
         ]
     );
+    assert_eq!(secrets[0].created_at, "2026-11-13T00:00:00Z");
 }
 
 #[tokio::test]
-async fn revoke_signing_secret_sends_the_kid() {
+async fn secrets_create_names_the_first_type_and_returns_the_secret_once() {
     let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/connectors/{CONNECTOR_ID}")))
-        .and(body_json(json!({ "revoke_signing_secret": "1a2b3c4d" })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_connector_json(
-            json!([{ "id": "5e6f7a8b", "type": "standard_webhooks", "created_at": "2026-11-14T00:00:00Z", "status": "current" }]),
-            None,
-        )))
+    let mut created = secret_json("1a2b3c4d", "bearer", "current");
+    created["secret"] = json!("whtok_c2VjcmV0");
+    Mock::given(method("POST"))
+        .and(path(secrets_path()))
+        .and(query_param_is_missing("project"))
+        .and(body_json(json!({ "type": "bearer" })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
         .expect(1)
         .mount(&server)
         .await;
 
-    let connector = Connectors::new(build_http(&server))
-        .revoke_signing_secret(connector_id(), "1a2b3c4d", None)
+    let created = Connectors::new(build_http(&server))
+        .secrets
+        .create(connector_id(), Some(WebhookSecretType::Bearer), None)
         .await
         .unwrap();
 
-    assert!(connector.signing_secret.is_none());
-    let secrets = connector.signing_secrets.unwrap();
-    assert_eq!(secrets.len(), 1);
-    assert_eq!(secrets[0].id, "5e6f7a8b");
+    assert_eq!(created.secret.expose(), "whtok_c2VjcmV0");
+    assert!(!format!("{created:?}").contains("whtok_c2VjcmV0"));
+    assert_eq!(created.webhook_secret.id, "1a2b3c4d");
     assert_eq!(
-        secrets[0].created_at.as_deref(),
-        Some("2026-11-14T00:00:00Z")
+        created.webhook_secret.secret_type,
+        WebhookSecretType::Bearer
+    );
+    assert_eq!(created.webhook_secret.status, WebhookSecretStatus::Current);
+}
+
+#[tokio::test]
+async fn secrets_create_without_a_type_sends_an_empty_body_to_rotate() {
+    let server = MockServer::start().await;
+    let mut created = secret_json("5e6f7a8b", "standard_webhooks", "current");
+    created["secret"] = json!("whsec_bmV3");
+    Mock::given(method("POST"))
+        .and(path(secrets_path()))
+        .and(query_param("project", "web"))
+        .and(body_json(json!({})))
+        .respond_with(ResponseTemplate::new(201).set_body_json(created))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let created = Connectors::new(build_http(&server))
+        .secrets
+        .create(
+            connector_id(),
+            None,
+            Some(StringOrUuid::String("web".into())),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(created.secret.expose(), "whsec_bmV3");
+    assert_eq!(
+        created.webhook_secret.secret_type,
+        WebhookSecretType::StandardWebhooks
+    );
+}
+
+#[tokio::test]
+async fn secrets_delete_sends_the_kid() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{}/1a2b3c4d", secrets_path())))
+        .and(query_param("project", "web"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Connectors::new(build_http(&server))
+        .secrets
+        .delete(
+            connector_id(),
+            "1a2b3c4d",
+            Some(StringOrUuid::String("web".into())),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn secrets_errors_keep_their_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(secrets_path()))
+        .respond_with(
+            ResponseTemplate::new(409)
+                .set_body_json(json!({ "detail": "Two secrets are live; delete one first" })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{}/deadbeef", secrets_path())))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({ "detail": "No live secret has this id" })),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(secrets_path()))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({ "detail": "Webhook connector not found" })),
+        )
+        .mount(&server)
+        .await;
+
+    let secrets = Connectors::new(build_http(&server)).secrets;
+    let conflict = secrets
+        .create(connector_id(), None, None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(conflict, IntrospectionAPIError::Http { status: 409, .. }),
+        "{conflict:?}"
+    );
+    let missing = secrets
+        .delete(connector_id(), "deadbeef", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(missing, IntrospectionAPIError::Http { status: 404, .. }),
+        "{missing:?}"
+    );
+    let not_webhook = secrets
+        .list(connector_id(), &PaginationParams::default(), None)
+        .next()
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        matches!(not_webhook, IntrospectionAPIError::Http { status: 404, .. }),
+        "{not_webhook:?}"
     );
 }
 
 #[test]
-fn the_rotation_param_round_trips_its_two_wire_shapes() {
-    let issue: ConnectorUpdateParams = serde_json::from_value(json!({
-        "rotate_signing_secret": { "type": "standard_webhooks" },
-    }))
-    .unwrap();
-    assert_eq!(
-        issue.rotate_signing_secret,
-        Some(SigningSecretRotation::Issue(
-            WebhookSecretType::StandardWebhooks
-        ))
-    );
-    let rotate: ConnectorUpdateParams =
-        serde_json::from_value(json!({ "rotate_signing_secret": true })).unwrap();
-    assert_eq!(
-        serde_json::to_value(&rotate).unwrap(),
-        json!({ "rotate_signing_secret": true })
-    );
-    assert!(serde_json::from_value::<ConnectorUpdateParams>(
-        json!({ "rotate_signing_secret": false })
-    )
-    .is_err());
-    // Removed fields are refused rather than silently dropped.
+fn the_removed_secret_fields_are_refused_on_update() {
     for removed in [
+        json!({ "rotate_signing_secret": true }),
+        json!({ "rotate_signing_secret": { "type": "standard_webhooks" } }),
+        json!({ "revoke_signing_secret": "1a2b3c4d" }),
         json!({ "webhook_auth": "bearer" }),
         json!({ "revoke_previous_signing_secret": true }),
     ] {
@@ -1026,15 +1095,35 @@ fn the_rotation_param_round_trips_its_two_wire_shapes() {
 }
 
 #[test]
-fn an_unknown_secret_type_is_kept() {
-    let connector: introspection_sdk::Connector = serde_json::from_value(webhook_connector_json(
-        json!([{ "id": "1a2b3c4d", "type": "hmac_v2", "status": "current" }]),
-        None,
-    ))
-    .unwrap();
-    assert!(connector.signing_secret.is_none());
+fn an_unknown_secret_type_or_status_is_kept() {
+    let secret: introspection_sdk::WebhookSecret =
+        serde_json::from_value(secret_json("1a2b3c4d", "hmac_v2", "retiring")).unwrap();
     assert_eq!(
-        connector.signing_secrets.unwrap()[0].secret_type,
+        secret.secret_type,
         WebhookSecretType::Unknown(json!("hmac_v2"))
     );
+    assert_eq!(
+        secret.status,
+        WebhookSecretStatus::Unknown(json!("retiring"))
+    );
+    assert_eq!(
+        serde_json::to_value(&secret).unwrap(),
+        secret_json("1a2b3c4d", "hmac_v2", "retiring")
+    );
+}
+
+#[tokio::test]
+async fn secrets_delete_encodes_the_id_and_refuses_a_dot_segment() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{}/a%2Fb", secrets_path())))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let secrets = Connectors::new(build_http(&server)).secrets;
+    secrets.delete(connector_id(), "a/b", None).await.unwrap();
+    for bad in ["", ".", ".."] {
+        assert!(secrets.delete(connector_id(), bad, None).await.is_err());
+    }
 }

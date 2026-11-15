@@ -2787,7 +2787,7 @@ pub enum ConnectionBrokerSubjectType {
 }
 
 /// How a caller proves it holds a `webhook` connector's secret
-/// ([`SigningSecret::secret_type`]).
+/// ([`WebhookSecret::secret_type`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookSecretType {
@@ -2802,65 +2802,20 @@ pub enum WebhookSecretType {
     Unknown(serde_json::Value),
 }
 
-/// [`ConnectorUpdateParams::rotate_signing_secret`]: issue a `webhook`
-/// connector's first secret, or rotate the live one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SigningSecretRotation {
-    /// The first secret, of this type (`{"type": ...}` on the wire). With a
-    /// secret already live the server keeps the live one's type.
-    Issue(WebhookSecretType),
-    /// A new secret of the current one's type (`true` on the wire); the
-    /// current one becomes the previous.
-    Rotate,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-enum SigningSecretRotationWire {
-    Flag(bool),
-    Issue {
-        #[serde(rename = "type")]
-        secret_type: WebhookSecretType,
-    },
-}
-
-impl Serialize for SigningSecretRotation {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Rotate => SigningSecretRotationWire::Flag(true),
-            Self::Issue(secret_type) => SigningSecretRotationWire::Issue {
-                secret_type: secret_type.clone(),
-            },
-        }
-        .serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for SigningSecretRotation {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        match SigningSecretRotationWire::deserialize(deserializer)? {
-            SigningSecretRotationWire::Flag(true) => Ok(Self::Rotate),
-            SigningSecretRotationWire::Flag(false) => Err(serde::de::Error::custom(
-                "rotate_signing_secret is `true` or `{\"type\": ...}`; omit it to leave the secrets as they are",
-            )),
-            SigningSecretRotationWire::Issue { secret_type } => Ok(Self::Issue(secret_type)),
-        }
-    }
-}
-
 /// The provider slug of an inbound `webhook` connector
 /// ([`ConnectorCreateParams::webhook`]).
 pub const WEBHOOK_CONNECTOR_PROVIDER: &str = "webhook";
 
 /// A connector — the CP read model returned by every `/v1/connectors` route.
 ///
-/// `client_secret` is **write-only**: accepted on create and update, absent
-/// from every response. `signing_secret` is too, except a `webhook`
-/// connector's, which the platform generates and returns once, on the update
-/// that issues or rotates it ([`ConnectorUpdateParams::rotate_signing_secret`]).
+/// `client_secret` and `signing_secret` are **write-only**: accepted on
+/// create and update, absent from every response. A `webhook` connector's
+/// secrets are a sub-resource instead ([`ConnectorSecrets`]).
 /// `requires_runtime` is server-derived and is the **only**
 /// signal for whether [`ConnectorAuthorizeParams::runtime`] must be set;
 /// never hardcode a provider list.
+///
+/// [`ConnectorSecrets`]: crate::resources::connectors::ConnectorSecrets
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Connector {
@@ -2913,44 +2868,48 @@ pub struct Connector {
     /// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
     #[serde(default)]
     pub requires_runtime: bool,
-    /// A `webhook` connector's accepted secrets, current first, described
-    /// without their material; `None` for every other provider. At most two:
-    /// the current and, after a rotation, the previous. Empty until the first
-    /// is issued, and the endpoint refuses every call while it is.
-    #[serde(default)]
-    pub signing_secrets: Option<Vec<SigningSecret>>,
-    /// A `webhook` connector's new secret (`whsec_...` or `whtok_...`), on
-    /// the update that issues or rotates it only. Shown once: no other
-    /// response carries it.
-    #[serde(default)]
-    pub signing_secret: Option<Secret>,
 }
 
-/// Whether a [`SigningSecret`] is a `webhook` connector's current secret or
+/// Whether a [`WebhookSecret`] is a `webhook` connector's current secret or
 /// the previous one it still accepts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SigningSecretStatus {
+pub enum WebhookSecretStatus {
     Current,
     Previous,
-    /// A status this SDK does not know yet.
-    #[serde(other)]
-    Other,
+    /// A status this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
-/// One secret a `webhook` connector accepts ([`Connector::signing_secrets`]).
-#[serde_with::skip_serializing_none]
+/// One live secret of a `webhook` connector, without its material
+/// ([`ConnectorSecrets::list`]). At most two are live, both of one type: the
+/// newest is current, the older is previous and still verifies.
+///
+/// [`ConnectorSecrets::list`]: crate::resources::connectors::ConnectorSecrets::list
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct SigningSecret {
+pub struct WebhookSecret {
     /// A fingerprint of the secret (its kid): the first 8 hex digits of its
     /// SHA-256. It names the secret a sender holds without revealing it, and
-    /// is what [`ConnectorUpdateParams::revoke_signing_secret`] takes.
+    /// is what [`ConnectorSecrets::delete`] takes.
+    ///
+    /// [`ConnectorSecrets::delete`]: crate::resources::connectors::ConnectorSecrets::delete
     pub id: String,
     #[serde(rename = "type")]
     pub secret_type: WebhookSecretType,
-    #[serde(default)]
-    pub created_at: Option<String>,
-    pub status: SigningSecretStatus,
+    pub status: WebhookSecretStatus,
+    pub created_at: String,
+}
+
+/// [`ConnectorSecrets::create`]'s response: the new secret and its plaintext
+/// (`whsec_...` or `whtok_...`), returned here only.
+///
+/// [`ConnectorSecrets::create`]: crate::resources::connectors::ConnectorSecrets::create
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct WebhookSecretCreated {
+    #[serde(flatten)]
+    pub webhook_secret: WebhookSecret,
+    pub secret: Secret,
 }
 
 impl Connector {
@@ -3062,11 +3021,10 @@ pub struct ConnectorCreateParams {
 impl ConnectorCreateParams {
     /// An inbound `webhook` connector: `auth_mode` `static`, no hosts, scopes,
     /// endpoints or secret. Create issues no secret, and the server refuses
-    /// one sent here; issue the first with
-    /// [`Connectors::issue_signing_secret`]. Routines listen to it by slug
-    /// with [`RoutineTriggerSpec::connector`].
+    /// one sent here; issue the first with [`ConnectorSecrets::create`].
+    /// Routines listen to it by slug with [`RoutineTriggerSpec::connector`].
     ///
-    /// [`Connectors::issue_signing_secret`]: crate::resources::connectors::Connectors::issue_signing_secret
+    /// [`ConnectorSecrets::create`]: crate::resources::connectors::ConnectorSecrets::create
     pub fn webhook(name: impl Into<String>) -> Self {
         Self::new(name, WEBHOOK_CONNECTOR_PROVIDER, ConnectorAuthMode::Static)
     }
@@ -3133,18 +3091,6 @@ pub struct ConnectorUpdateParams {
     /// Replaces the connector's Cedar entities; omitted = unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_entities: Option<Vec<PolicyEntity>>,
-    /// For a `webhook` connector only: issue a secret, returned once in
-    /// [`Connector::signing_secret`]. A rotation keeps the live secret's type
-    /// and the old one stays valid as the previous until it is revoked. With
-    /// two live the server answers `409`; revoke one first.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rotate_signing_secret: Option<SigningSecretRotation>,
-    /// For a `webhook` connector only: the id (kid) of a live secret to stop
-    /// accepting now. The current one only once no previous one is live
-    /// (`409`); revoking the last leaves the endpoint refusing every call.
-    /// Sent with [`Self::rotate_signing_secret`] it is a `422`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revoke_signing_secret: Option<String>,
 }
 
 /// A Cedar entity a recipe's policies read, in Cedar's JSON entity format:

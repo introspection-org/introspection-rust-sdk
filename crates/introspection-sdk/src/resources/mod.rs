@@ -18,7 +18,8 @@
 //! - [`Connectors`] — `/v1/connectors` CRUD, plus `authorize()`, which
 //!   mints the consent URL (`POST /v1/oauth/connections/authorize`) a
 //!   Business hands its customer so their workspace connects to an agent,
-//!   and `connection_token()`, the token broker.
+//!   and `connection_token()`, the token broker; a `webhook` connector's
+//!   secrets are [`ConnectorSecrets`].
 //! - [`Endpoints`] — `GET /v1/endpoints` lookup: the project's endpoint
 //!   bindings, such as the `kind: mcp` binding naming an MCP server.
 //! - [`Members`] — `/v1/members` list, read, invite and update: the customer
@@ -101,7 +102,7 @@ pub use annotations::Annotations;
 pub use api_keys::ApiKeys;
 pub use applications::{ApplicationIdps, ApplicationKeys, ApplicationSecrets, Applications};
 pub use connections::MemberConnections;
-pub use connectors::Connectors;
+pub use connectors::{ConnectorSecrets, Connectors};
 pub use credentials::Credentials;
 pub use endpoints::Endpoints;
 pub use experiments::{ExperimentHandle, Experiments};

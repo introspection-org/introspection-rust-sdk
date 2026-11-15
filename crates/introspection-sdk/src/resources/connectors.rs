@@ -13,10 +13,8 @@
 //!
 //! `client_secret` / `signing_secret` are write-only — accepted on create and
 //! update, absent from every response — so they appear on the param structs.
-//! The one exception is a `webhook` connector's secret, which the platform
-//! generates: [`Connectors::issue_signing_secret`] and
-//! [`Connectors::rotate_signing_secret`] return it once in
-//! [`Connector::signing_secret`]. Omitting one on update leaves it as it is.
+//! Omitting one on update leaves it as it is. A `webhook` connector's secrets,
+//! which the platform generates, are a sub-resource: [`Connectors::secrets`].
 //!
 //! Project scope comes from the authenticated credential. A session or an
 //! org-wide token names the project instead: the connector methods take a
@@ -35,8 +33,8 @@ use crate::api::schemas::{
     ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
     ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams,
     ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscovery,
-    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, ProjectSelector, SigningSecretRotation,
-    StringOrUuid, WebhookSecretType,
+    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, PaginationParams, ProjectSelector,
+    StringOrUuid, WebhookSecret, WebhookSecretCreated, WebhookSecretType,
 };
 use crate::resources::with_project;
 
@@ -44,12 +42,17 @@ use crate::resources::with_project;
 #[derive(Clone)]
 pub struct Connectors {
     http: Arc<HttpClient>,
+    /// `/v1/connectors/{id}/secrets`: a `webhook` connector's secrets.
+    pub secrets: ConnectorSecrets,
 }
 
 impl Connectors {
     #[doc(hidden)]
     pub fn new(http: Arc<HttpClient>) -> Self {
-        Self { http }
+        Self {
+            secrets: ConnectorSecrets { http: http.clone() },
+            http,
+        }
     }
 
     /// `POST /v1/oauth/connections/token` — resolve a provider credential
@@ -180,60 +183,6 @@ impl Connectors {
         self.http.patch_json(&path, params).await
     }
 
-    /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret: {"type": ...}`:
-    /// issue a `webhook` connector's first secret, of `secret_type`, returned
-    /// once in [`Connector::signing_secret`]. Create issues none, so the
-    /// endpoint refuses every call until this runs. Any other provider
-    /// answers `422`.
-    pub async fn issue_signing_secret(
-        &self,
-        connector_id: Uuid,
-        secret_type: WebhookSecretType,
-        project: Option<StringOrUuid>,
-    ) -> ApiResult<Connector> {
-        let params = ConnectorUpdateParams {
-            rotate_signing_secret: Some(SigningSecretRotation::Issue(secret_type)),
-            ..Default::default()
-        };
-        self.update(connector_id, &params, project).await
-    }
-
-    /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret: true`: issue
-    /// a `webhook` connector a new secret of the current one's type, returned
-    /// once in [`Connector::signing_secret`]. The current one becomes the
-    /// previous and stays valid until [`Self::revoke_signing_secret`]. With
-    /// two already live the server answers `409`; revoke one first.
-    pub async fn rotate_signing_secret(
-        &self,
-        connector_id: Uuid,
-        project: Option<StringOrUuid>,
-    ) -> ApiResult<Connector> {
-        let params = ConnectorUpdateParams {
-            rotate_signing_secret: Some(SigningSecretRotation::Rotate),
-            ..Default::default()
-        };
-        self.update(connector_id, &params, project).await
-    }
-
-    /// `PATCH /v1/connectors/{id}` with `revoke_signing_secret`: stop
-    /// accepting the `webhook` connector's secret whose id (kid, from
-    /// [`Connector::signing_secrets`]) is `secret_id`. The current one can be
-    /// revoked only when no previous one is live (`409`); revoking the last
-    /// leaves the endpoint refusing every call. To change a connector's
-    /// secret type, revoke every secret, then issue one of the other type.
-    pub async fn revoke_signing_secret(
-        &self,
-        connector_id: Uuid,
-        secret_id: impl Into<String>,
-        project: Option<StringOrUuid>,
-    ) -> ApiResult<Connector> {
-        let params = ConnectorUpdateParams {
-            revoke_signing_secret: Some(secret_id.into()),
-            ..Default::default()
-        };
-        self.update(connector_id, &params, project).await
-    }
-
     /// `DELETE /v1/connectors/{id}` — soft delete.
     ///
     /// The server revokes the connector's connections as it goes.
@@ -302,6 +251,93 @@ impl Connectors {
         )?;
         let path = with_project("/v1/oauth/connections/authorize", project.as_ref());
         self.http.post_json(&path, &body).await
+    }
+}
+
+/// `client.connectors().secrets` — a `webhook` connector's secrets. At most
+/// two are live, both of one type: the newest is current, the older is
+/// previous and still verifies, so senders can switch over. Every route
+/// answers `404` for a connector that is not a `webhook` connector.
+#[derive(Clone)]
+pub struct ConnectorSecrets {
+    http: Arc<HttpClient>,
+}
+
+impl ConnectorSecrets {
+    /// `GET /v1/connectors/{id}/secrets` — paginated, current first, without
+    /// their material.
+    pub fn list(
+        &self,
+        connector_id: Uuid,
+        params: &PaginationParams,
+        project: Option<StringOrUuid>,
+    ) -> Paginator<WebhookSecret> {
+        #[derive(serde::Serialize)]
+        struct Query<'a> {
+            #[serde(flatten)]
+            page: &'a PaginationParams,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            project: Option<StringOrUuid>,
+        }
+
+        let path = format!("/v1/connectors/{connector_id}/secrets");
+        let query = Query {
+            page: params,
+            project,
+        };
+        Paginator::new(self.http.clone(), &path, &query)
+            .expect("PaginationParams must serialize to a JSON object")
+    }
+
+    /// `POST /v1/connectors/{id}/secrets` — issue a secret, its plaintext in
+    /// [`WebhookSecretCreated::secret`] on this response only. With
+    /// `secret_type` unset it takes the live secret's type (a rotation: the
+    /// current one becomes the previous); with none live that is a `422`.
+    /// `409` when two are already live (delete one first) or when
+    /// `secret_type` differs from a live secret's (delete every secret to
+    /// change type).
+    pub async fn create(
+        &self,
+        connector_id: Uuid,
+        secret_type: Option<WebhookSecretType>,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<WebhookSecretCreated> {
+        #[derive(serde::Serialize)]
+        struct Body {
+            #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+            secret_type: Option<WebhookSecretType>,
+        }
+
+        let path = with_project(
+            &format!("/v1/connectors/{connector_id}/secrets"),
+            project.as_ref(),
+        );
+        self.http.post_json(&path, &Body { secret_type }).await
+    }
+
+    /// `DELETE /v1/connectors/{id}/secrets/{secret_id}` — stop accepting the
+    /// secret whose id (kid) is `secret_id`. `409` for the current one while
+    /// a previous one is live; `404` when no live secret has that id.
+    /// Deleting the last leaves the endpoint refusing every call.
+    pub async fn delete(
+        &self,
+        connector_id: Uuid,
+        secret_id: &str,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<()> {
+        if matches!(secret_id, "" | "." | "..") {
+            return Err(IntrospectionAPIError::InvalidConfig(format!(
+                "{secret_id:?} is not a secret id"
+            )));
+        }
+        let path = with_project(
+            &format!(
+                "/v1/connectors/{connector_id}/secrets/{}",
+                crate::api::encoding::encode(secret_id)
+            ),
+            project.as_ref(),
+        );
+        self.http.delete_empty(&path).await
     }
 }
 

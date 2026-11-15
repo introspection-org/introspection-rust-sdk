@@ -189,14 +189,14 @@ pub use api::{
     RunnerDeployment, RunnerIdentity, RunnerSpec, Runtime, RuntimeListParams, RuntimeLlmMode,
     RuntimeMcpRequirement, RuntimePeering, RuntimePeeringListParams, RuntimeSettingListParams,
     RuntimeUpdateParams, SeatTier, Secret, ShareCreate, ShareListParams, ShareResourceType,
-    ShareUpdate, Shares, SignInSettings, SigningSecret, SigningSecretRotation, SigningSecretStatus,
-    SortDirection, SpanAttributes, SpanStatus, SseEvent, StreamOptions, StringOrUuid, Task,
-    TaskCancelOptions, TaskCancelResponse, TaskCommand, TaskCommandKind, TaskCommandListParams,
-    TaskCommandSpec, TaskCommandStatus, TaskCommands, TaskCreate, TaskCreateResponse, TaskFileRef,
-    TaskKind, TaskListParams, TaskPrompt, TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind,
-    TaskRunResponse, TaskRunResume, TaskRuns, TaskStatus, TaskUpdate, Tasks,
-    TelemetryGoalComponent, TimeDimension, TokenCount, TokenCreateParams, Trajectory, TypedEvent,
-    UploadSource, Variable, VariableCreateParams, VariableKind, VariableUpdateParams,
+    ShareUpdate, Shares, SignInSettings, SortDirection, SpanAttributes, SpanStatus, SseEvent,
+    StreamOptions, StringOrUuid, Task, TaskCancelOptions, TaskCancelResponse, TaskCommand,
+    TaskCommandKind, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCommands,
+    TaskCreate, TaskCreateResponse, TaskFileRef, TaskKind, TaskListParams, TaskPrompt,
+    TaskRepoRequest, TaskRun, TaskRunCreate, TaskRunKind, TaskRunResponse, TaskRunResume, TaskRuns,
+    TaskStatus, TaskUpdate, Tasks, TelemetryGoalComponent, TimeDimension, TokenCount,
+    TokenCreateParams, Trajectory, TypedEvent, UploadSource, Variable, VariableCreateParams,
+    VariableKind, VariableUpdateParams, WebhookSecret, WebhookSecretCreated, WebhookSecretStatus,
     WebhookSecretType, WsAuthenticationDocs, WsFrameDocs, WsMessageProtocolDocs,
     MAX_COMMAND_WAIT_SECONDS, ROUTINE_PARAMETERS_FILE_NAME, WEBHOOK_CONNECTOR_PROVIDER,
 };
@@ -236,10 +236,11 @@ pub use resources::tags::{
 };
 pub use resources::{
     Aauth, Annotations, ApiKeys, ApplicationIdps, ApplicationKeys, ApplicationSecrets,
-    Applications, Approvals, Connectors, Credentials, Endpoints, ExperimentHandle, Experiments,
-    Images, Integrations, IssueComments, Issues, Judges, MemberConnections, Members, Missions,
-    Oidc, Organizations, ProjectPeerings, Projects, Recipes, Remotes, Repositories,
-    RepositoryContents, Routines, RuntimeHandle, Runtimes, Tags, Tokens, Variables,
+    Applications, Approvals, ConnectorSecrets, Connectors, Credentials, Endpoints,
+    ExperimentHandle, Experiments, Images, Integrations, IssueComments, Issues, Judges,
+    MemberConnections, Members, Missions, Oidc, Organizations, ProjectPeerings, Projects, Recipes,
+    Remotes, Repositories, RepositoryContents, Routines, RuntimeHandle, Runtimes, Tags, Tokens,
+    Variables,
 };
 pub use runner::{Runner, RunnerSource};
 pub use types::{AdvancedOptions, ClientConfig, ClientConfigBuilder};
