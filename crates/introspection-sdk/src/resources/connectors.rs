@@ -325,8 +325,16 @@ impl ConnectorSecrets {
         secret_id: &str,
         project: Option<StringOrUuid>,
     ) -> ApiResult<()> {
+        if matches!(secret_id, "" | "." | "..") {
+            return Err(IntrospectionAPIError::InvalidConfig(format!(
+                "{secret_id:?} is not a secret id"
+            )));
+        }
         let path = with_project(
-            &format!("/v1/connectors/{connector_id}/secrets/{secret_id}"),
+            &format!(
+                "/v1/connectors/{connector_id}/secrets/{}",
+                crate::api::encoding::encode(secret_id)
+            ),
             project.as_ref(),
         );
         self.http.delete_empty(&path).await

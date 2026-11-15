@@ -1111,3 +1111,19 @@ fn an_unknown_secret_type_or_status_is_kept() {
         secret_json("1a2b3c4d", "hmac_v2", "retiring")
     );
 }
+
+#[tokio::test]
+async fn secrets_delete_encodes_the_id_and_refuses_a_dot_segment() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("{}/a%2Fb", secrets_path())))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let secrets = Connectors::new(build_http(&server)).secrets;
+    secrets.delete(connector_id(), "a/b", None).await.unwrap();
+    for bad in ["", ".", ".."] {
+        assert!(secrets.delete(connector_id(), bad, None).await.is_err());
+    }
+}
