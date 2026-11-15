@@ -12,8 +12,8 @@ use uuid::Uuid;
 use crate::api::error::ApiResult;
 use crate::api::http::HttpClient;
 use crate::api::schemas::{
-    ApiKey, ApiKeyAcknowledgement, ApiKeyCreateParams, ApiKeyCreated, ApiKeyDeleteParams,
-    ApiKeyListParams, ApiKeyUpdateParams, StringOrUuid,
+    ApiKey, ApiKeyCreateParams, ApiKeyCreated, ApiKeyDeleteParams, ApiKeyListParams,
+    ApiKeyUpdateParams, StringOrUuid,
 };
 use crate::resources::with_project;
 
@@ -40,8 +40,7 @@ impl ApiKeys {
     }
 
     /// `POST /v1/api-keys`. The plaintext key is in
-    /// [`ApiKeyCreated::api_key`] and is never returned again; save it, then
-    /// call [`Self::acknowledge`].
+    /// [`ApiKeyCreated::api_key`] and is never returned again; save it.
     pub async fn create(
         &self,
         params: &ApiKeyCreateParams,
@@ -75,19 +74,5 @@ impl ApiKeys {
             path.push_str(&format!("{separator}expires_in={expires_in}"));
         }
         self.http.delete_empty(&path).await
-    }
-
-    /// `POST /v1/api-keys/{id}/acknowledge` — record that the plaintext from
-    /// [`Self::create`] was saved. A second acknowledge answers 404.
-    pub async fn acknowledge(
-        &self,
-        api_key_id: Uuid,
-        project: Option<StringOrUuid>,
-    ) -> ApiResult<ApiKeyAcknowledgement> {
-        let path = with_project(
-            &format!("/v1/api-keys/{api_key_id}/acknowledge"),
-            project.as_ref(),
-        );
-        self.http.post_json(&path, &serde_json::Map::new()).await
     }
 }

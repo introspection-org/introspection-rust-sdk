@@ -225,10 +225,6 @@ pub async fn members_and_keys(w: &mut Walk) {
         )
         .await
         .expect("rename the key");
-    sa.api_keys()
-        .acknowledge(key.key.id, Some(project.into()))
-        .await
-        .expect("acknowledge the key");
     // The organisation's name, slug, sign-in settings and billing are whoever is running the walk.
     assert_stable!(without(&org, &["sign_in", "subscription_live"]), { ".name" => "[login's]", ".slug" => "[login's]" }, @r#"
     {

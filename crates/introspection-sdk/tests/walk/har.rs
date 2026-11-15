@@ -461,9 +461,8 @@ impl Body {
     /// equivalences and nothing looser:
     ///
     /// - An empty JSON object matches a recorded empty body. The Rust SDK
-    ///   posts `{}` to three bodiless actions (a run's `/cancel`, an
-    ///   routine's `/trigger`, an API key's `/acknowledge`) where the JS
-    ///   SDK sends nothing.
+    ///   posts `{}` to two bodiless actions (a run's `/cancel` and a
+    ///   routine's `/trigger`) where the JS SDK sends nothing.
     /// - A multipart body matches a recorded empty one. Polly in Node
     ///   records a `FormData` body as an empty `text/plain` entry, so the JS
     ///   recording carries no fields to compare; a recording this SDK writes

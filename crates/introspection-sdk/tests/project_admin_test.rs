@@ -132,12 +132,6 @@ async fn api_keys_list_unwraps_the_envelope_and_delete_sends_the_grace() {
         .expect(1)
         .mount(&server)
         .await;
-    Mock::given(method("POST"))
-        .and(path(format!("/v1/api-keys/{ID}/acknowledge")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "acknowledged": true })))
-        .expect(1)
-        .mount(&server)
-        .await;
 
     let client = client(&server);
     let keys = client
@@ -161,14 +155,6 @@ async fn api_keys_list_unwraps_the_envelope_and_delete_sends_the_grace() {
         )
         .await
         .expect("delete");
-    assert!(
-        client
-            .api_keys()
-            .acknowledge(id(), None)
-            .await
-            .expect("acknowledge")
-            .acknowledged
-    );
 }
 
 #[tokio::test]

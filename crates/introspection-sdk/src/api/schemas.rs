@@ -5748,7 +5748,8 @@ pub struct ApiKey {
     pub expires_at: Option<String>,
     #[serde(default)]
     pub last_used_at: Option<String>,
-    /// Set once [`crate::ApiKeys::acknowledge`] records the key as saved.
+    /// Legacy: no longer written by the server; set only on keys acknowledged
+    /// before the acknowledge route was retired.
     #[serde(default)]
     pub acknowledged_at: Option<String>,
     pub key_display: String,
@@ -5813,13 +5814,6 @@ pub struct ApiKeyDeleteParams {
     /// revokes it at once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<u64>,
-}
-
-/// Response of `POST /v1/api-keys/{id}/acknowledge`.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ApiKeyAcknowledgement {
-    pub acknowledged: bool,
 }
 
 // applications
