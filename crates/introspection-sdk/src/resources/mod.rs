@@ -44,7 +44,7 @@
 //! - [`Organizations`] — `GET /v1/organizations/me`, the credential's org.
 //! - [`Tokens`] — `POST /v1/tokens`, a Data Plane token for one project.
 //! - [`ApiKeys`] — `/v1/api-keys`: list, create, update, delete (or rotate
-//!   with a grace period) and acknowledge.
+//!   with a grace period).
 //! - [`Applications`] — `/v1/applications` CRUD with each Application's
 //!   [`ApplicationIdps`], [`ApplicationSecrets`] and [`ApplicationKeys`].
 //! - [`Credentials`] and [`Variables`] — what a project's runtimes read.

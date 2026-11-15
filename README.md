@@ -800,7 +800,6 @@ let key = client
     .await?;
 let plaintext = key.api_key.expect("returned on create only");
 save(plaintext.expose())?;
-client.api_keys().acknowledge(key.key.id, project.clone()).await?;
 
 client
     .credentials()

@@ -217,9 +217,9 @@ pub use http::{HttpClient, HttpConfig};
 pub use paginator::Paginator;
 pub use resumable::{stream_resumable, stream_resumable_frames, RunFrame, StreamOptions};
 pub use schemas::{
-    AgentInfo, AnnotationEvent, AnnotationPayload, ApiKey, ApiKeyAcknowledgement, ApiKeyCapability,
-    ApiKeyCreateParams, ApiKeyCreated, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus,
-    ApiKeyUpdateParams, Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
+    AgentInfo, AnnotationEvent, AnnotationPayload, ApiKey, ApiKeyCapability, ApiKeyCreateParams,
+    ApiKeyCreated, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus, ApiKeyUpdateParams,
+    Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
     ApplicationIdpCreateParams, ApplicationIdpProvider, ApplicationIdpStatus, ApplicationKey,
     ApplicationListParams, ApplicationSecret, ApplicationSecretCreateParams,
     ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, BranchesQuery,

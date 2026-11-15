@@ -132,11 +132,6 @@ const TYPED: &[(&str, &str, Check)] = &[
     ("POST", r"^/v1/api-keys$", round_trip::<ApiKeyCreated>),
     ("PATCH", r"^/v1/api-keys/[^/]+$", round_trip::<ApiKey>),
     (
-        "POST",
-        r"^/v1/api-keys/[^/]+/acknowledge$",
-        round_trip::<ApiKeyAcknowledgement>,
-    ),
-    (
         "GET",
         r"^/v1/applications$",
         round_trip::<Paginated<Application>>,

@@ -120,9 +120,9 @@ pub mod types;
 // jscpd:ignore-start -- a re-export list mirroring `api`'s, declarations only
 // Re-export wire types + low-level REST API surface (always available)
 pub use api::{
-    AgentInfo, AnnotationEvent, AnnotationPayload, ApiKey, ApiKeyAcknowledgement, ApiKeyCapability,
-    ApiKeyCreateParams, ApiKeyCreated, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus,
-    ApiKeyUpdateParams, Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
+    AgentInfo, AnnotationEvent, AnnotationPayload, ApiKey, ApiKeyCapability, ApiKeyCreateParams,
+    ApiKeyCreated, ApiKeyDeleteParams, ApiKeyListParams, ApiKeyStatus, ApiKeyUpdateParams,
+    Application, ApplicationCreateParams, ApplicationGrant, ApplicationIdp,
     ApplicationIdpCreateParams, ApplicationIdpProvider, ApplicationIdpStatus, ApplicationKey,
     ApplicationListParams, ApplicationSecret, ApplicationSecretCreateParams,
     ApplicationSecretStatus, ApplicationType, ApplicationUpdateParams, Arm, BranchesQuery,
