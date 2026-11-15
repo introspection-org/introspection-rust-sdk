@@ -421,7 +421,7 @@ client.routines().update(reminder.id, &RoutineUpdateParams {
     ..Default::default()
 }).await?;
 
-let run = client.routines().trigger(reminder.id).await?;
+let run = client.routines().trigger(reminder.id, &Default::default()).await?;
 println!("{} {:?}", run.status, run.task_id);
 
 // The routines that post into one task, and what each firing did.
@@ -434,6 +434,11 @@ let fired = client.events().list(&EventListParams {
     ..EventListParams::new(IntrospectionEventName::RoutineTriggered)
 })?;
 ```
+
+`RoutineUpdateParams::trigger_type` switches a prompt routine between
+`Manual` and `Cron`: `Cron` needs a schedule in the same update
+(`cron_schedule` or `metadata.cron_schedules`, no cron repeated), and `Manual`
+drops the next slot.
 
 `Routine::kind` is `None` for a routine a person created. A platform
 routine carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
@@ -455,10 +460,11 @@ change, so it is not served yet.
 Beside its schedule and a manual trigger, a prompt routine that starts a task
 per run can run on events. Each of its `triggers` listens to an organization
 integration (Slack, GitHub) or a project connector. A custom webhook is a
-`webhook` connector: the platform generates its secret and returns it once, on
-create, and your system `POST`s to the connector's endpoint, signed with
-[Standard Webhooks](https://www.standardwebhooks.com/) (the default) or sent
-with `Authorization: Bearer <secret>`. An event-started run's parameters are
+`webhook` connector. Create issues it no secret; issue the first with
+`issue_signing_secret`, naming its type, and the platform generates it and
+returns it once. Your system then `POST`s to the connector's endpoint, signed
+with [Standard Webhooks](https://www.standardwebhooks.com/) (a `whsec_...`
+secret) or sent with `Authorization: Bearer <whtok_...>`. An event-started run's parameters are
 the event's body: the run gets it as `parameters.json` (any JSON; a body that
 is not JSON arrives as a JSON string), and each `@parameters.<key>` in the
 prompt becomes that top-level key's value as JSON, the same as a manual run's
@@ -468,15 +474,18 @@ id, time):
 ```rust
 use introspection_sdk::{
     ConnectorCreateParams, RoutineCreateParams, RoutineTriggerFilter,
-    RoutineTriggerProvider, RoutineTriggerSpec, RoutineTriggerType, WebhookAuth,
+    RoutineTriggerProvider, RoutineTriggerSpec, RoutineTriggerType, WebhookSecretType,
 };
 
 let connector = client.connectors().create(&ConnectorCreateParams {
     slug: Some("ci-alerts".into()),
-    ..ConnectorCreateParams::webhook("CI alerts", Some(WebhookAuth::StandardWebhooks))
+    ..ConnectorCreateParams::webhook("CI alerts")
 }, None).await?;
+let issued = client.connectors()
+    .issue_signing_secret(connector.id, WebhookSecretType::StandardWebhooks, None)
+    .await?;
 // Shown once: no read returns it. Store it in the sending system now.
-let secret = connector.signing_secret.as_ref().expect("a new webhook connector's secret");
+let secret = issued.signing_secret.as_ref().expect("the issued secret");
 let endpoint = connector.webhook_endpoint("https://api.introspection.dev");
 
 let triage = client.routines().create(&RoutineCreateParams {
@@ -501,13 +510,16 @@ a trigger, and the rest are removed. A trigger runs one at a time: an event
 that arrives during its previous run is skipped as `trigger_busy`.
 
 A webhook connector accepts at most two secrets, listed without their material
-in `connector.signing_secrets` (`id`, a fingerprint, `created_at` and
-`status`, `Current` or `Previous`). Rotate with
-`client.connectors().rotate_signing_secret(connector.id, None)`, which returns
-the new secret once; the old one stays valid as the previous secret until the
-next rotation, or until you stop it with
-`client.connectors().revoke_previous_signing_secret(connector.id, None)` once
-every sender has the new one.
+in `connector.signing_secrets` (`id`, a fingerprint used as the kid,
+`secret_type`, `created_at` and `status`, `Current` or `Previous`). Rotate with
+`client.connectors().rotate_signing_secret(connector.id, None)`, which keeps
+the type and returns the new secret once; the old one stays valid as the
+previous secret until you stop it with
+`client.connectors().revoke_signing_secret(connector.id, kid, None)` once every
+sender has the new one. With two live a rotation answers `409`, so revoke one
+first. The current secret can be revoked only when no previous one is live,
+and revoking the last leaves the endpoint refusing every call. To change the
+type, revoke every secret, then issue one of the other type.
 
 Sign a request with an official
 [`standardwebhooks`](https://github.com/standard-webhooks/standard-webhooks)
@@ -516,7 +528,12 @@ library, such as `new Webhook(secret).sign(id, date, body)` in JavaScript or
 signature as `webhook-signature` beside `webhook-id` and `webhook-timestamp`.
 
 A manual trigger takes the same parameters, as any JSON object of at most
-16 KiB and 8 levels deep:
+16 KiB and 8 levels deep. For a prompt routine that starts a task per run,
+`trigger` also uploads them through the Files API
+(`routine-parameters/<uuid>.json`, expiring in 30 days) and attaches that file
+to the run's task as `parameters.json`, beside the inline copy. It reads the
+routine first to decide; set `attach_parameters_file` to `Some(true)` or
+`Some(false)` to skip that read:
 
 ```rust
 use introspection_sdk::RoutineTriggerParams;
@@ -524,14 +541,23 @@ use introspection_sdk::RoutineTriggerParams;
 let serde_json::Value::Object(parameters) =
     serde_json::json!({ "severity": "high", "service": "billing" }) else { unreachable!() };
 let run = client.routines()
-    .trigger_with(triage.id, &RoutineTriggerParams::with_parameters(parameters))
+    .trigger(triage.id, &RoutineTriggerParams::with_parameters(parameters))
     .await?;
 println!("{} {:?} {:?}", run.status, run.task_id, run.result);
 ```
 
+`RoutineTriggerParams::for_routine(&routine, parameters)` decides from a
+routine you already hold. `parameters` is a `RoutineParameters`: `Inline` (a
+JSON object, as above), `Path` (a local JSON file holding an object, read by
+the SDK and then sent as `Inline`), or `File`, a JSON file you already
+uploaded, which is attached as `parameters.json` and read by the server (at
+most 256 KiB), with no read of the routine and no upload. `with_parameters`
+takes any of them, from a map, a `PathBuf`, a `File` or a file id; `files` attaches more Files API references to the run's
+task. Only a prompt routine that starts a task per run takes files.
+
 A platform routine reads the keys its kind defines: an `ObservationSynthesis`
-routine takes `conversation_ids` (`RoutineTriggerParams::conversation_ids`) and
-reports what it queued in `run.synthesis_result()`.
+routine takes `conversation_ids` (`RoutineTriggerParams::conversation_ids`,
+inline only) and reports what it queued in `run.synthesis_result()`.
 
 ## Connect a member's apps
 

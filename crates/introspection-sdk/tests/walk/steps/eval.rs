@@ -539,7 +539,7 @@ pub async fn routines(w: &mut Walk) {
     "#);
     let triggered = sa
         .routines()
-        .trigger(routine.id)
+        .trigger(routine.id, &Default::default())
         .await
         .expect("trigger the routine");
     assert_stable!(triggered, @r#"

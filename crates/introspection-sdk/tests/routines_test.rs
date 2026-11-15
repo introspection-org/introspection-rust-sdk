@@ -6,14 +6,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use introspection_sdk::api::{HttpClient, HttpConfig};
+use introspection_sdk::api::{HttpClient, HttpConfig, IntrospectionAPIError};
 use introspection_sdk::{
     AdvancedOptions, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
     IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
     RoutineCondition, RoutineConditionType, RoutineCreateParams, RoutineExecutionStatus,
-    RoutineKind, RoutineListParams, RoutineMetadata, RoutineSkipReason, RoutineTriggerEventRef,
-    RoutineTriggerFilter, RoutineTriggerParams, RoutineTriggerProvider, RoutineTriggerSource,
-    RoutineTriggerSpec, RoutineTriggerType, RoutineUpdateParams, Routines, TaskRepoRequest,
+    RoutineKind, RoutineListParams, RoutineMetadata, RoutineParameters, RoutineSkipReason,
+    RoutineTriggerEventRef, RoutineTriggerFilter, RoutineTriggerParams, RoutineTriggerProvider,
+    RoutineTriggerRequest, RoutineTriggerSource, RoutineTriggerSpec, RoutineTriggerType,
+    RoutineUpdateParams, Routines, TaskFileRef, TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -381,6 +382,50 @@ async fn update_sends_only_the_set_fields() {
 }
 
 #[tokio::test]
+async fn update_switches_the_trigger_type() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .and(body_json(
+            json!({ "cron_schedule": "0 9 * * *", "trigger_type": "cron" }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .and(body_json(json!({ "trigger_type": "manual" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let routines = Routines::new(build_http(&server));
+    routines
+        .update(
+            id(ROUTINE_ID),
+            &RoutineUpdateParams {
+                trigger_type: Some(RoutineTriggerType::Cron),
+                cron_schedule: Some("0 9 * * *".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    routines
+        .update(
+            id(ROUTINE_ID),
+            &RoutineUpdateParams {
+                trigger_type: Some(RoutineTriggerType::Manual),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn update_metadata_sends_only_the_set_metadata_fields() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
@@ -631,7 +676,7 @@ async fn trigger_returns_the_task_it_ran() {
         .await;
 
     let response = Routines::new(build_http(&server))
-        .trigger(id(ROUTINE_ID))
+        .trigger(id(ROUTINE_ID), &RoutineTriggerParams::default())
         .await
         .unwrap();
 
@@ -658,8 +703,10 @@ async fn trigger_sends_an_empty_body() {
         .await;
 
     let routines = Routines::new(build_http(&server));
-    routines.trigger(id(ROUTINE_ID)).await.unwrap();
-    // Default params send no `parameters` either.
+    routines
+        .trigger(id(ROUTINE_ID), &RoutineTriggerParams::default())
+        .await
+        .unwrap();
     routines
         .trigger_with(id(ROUTINE_ID), &RoutineTriggerParams::default())
         .await
@@ -667,7 +714,7 @@ async fn trigger_sends_an_empty_body() {
 }
 
 #[tokio::test]
-async fn trigger_with_sends_the_conversation_ids_as_parameters() {
+async fn trigger_sends_the_conversation_ids_inline_without_an_upload() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
@@ -693,7 +740,7 @@ async fn trigger_with_sends_the_conversation_ids_as_parameters() {
         .await;
 
     let response = Routines::new(build_http(&server))
-        .trigger_with(
+        .trigger(
             id(ROUTINE_ID),
             &RoutineTriggerParams::conversation_ids(["conv-a", "conv-b"]),
         )
@@ -717,38 +764,440 @@ async fn trigger_with_sends_the_conversation_ids_as_parameters() {
     );
 }
 
-#[tokio::test]
-async fn trigger_with_sends_a_prompt_routines_parameters() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
-        .and(body_json(json!({
-            "parameters": { "severity": "high", "alert": { "id": 7 } },
-        })))
-        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
-            "status": "triggered",
-            "routine_id": ROUTINE_ID,
-            "task_id": TASK_ID,
-            "run_id": null,
-            "reason": null,
-            "result": null,
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+const FILE_ID: &str = "66666666-6666-7666-8666-666666666666";
+const EXTRA_FILE_ID: &str = "77777777-7777-7777-8777-777777777777";
 
+fn uploaded_file_json(name: &str) -> serde_json::Value {
+    json!({
+        "id": FILE_ID,
+        "org_id": "00000000-0000-0000-0000-0000000000aa",
+        "project_id": "00000000-0000-0000-0000-0000000000bb",
+        "created_at": "2026-11-15T00:00:00Z",
+        "updated_at": "2026-11-15T00:00:00Z",
+        "name": name,
+        "storage_path": format!("/storage/{name}"),
+        "mime_type": "application/json",
+        "size_bytes": 40,
+        "expires_at": "2026-12-15T00:00:00Z",
+    })
+}
+
+fn triggered_json() -> serde_json::Value {
+    json!({
+        "status": "triggered",
+        "routine_id": ROUTINE_ID,
+        "task_id": TASK_ID,
+        "run_id": null,
+        "reason": null,
+        "result": null,
+    })
+}
+
+fn parameters() -> serde_json::Map<String, serde_json::Value> {
     let serde_json::Value::Object(parameters) = json!({ "severity": "high", "alert": { "id": 7 } })
     else {
         unreachable!()
     };
-    let response = Routines::new(build_http(&server))
-        .trigger_with(
+    parameters
+}
+
+async fn mount_upload(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .respond_with(|request: &Request| {
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            let name = body["name"].as_str().unwrap().to_string();
+            ResponseTemplate::new(201).set_body_json(uploaded_file_json(&name))
+        })
+        .mount(server)
+        .await;
+}
+
+async fn mount_trigger(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}/trigger")))
+        .respond_with(ResponseTemplate::new(202).set_body_json(triggered_json()))
+        .mount(server)
+        .await;
+}
+
+async fn mount_routine(server: &MockServer, routine: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(routine))
+        .mount(server)
+        .await;
+}
+
+async fn reads(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.method.as_str() == "GET")
+        .count()
+}
+
+async fn bodies(server: &MockServer, route: &str) -> Vec<serde_json::Value> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.path() == route)
+        .map(|request| serde_json::from_slice(&request.body).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn trigger_attaching_explicitly_uploads_without_reading_the_routine() {
+    let server = MockServer::start().await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    let routines = Routines::new(build_http(&server));
+    let params = RoutineTriggerParams {
+        files: vec![TaskFileRef {
+            id: id(EXTRA_FILE_ID),
+            name: Some("inputs/report.csv".into()),
+            size_bytes: None,
+        }],
+        attach_parameters_file: Some(true),
+        ..RoutineTriggerParams::with_parameters(parameters())
+    };
+    let response = routines.trigger(id(ROUTINE_ID), &params).await.unwrap();
+    assert_eq!(response.task_id, Some(id(TASK_ID)));
+    routines.trigger(id(ROUTINE_ID), &params).await.unwrap();
+
+    let uploads = bodies(&server, "/v1/files").await;
+    assert_eq!(uploads.len(), 2);
+    for upload in &uploads {
+        let name = upload["name"].as_str().unwrap();
+        let stem = name
+            .strip_prefix("routine-parameters/")
+            .and_then(|rest| rest.strip_suffix(".json"))
+            .unwrap_or_else(|| panic!("unexpected name {name}"));
+        Uuid::parse_str(stem).unwrap();
+        assert_eq!(upload["mime_type"], "application/json");
+        assert_eq!(upload["ttl_seconds"], 2_592_000);
+        let content: serde_json::Value =
+            serde_json::from_str(upload["content"].as_str().unwrap()).unwrap();
+        assert_eq!(content, serde_json::Value::Object(parameters()));
+    }
+    assert_ne!(uploads[0]["name"], uploads[1]["name"]);
+    assert_eq!(reads(&server).await, 0);
+
+    let triggers = bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await;
+    assert_eq!(triggers.len(), 2);
+    assert_eq!(
+        triggers[0],
+        json!({
+            "parameters": { "severity": "high", "alert": { "id": 7 } },
+            "files": [
+                { "id": FILE_ID, "name": "parameters.json" },
+                { "id": EXTRA_FILE_ID, "name": "inputs/report.csv" },
+            ],
+        })
+    );
+}
+
+#[tokio::test]
+async fn trigger_with_a_parameters_file_sends_only_its_reference() {
+    let server = MockServer::start().await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    let uploaded: introspection_sdk::File =
+        serde_json::from_value(uploaded_file_json("inputs/params.json")).unwrap();
+    let routines = Routines::new(build_http(&server));
+    // An id, an uploaded `File`, and an explicit attach choice the file path ignores.
+    for params in [
+        RoutineTriggerParams::with_parameters(id(EXTRA_FILE_ID)),
+        RoutineTriggerParams::with_parameters(&uploaded),
+        RoutineTriggerParams {
+            parameters: Some(RoutineParameters::file(id(EXTRA_FILE_ID))),
+            files: vec![TaskFileRef {
+                id: id(FILE_ID),
+                name: Some("inputs/report.csv".into()),
+                size_bytes: None,
+            }],
+            attach_parameters_file: Some(true),
+        },
+    ] {
+        routines.trigger(id(ROUTINE_ID), &params).await.unwrap();
+    }
+
+    assert!(bodies(&server, "/v1/files").await.is_empty());
+    assert_eq!(reads(&server).await, 0);
+    assert_eq!(
+        bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await,
+        vec![
+            json!({ "files": [{ "id": EXTRA_FILE_ID, "name": "parameters.json" }] }),
+            json!({ "files": [{ "id": FILE_ID, "name": "parameters.json" }] }),
+            json!({ "files": [
+                { "id": EXTRA_FILE_ID, "name": "parameters.json" },
+                { "id": FILE_ID, "name": "inputs/report.csv" },
+            ] }),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn trigger_without_parameters_uploads_nothing() {
+    let server = MockServer::start().await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    let routines = Routines::new(build_http(&server));
+    routines
+        .trigger(id(ROUTINE_ID), &RoutineTriggerParams::default())
+        .await
+        .unwrap();
+    routines
+        .trigger(
             id(ROUTINE_ID),
-            &RoutineTriggerParams::with_parameters(parameters),
+            &RoutineTriggerParams {
+                files: vec![TaskFileRef {
+                    id: id(EXTRA_FILE_ID),
+                    name: None,
+                    size_bytes: Some(12),
+                }],
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
-    assert_eq!(response.task_id, Some(id(TASK_ID)));
+
+    assert!(bodies(&server, "/v1/files").await.is_empty());
+    assert_eq!(reads(&server).await, 0);
+    assert_eq!(
+        bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await,
+        vec![
+            json!({}),
+            json!({ "files": [{ "id": EXTRA_FILE_ID, "size_bytes": 12 }] }),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn trigger_by_default_reads_a_prompt_routine_and_uploads() {
+    let server = MockServer::start().await;
+    let mut own_task = routine_json();
+    own_task["task_id"] = json!(null);
+    mount_routine(&server, own_task).await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    Routines::new(build_http(&server))
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams::with_parameters(parameters()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(reads(&server).await, 1);
+    assert_eq!(bodies(&server, "/v1/files").await.len(), 1);
+    assert_eq!(
+        bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await,
+        vec![json!({
+            "parameters": { "severity": "high", "alert": { "id": 7 } },
+            "files": [{ "id": FILE_ID, "name": "parameters.json" }],
+        })]
+    );
+}
+
+#[tokio::test]
+async fn trigger_by_default_sends_a_platform_or_task_routines_parameters_inline() {
+    let inline = json!({ "parameters": { "severity": "high", "alert": { "id": 7 } } });
+    let mut platform = routine_json();
+    platform["kind"] = json!("observation_synthesis");
+    platform["task_id"] = json!(null);
+    // `routine_json()` posts into an existing task.
+    for routine in [platform, routine_json()] {
+        let server = MockServer::start().await;
+        mount_routine(&server, routine).await;
+        mount_upload(&server).await;
+        mount_trigger(&server).await;
+
+        Routines::new(build_http(&server))
+            .trigger(
+                id(ROUTINE_ID),
+                &RoutineTriggerParams::with_parameters(parameters()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(reads(&server).await, 1);
+        assert!(bodies(&server, "/v1/files").await.is_empty());
+        assert_eq!(
+            bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await,
+            vec![inline.clone()]
+        );
+    }
+}
+
+#[tokio::test]
+async fn trigger_not_attaching_explicitly_reads_and_uploads_nothing() {
+    let server = MockServer::start().await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    let routine: introspection_sdk::Routine = serde_json::from_value(routine_json()).unwrap();
+    assert!(!routine.takes_files());
+    let routines = Routines::new(build_http(&server));
+    routines
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams::for_routine(&routine, parameters()),
+        )
+        .await
+        .unwrap();
+    routines
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams {
+                attach_parameters_file: Some(false),
+                ..RoutineTriggerParams::with_parameters(parameters())
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(reads(&server).await, 0);
+    assert!(bodies(&server, "/v1/files").await.is_empty());
+    let inline = json!({ "parameters": { "severity": "high", "alert": { "id": 7 } } });
+    assert_eq!(
+        bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await,
+        vec![inline.clone(), inline]
+    );
+
+    let mut own_task = routine_json();
+    own_task["task_id"] = json!(null);
+    let own_task: introspection_sdk::Routine = serde_json::from_value(own_task).unwrap();
+    assert!(own_task.takes_files());
+    assert_eq!(
+        RoutineTriggerParams::for_routine(&own_task, parameters()).attach_parameters_file,
+        Some(true)
+    );
+}
+
+fn parameters_on_disk(contents: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("routine-parameters-{}.json", Uuid::now_v7()));
+    std::fs::write(&path, contents).unwrap();
+    path
+}
+
+#[tokio::test]
+async fn trigger_with_a_local_file_sends_it_as_inline_parameters() {
+    let server = MockServer::start().await;
+    let mut own_task = routine_json();
+    own_task["task_id"] = json!(null);
+    mount_routine(&server, own_task).await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    let path = parameters_on_disk(r#"{"severity": "high", "alert": {"id": 7}}"#);
+    let routines = Routines::new(build_http(&server));
+    routines
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams::with_parameters(path.clone()),
+        )
+        .await
+        .unwrap();
+    routines
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams {
+                attach_parameters_file: Some(false),
+                ..RoutineTriggerParams::with_parameters(path.clone())
+            },
+        )
+        .await
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+
+    assert_eq!(reads(&server).await, 1);
+    let uploads = bodies(&server, "/v1/files").await;
+    assert_eq!(uploads.len(), 1);
+    let content: serde_json::Value =
+        serde_json::from_str(uploads[0]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(content, serde_json::Value::Object(parameters()));
+    let inline = json!({ "severity": "high", "alert": { "id": 7 } });
+    assert_eq!(
+        bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger")).await,
+        vec![
+            json!({
+                "parameters": inline,
+                "files": [{ "id": FILE_ID, "name": "parameters.json" }],
+            }),
+            json!({ "parameters": inline }),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_local_file_that_is_not_a_json_object_is_refused_before_any_request() {
+    let server = MockServer::start().await;
+    mount_upload(&server).await;
+    mount_trigger(&server).await;
+
+    let routines = Routines::new(build_http(&server));
+    for contents in ["[1, 2]", "severity: high"] {
+        let path = parameters_on_disk(contents);
+        let err = routines
+            .trigger(
+                id(ROUTINE_ID),
+                &RoutineTriggerParams::with_parameters(path.clone()),
+            )
+            .await
+            .unwrap_err();
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            matches!(err, IntrospectionAPIError::InvalidConfig(_)),
+            "{err}"
+        );
+    }
+    let missing = std::env::temp_dir().join(format!("missing-{}.json", Uuid::now_v7()));
+    let err = routines
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams::with_parameters(missing),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, IntrospectionAPIError::Io(_)), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_upload_does_not_trigger() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/files"))
+        .respond_with(ResponseTemplate::new(413).set_body_json(json!({ "detail": "too large" })))
+        .mount(&server)
+        .await;
+    mount_trigger(&server).await;
+
+    let err = Routines::new(build_http(&server))
+        .trigger(
+            id(ROUTINE_ID),
+            &RoutineTriggerParams {
+                attach_parameters_file: Some(true),
+                ..RoutineTriggerParams::with_parameters(parameters())
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(413));
+    assert!(
+        bodies(&server, &format!("/v1/routines/{ROUTINE_ID}/trigger"))
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -768,7 +1217,7 @@ async fn a_clustering_trigger_returns_its_run() {
         .await;
 
     let response = Routines::new(build_http(&server))
-        .trigger(id(ROUTINE_ID))
+        .trigger(id(ROUTINE_ID), &RoutineTriggerParams::default())
         .await
         .unwrap();
 
@@ -777,9 +1226,9 @@ async fn a_clustering_trigger_returns_its_run() {
 }
 
 #[test]
-fn trigger_params_refuse_an_unknown_field() {
+fn the_trigger_body_refuses_an_unknown_field() {
     // The old top-level `conversation_ids` moved under `parameters`.
-    let err = serde_json::from_value::<RoutineTriggerParams>(json!({
+    let err = serde_json::from_value::<RoutineTriggerRequest>(json!({
         "conversation_ids": ["conv-a"],
     }))
     .unwrap_err();
@@ -801,7 +1250,7 @@ async fn a_skipped_trigger_carries_its_reason() {
         .await;
 
     let response = Routines::new(build_http(&server))
-        .trigger(id(ROUTINE_ID))
+        .trigger(id(ROUTINE_ID), &RoutineTriggerParams::default())
         .await
         .unwrap();
 

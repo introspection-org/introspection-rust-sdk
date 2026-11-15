@@ -12,8 +12,11 @@
 //! their own customer, without anyone touching our UI.
 //!
 //! `client_secret` / `signing_secret` are write-only — accepted on create and
-//! update, absent from every response — so they appear on the param structs
-//! and never on [`Connector`]. Omitting one on update leaves it as it is.
+//! update, absent from every response — so they appear on the param structs.
+//! The one exception is a `webhook` connector's secret, which the platform
+//! generates: [`Connectors::issue_signing_secret`] and
+//! [`Connectors::rotate_signing_secret`] return it once in
+//! [`Connector::signing_secret`]. Omitting one on update leaves it as it is.
 //!
 //! Project scope comes from the authenticated credential. A session or an
 //! org-wide token names the project instead: the connector methods take a
@@ -32,7 +35,8 @@ use crate::api::schemas::{
     ConnectionTokenParams, ConnectionTokenResult, Connector, ConnectorApp, ConnectorAppListParams,
     ConnectorAuthorization, ConnectorAuthorizeParams, ConnectorCreateParams,
     ConnectorCustomAppSearchParams, ConnectorListParams, ConnectorOAuthDiscovery,
-    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, ProjectSelector, StringOrUuid,
+    ConnectorOAuthDiscoveryParams, ConnectorUpdateParams, ProjectSelector, SigningSecretRotation,
+    StringOrUuid, WebhookSecretType,
 };
 use crate::resources::with_project;
 
@@ -176,36 +180,55 @@ impl Connectors {
         self.http.patch_json(&path, params).await
     }
 
-    /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret`: issue a
-    /// `webhook` connector a new secret, returned once in
-    /// [`Connector::signing_secret`]. The current one becomes the previous
-    /// and is accepted until the next rotation or
-    /// [`Self::revoke_previous_signing_secret`]; a previous one already held
-    /// is retired, so at most two are valid. Any other provider answers
-    /// `422`.
+    /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret: {"type": ...}`:
+    /// issue a `webhook` connector's first secret, of `secret_type`, returned
+    /// once in [`Connector::signing_secret`]. Create issues none, so the
+    /// endpoint refuses every call until this runs. Any other provider
+    /// answers `422`.
+    pub async fn issue_signing_secret(
+        &self,
+        connector_id: Uuid,
+        secret_type: WebhookSecretType,
+        project: Option<StringOrUuid>,
+    ) -> ApiResult<Connector> {
+        let params = ConnectorUpdateParams {
+            rotate_signing_secret: Some(SigningSecretRotation::Issue(secret_type)),
+            ..Default::default()
+        };
+        self.update(connector_id, &params, project).await
+    }
+
+    /// `PATCH /v1/connectors/{id}` with `rotate_signing_secret: true`: issue
+    /// a `webhook` connector a new secret of the current one's type, returned
+    /// once in [`Connector::signing_secret`]. The current one becomes the
+    /// previous and stays valid until [`Self::revoke_signing_secret`]. With
+    /// two already live the server answers `409`; revoke one first.
     pub async fn rotate_signing_secret(
         &self,
         connector_id: Uuid,
         project: Option<StringOrUuid>,
     ) -> ApiResult<Connector> {
         let params = ConnectorUpdateParams {
-            rotate_signing_secret: Some(true),
+            rotate_signing_secret: Some(SigningSecretRotation::Rotate),
             ..Default::default()
         };
         self.update(connector_id, &params, project).await
     }
 
-    /// `PATCH /v1/connectors/{id}` with `revoke_previous_signing_secret`:
-    /// stop accepting a `webhook` connector's previous secret now, leaving
-    /// only the current one in [`Connector::signing_secrets`]. With no
-    /// previous secret it changes nothing. Any other provider answers `422`.
-    pub async fn revoke_previous_signing_secret(
+    /// `PATCH /v1/connectors/{id}` with `revoke_signing_secret`: stop
+    /// accepting the `webhook` connector's secret whose id (kid, from
+    /// [`Connector::signing_secrets`]) is `secret_id`. The current one can be
+    /// revoked only when no previous one is live (`409`); revoking the last
+    /// leaves the endpoint refusing every call. To change a connector's
+    /// secret type, revoke every secret, then issue one of the other type.
+    pub async fn revoke_signing_secret(
         &self,
         connector_id: Uuid,
+        secret_id: impl Into<String>,
         project: Option<StringOrUuid>,
     ) -> ApiResult<Connector> {
         let params = ConnectorUpdateParams {
-            revoke_previous_signing_secret: Some(true),
+            revoke_signing_secret: Some(secret_id.into()),
             ..Default::default()
         };
         self.update(connector_id, &params, project).await

@@ -17,6 +17,7 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,7 +413,7 @@ fn default_task_status() -> TaskStatus {
 /// reference. `name` is the workspace-relative path to mount at — omit it and
 /// the file is mounted under its own name. It must be relative and must not
 /// traverse outside the task's files directory.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFileRef {
     pub id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2785,18 +2786,66 @@ pub enum ConnectionBrokerSubjectType {
     Person,
 }
 
-/// How a `webhook` connector's callers authenticate.
+/// How a caller proves it holds a `webhook` connector's secret
+/// ([`SigningSecret::secret_type`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WebhookAuth {
+pub enum WebhookSecretType {
     /// [Standard Webhooks](https://www.standardwebhooks.com/) signatures
-    /// (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The default.
+    /// (`webhook-id`, `webhook-timestamp`, `webhook-signature`) with a
+    /// `whsec_...` secret.
     StandardWebhooks,
-    /// `Authorization: Bearer <secret>`.
+    /// `Authorization: Bearer <whtok_...>`.
     Bearer,
-    /// A mode this SDK build does not know, as the server sent it.
+    /// A type this SDK build does not know, as the server sent it.
     #[serde(untagged)]
     Unknown(serde_json::Value),
+}
+
+/// [`ConnectorUpdateParams::rotate_signing_secret`]: issue a `webhook`
+/// connector's first secret, or rotate the live one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SigningSecretRotation {
+    /// The first secret, of this type (`{"type": ...}` on the wire). With a
+    /// secret already live the server keeps the live one's type.
+    Issue(WebhookSecretType),
+    /// A new secret of the current one's type (`true` on the wire); the
+    /// current one becomes the previous.
+    Rotate,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SigningSecretRotationWire {
+    Flag(bool),
+    Issue {
+        #[serde(rename = "type")]
+        secret_type: WebhookSecretType,
+    },
+}
+
+impl Serialize for SigningSecretRotation {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Rotate => SigningSecretRotationWire::Flag(true),
+            Self::Issue(secret_type) => SigningSecretRotationWire::Issue {
+                secret_type: secret_type.clone(),
+            },
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SigningSecretRotation {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match SigningSecretRotationWire::deserialize(deserializer)? {
+            SigningSecretRotationWire::Flag(true) => Ok(Self::Rotate),
+            SigningSecretRotationWire::Flag(false) => Err(serde::de::Error::custom(
+                "rotate_signing_secret is `true` or `{\"type\": ...}`; omit it to leave the secrets as they are",
+            )),
+            SigningSecretRotationWire::Issue { secret_type } => Ok(Self::Issue(secret_type)),
+        }
+    }
 }
 
 /// The provider slug of an inbound `webhook` connector
@@ -2807,8 +2856,9 @@ pub const WEBHOOK_CONNECTOR_PROVIDER: &str = "webhook";
 ///
 /// `client_secret` is **write-only**: accepted on create and update, absent
 /// from every response. `signing_secret` is too, except a `webhook`
-/// connector's, which the platform generates and returns once, on create and
-/// on [`ConnectorUpdateParams::rotate_signing_secret`]. `requires_runtime` is server-derived and is the **only**
+/// connector's, which the platform generates and returns once, on the update
+/// that issues or rotates it ([`ConnectorUpdateParams::rotate_signing_secret`]).
+/// `requires_runtime` is server-derived and is the **only**
 /// signal for whether [`ConnectorAuthorizeParams::runtime`] must be set;
 /// never hardcode a provider list.
 #[serde_with::skip_serializing_none]
@@ -2863,18 +2913,15 @@ pub struct Connector {
     /// [`Connectors::authorize`]: crate::resources::connectors::Connectors::authorize
     #[serde(default)]
     pub requires_runtime: bool,
-    /// How a `webhook` connector's callers authenticate; `None` for every
-    /// other provider.
-    #[serde(default)]
-    pub webhook_auth: Option<WebhookAuth>,
     /// A `webhook` connector's accepted secrets, current first, described
     /// without their material; `None` for every other provider. At most two:
-    /// the current and, after a rotation, the previous.
+    /// the current and, after a rotation, the previous. Empty until the first
+    /// is issued, and the endpoint refuses every call while it is.
     #[serde(default)]
     pub signing_secrets: Option<Vec<SigningSecret>>,
-    /// A `webhook` connector's new secret, on its create or rotation only.
-    /// Shown once: no read returns it, and a repeat create of a live slug
-    /// returns none, since the stored one stands.
+    /// A `webhook` connector's new secret (`whsec_...` or `whtok_...`), on
+    /// the update that issues or rotates it only. Shown once: no other
+    /// response carries it.
     #[serde(default)]
     pub signing_secret: Option<Secret>,
 }
@@ -2895,9 +2942,12 @@ pub enum SigningSecretStatus {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SigningSecret {
-    /// A fingerprint of the secret: the first 8 hex digits of its SHA-256.
-    /// It names the secret a sender holds without revealing it.
+    /// A fingerprint of the secret (its kid): the first 8 hex digits of its
+    /// SHA-256. It names the secret a sender holds without revealing it, and
+    /// is what [`ConnectorUpdateParams::revoke_signing_secret`] takes.
     pub id: String,
+    #[serde(rename = "type")]
+    pub secret_type: WebhookSecretType,
     #[serde(default)]
     pub created_at: Option<String>,
     pub status: SigningSecretStatus,
@@ -3007,22 +3057,18 @@ pub struct ConnectorCreateParams {
     /// Cedar entities for the recipe's policies; see [`PolicyEntity`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_entities: Option<Vec<PolicyEntity>>,
-    /// For a `webhook` connector only: how callers authenticate. Defaults to
-    /// [`WebhookAuth::StandardWebhooks`] server-side.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub webhook_auth: Option<WebhookAuth>,
 }
 
 impl ConnectorCreateParams {
     /// An inbound `webhook` connector: `auth_mode` `static`, no hosts, scopes,
-    /// endpoints or secret of its own. The platform generates the secret and
-    /// returns it once in [`Connector::signing_secret`]; routines listen to it
-    /// by slug with [`RoutineTriggerSpec::connector`].
-    pub fn webhook(name: impl Into<String>, webhook_auth: Option<WebhookAuth>) -> Self {
-        Self {
-            webhook_auth,
-            ..Self::new(name, WEBHOOK_CONNECTOR_PROVIDER, ConnectorAuthMode::Static)
-        }
+    /// endpoints or secret. Create issues no secret, and the server refuses
+    /// one sent here; issue the first with
+    /// [`Connectors::issue_signing_secret`]. Routines listen to it by slug
+    /// with [`RoutineTriggerSpec::connector`].
+    ///
+    /// [`Connectors::issue_signing_secret`]: crate::resources::connectors::Connectors::issue_signing_secret
+    pub fn webhook(name: impl Into<String>) -> Self {
+        Self::new(name, WEBHOOK_CONNECTOR_PROVIDER, ConnectorAuthMode::Static)
     }
 
     /// Create params with the three required fields set and every optional
@@ -3053,7 +3099,6 @@ impl ConnectorCreateParams {
             assertion_audience: None,
             webhook_url: None,
             policy_entities: None,
-            webhook_auth: None,
         }
     }
 }
@@ -3088,20 +3133,18 @@ pub struct ConnectorUpdateParams {
     /// Replaces the connector's Cedar entities; omitted = unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_entities: Option<Vec<PolicyEntity>>,
-    /// For a `webhook` connector only: how callers authenticate.
+    /// For a `webhook` connector only: issue a secret, returned once in
+    /// [`Connector::signing_secret`]. A rotation keeps the live secret's type
+    /// and the old one stays valid as the previous until it is revoked. With
+    /// two live the server answers `409`; revoke one first.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub webhook_auth: Option<WebhookAuth>,
-    /// For a `webhook` connector only: issue a new secret, returned once in
-    /// [`Connector::signing_secret`]. The current one becomes the previous
-    /// and stays valid until the next rotation or
-    /// [`Self::revoke_previous_signing_secret`]; a connector accepts at most
-    /// two.
+    pub rotate_signing_secret: Option<SigningSecretRotation>,
+    /// For a `webhook` connector only: the id (kid) of a live secret to stop
+    /// accepting now. The current one only once no previous one is live
+    /// (`409`); revoking the last leaves the endpoint refusing every call.
+    /// Sent with [`Self::rotate_signing_secret`] it is a `422`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rotate_signing_secret: Option<bool>,
-    /// For a `webhook` connector only: stop accepting its previous secret
-    /// now. Sent with [`Self::rotate_signing_secret`] it is a `422`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revoke_previous_signing_secret: Option<bool>,
+    pub revoke_signing_secret: Option<String>,
 }
 
 /// A Cedar entity a recipe's policies read, in Cedar's JSON entity format:
@@ -4763,6 +4806,12 @@ fn default_true() -> bool {
 }
 
 impl Routine {
+    /// Whether a run of it starts a task of its own and so takes files,
+    /// such as a `parameters.json`: a prompt routine without a `task_id`.
+    pub fn takes_files(&self) -> bool {
+        self.kind.is_none() && self.task_id.is_none()
+    }
+
     /// `metadata` decoded into its typed shape, or `None` when it is absent
     /// or does not fit.
     pub fn typed_metadata(&self) -> Option<RoutineMetadata> {
@@ -4840,8 +4889,8 @@ impl RoutineCreateParams {
 }
 
 /// `PATCH /v1/routines/{id}` body. Only set fields are sent and `None`
-/// leaves a field as it is, so nothing can be cleared. `kind` and
-/// `trigger_type` are immutable; `metadata` replaces the stored object.
+/// leaves a field as it is, so nothing can be cleared. `kind` is immutable;
+/// `metadata` replaces the stored object.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RoutineUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4850,6 +4899,12 @@ pub struct RoutineUpdateParams {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron_schedule: Option<String>,
+    /// Switches a prompt routine between [`RoutineTriggerType::Manual`] and
+    /// [`RoutineTriggerType::Cron`]. `Cron` needs a schedule in the same
+    /// patch (`cron_schedule` and/or `metadata.cron_schedules`, no cron
+    /// repeated); `Manual` drops the next slot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_type: Option<RoutineTriggerType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     /// Moves a routine that runs as a task to another runtime group.
@@ -4896,37 +4951,123 @@ pub struct RoutineListParams {
     pub filters: Option<HashMap<String, serde_json::Value>>,
 }
 
-/// `POST /v1/routines/{id}/trigger` body, sent by
-/// [`Routines::trigger_with`](crate::Routines::trigger_with). The
-/// default sends `{}`, the same as [`Routines::trigger`](crate::Routines::trigger).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RoutineTriggerParams {
-    /// The run's parameters: a JSON object of at most 16 KiB serialized and
-    /// 8 levels of nesting (`422` past either). A prompt routine that starts
-    /// a task receives the object as `parameters.json`, and each
-    /// `@parameters.<name>` in its prompt becomes that key's value as JSON
-    /// (`null` when absent). A platform routine reads the keys its kind
-    /// defines and answers `422` to any other:
-    /// [`RoutineKind::ObservationSynthesis`] takes `conversation_ids` (1 to
-    /// 100; see [`Self::conversation_ids()`]), and
+/// A run's parameters ([`RoutineTriggerParams::parameters`]): a JSON object
+/// sent inline, a local JSON file read and sent the same way, or a Files API
+/// file holding one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RoutineParameters {
+    /// A JSON object of at most 16 KiB serialized and 8 levels of nesting
+    /// (`422` past either), sent inline. A prompt routine that starts a task
+    /// receives it as `parameters.json` too, uploaded first as
+    /// [`RoutineTriggerParams::attach_parameters_file`] decides. A platform
+    /// routine reads the keys its kind defines and answers `422` to any
+    /// other: [`RoutineKind::ObservationSynthesis`] takes `conversation_ids`
+    /// (1 to 100; see [`RoutineTriggerParams::conversation_ids()`]), and
     /// [`RoutineKind::ObservationClustering`] takes none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<serde_json::Map<String, serde_json::Value>>,
+    Inline(serde_json::Map<String, serde_json::Value>),
+    /// An already-uploaded Files API file (its id) holding a JSON object of
+    /// at most 256 KiB, attached as `parameters.json`; the server reads the
+    /// parameters from it (`404` not found, `413` too large, `422` not an
+    /// object). Only a routine that [takes files](Routine::takes_files)
+    /// accepts it.
+    File(Uuid),
+    /// A local JSON file holding an object, read by the SDK and then sent
+    /// exactly as [`Self::Inline`]. JSON only; a file that is not a JSON
+    /// object is an `InvalidConfig` error before any request.
+    Path(PathBuf),
 }
 
+impl RoutineParameters {
+    /// The parameters held in the Files API file `file_id`.
+    pub fn file(file_id: Uuid) -> Self {
+        Self::File(file_id)
+    }
+}
+
+impl From<serde_json::Map<String, serde_json::Value>> for RoutineParameters {
+    fn from(parameters: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self::Inline(parameters)
+    }
+}
+
+impl From<Uuid> for RoutineParameters {
+    fn from(file_id: Uuid) -> Self {
+        Self::File(file_id)
+    }
+}
+
+impl From<PathBuf> for RoutineParameters {
+    fn from(path: PathBuf) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl From<&File> for RoutineParameters {
+    fn from(file: &File) -> Self {
+        Self::File(file.id)
+    }
+}
+
+/// What [`Routines::trigger`](crate::Routines::trigger) sends. The default
+/// sends `{}`.
+///
+/// [`RoutineParameters::Inline`] (or [`RoutineParameters::Path`]) parameters
+/// are sent inline and, when
+/// [`Self::attach_parameters_file`] decides so, first uploaded through the
+/// Files API under a name unique to the run and attached as
+/// `parameters.json`. [`RoutineParameters::File`] sends only the reference.
+/// A platform routine (one with a [`Routine::kind`]) or one that posts into
+/// an existing task ([`Routine::task_id`]) takes no files and answers `422`
+/// to one.
+#[derive(Debug, Clone, Default)]
+pub struct RoutineTriggerParams {
+    pub parameters: Option<RoutineParameters>,
+    /// More Files API references to attach to the run's task, as on
+    /// `POST /v1/tasks` (at most 100 with the parameters file). Only a
+    /// prompt routine that starts a task per run takes files.
+    pub files: Vec<TaskFileRef>,
+    /// Whether inline ([`RoutineParameters::Inline`] or
+    /// [`RoutineParameters::Path`]) parameters are also uploaded and
+    /// attached as `parameters.json`. `None` reads the routine first
+    /// (`GET /v1/routines/{id}`) and uploads only when it
+    /// [takes files](Routine::takes_files); `Some(true)` and `Some(false)`
+    /// skip that read and force the choice. Ignored for
+    /// [`RoutineParameters::File`] and without parameters.
+    pub attach_parameters_file: Option<bool>,
+}
+
+/// The name a run's parameters file is attached under.
+pub const ROUTINE_PARAMETERS_FILE_NAME: &str = "parameters.json";
+
 impl RoutineTriggerParams {
-    /// A trigger with these parameters.
-    pub fn with_parameters(parameters: serde_json::Map<String, serde_json::Value>) -> Self {
+    /// A trigger with these parameters: a JSON object or a local JSON file's
+    /// path (inline, uploaded as the run's `parameters.json` when the routine
+    /// takes files) or a Files API file (a [`File`] or its id).
+    pub fn with_parameters(parameters: impl Into<RoutineParameters>) -> Self {
         Self {
-            parameters: Some(parameters),
+            parameters: Some(parameters.into()),
+            ..Self::default()
+        }
+    }
+
+    /// A trigger of `routine` with these inline parameters, uploaded as
+    /// `parameters.json` only when the routine starts a task of its own
+    /// ([`Routine::takes_files`]), decided from the routine you hold rather
+    /// than by reading it again.
+    pub fn for_routine(
+        routine: &Routine,
+        parameters: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
+        Self {
+            attach_parameters_file: Some(routine.takes_files()),
+            ..Self::with_parameters(parameters)
         }
     }
 
     /// An [`RoutineKind::ObservationSynthesis`] trigger on exactly these
     /// conversations (1 to 100), synthesized now without waiting for them to
     /// idle. A conversation the caller cannot read answers `404`, and one
-    /// whose turn is still running `409`.
+    /// whose turn is still running `409`. Sends the parameters inline only.
     pub fn conversation_ids(ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let ids: Vec<serde_json::Value> = ids
             .into_iter()
@@ -4934,8 +5075,21 @@ impl RoutineTriggerParams {
             .collect();
         let mut parameters = serde_json::Map::new();
         parameters.insert("conversation_ids".into(), serde_json::Value::Array(ids));
-        Self::with_parameters(parameters)
+        Self {
+            attach_parameters_file: Some(false),
+            ..Self::with_parameters(parameters)
+        }
     }
+}
+
+/// `POST /v1/routines/{id}/trigger` body as sent on the wire.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutineTriggerRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<TaskFileRef>,
 }
 
 /// `POST /v1/routines/{id}/trigger` response. A `skipped` status carries
