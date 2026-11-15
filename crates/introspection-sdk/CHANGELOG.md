@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.49.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.48.1...v0.49.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* `ApiKeys::acknowledge` and `ApiKeyAcknowledgement` are removed. Drop the call; saving the plaintext from `ApiKeys::create` needs no follow-up request.
+* removed Connectors::issue_signing_secret, Connectors::rotate_signing_secret, Connectors::revoke_signing_secret, SigningSecretRotation, ConnectorUpdateParams::rotate_signing_secret, ConnectorUpdateParams::revoke_signing_secret, Connector::signing_secrets and Connector::signing_secret. SigningSecret is renamed WebhookSecret (created_at is now a required String) and SigningSecretStatus is renamed WebhookSecretStatus (its catch-all Other is now Unknown(serde_json::Value)).
+* **conversations:** ConversationExportParams and ConversationItemListParams gain public fields, so a struct literal without `..Default::default()` no longer compiles.
+* automations() is now routines() on the client, runner and DataPlane trait, and every Automation* type is renamed Routine* (Automation, AutomationCreateParams, AutomationUpdateParams, AutomationListParams, AutomationKind, AutomationTriggerType, AutomationTriggerParams, AutomationTriggerResponse, AutomationTriggered*/AutomationSkipped* and the rest), with no aliases. Task::automation_id, TaskListParams::require_automation_id and EventListParams::automation_id are now routine_id / require_routine_id / routine_id; IntrospectionEventName::AutomationTriggered/AutomationSkipped are RoutineTriggered/RoutineSkipped on introspection.routines.triggered/.skipped; the skip reason automation_deleted and the condition no_live_task_for_automation are routine_deleted and no_live_task_for_routine. This release requires a data plane serving /v1/routines (introspection-cloud#4051).
+
+### Features
+
+* **conversations:** resumable oldest-first export and asc/desc item reads ([#241](https://github.com/introspection-org/introspection-rust-sdk/issues/241)) ([4d8e055](https://github.com/introspection-org/introspection-rust-sdk/commit/4d8e05527c2737d99a6ae247e38dfac0e8bfa45f))
+* remove ApiKeys::acknowledge ([#244](https://github.com/introspection-org/introspection-rust-sdk/issues/244)) ([74232a3](https://github.com/introspection-org/introspection-rust-sdk/commit/74232a3b6291ca7000366bcd57542bc06e44afcc))
+* rename automations to routines; webhook secrets per type; trigger with parameters files ([#240](https://github.com/introspection-org/introspection-rust-sdk/issues/240)) ([0839983](https://github.com/introspection-org/introspection-rust-sdk/commit/0839983ee1a4bb4930c9e9e39e11c0d592f26e1c))
+* webhook connector secrets are a sub-resource (connectors().secrets) ([#243](https://github.com/introspection-org/introspection-rust-sdk/issues/243)) ([24e92a5](https://github.com/introspection-org/introspection-rust-sdk/commit/24e92a5de9e7aa74bb7793d09b4bcb9569562332))
+
 ## [0.48.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.48.0...v0.48.1) (2026-11-13)
 
 
