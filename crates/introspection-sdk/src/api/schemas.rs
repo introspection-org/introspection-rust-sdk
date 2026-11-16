@@ -390,12 +390,8 @@ pub struct Task {
     pub started_at: Option<String>,
     #[serde(default)]
     pub completed_at: Option<String>,
-    /// The member's own latest message; a routine post or notice does not move it.
     #[serde(default)]
     pub last_user_message_at: Option<String>,
-    /// The latest turn of any kind, a routine post or notice included.
-    #[serde(default)]
-    pub last_turn_at: Option<String>,
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
@@ -4554,11 +4550,11 @@ pub struct RoutineScheduleTrigger {
     pub cron: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
-    /// Skip a slot when the routine's member has sent no message in the
-    /// project for this many seconds (3600 to 31536000). `None` leaves it
-    /// out: a new schedule on a routine with `task_id` takes 2 days, and a
-    /// kept schedule keeps its stored value. `Some(None)` sends `null`, which
-    /// runs every slot.
+    /// Skip a slot when the routine's member has had no turn in a
+    /// conversation they started in the project for this many seconds (3600
+    /// to 31536000). `None` leaves it out, so a kept schedule keeps its
+    /// stored value and a new one runs every slot; `Some(None)` sends `null`,
+    /// which clears it.
     #[serde(
         default,
         with = "serde_with::rust::double_option",
