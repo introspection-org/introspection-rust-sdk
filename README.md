@@ -393,15 +393,15 @@ an org credential with `members:read` / `members:write` / `members:manage`.
 
 ## Schedule routines
 
-A routine runs a prompt as an agent task on a schedule, or once at a set
-time. Set `task_id` to post each firing into an existing task instead of
-creating a new one. A one-off reminder is a `Manual` routine with a future
-`next_trigger_at`:
+A routine runs a prompt as an agent task on its schedule triggers, or once at a
+set time. Set `task_id` to post each firing into an existing task instead of
+creating a new one. A one-off reminder is a routine with no schedule trigger
+and a future `next_trigger_at`:
 
 ```rust
 use introspection_sdk::{
     EventListParams, IntrospectionEventName, RoutineCreateParams, RoutineListParams,
-    RoutineMetadata, RoutineTriggerType, RoutineUpdateParams,
+    RoutineScheduleTrigger, RoutineUpdateParams,
 };
 
 let reminder = client.routines().create(&RoutineCreateParams {
@@ -409,15 +409,16 @@ let reminder = client.routines().create(&RoutineCreateParams {
     runtime_group_id: Some(runtime_group_id),
     task_id: Some(task_id),
     next_trigger_at: Some("2026-10-06T09:00:00+10:00".into()),
-    ..RoutineCreateParams::new("Invoice reminder", RoutineTriggerType::Manual)
+    ..RoutineCreateParams::new("Invoice reminder")
 }).await?;
 
-// Only the fields you set are sent; `metadata` replaces the stored object.
+// Only the fields you set are sent; `triggers` replaces the whole list.
+// With a schedule trigger, `next_trigger_at` is read-only.
 client.routines().update(reminder.id, &RoutineUpdateParams {
-    metadata: Some(RoutineMetadata {
+    triggers: Some(vec![RoutineScheduleTrigger {
         timezone: Some("Australia/Sydney".into()),
-        ..Default::default()
-    }),
+        ..RoutineScheduleTrigger::new("0 9 * * 1-5")
+    }.into()]),
     ..Default::default()
 }).await?;
 
@@ -435,10 +436,13 @@ let fired = client.events().list(&EventListParams {
 })?;
 ```
 
-`RoutineUpdateParams::trigger_type` switches a prompt routine between
-`Manual` and `Cron`: `Cron` needs a schedule in the same update
-(`cron_schedule` or `metadata.cron_schedules`, no cron repeated), and `Manual`
-drops the next slot.
+`Routine::triggers` is one list discriminated on `type`: `Schedule`, `Slack`,
+`Github`, `Linear` and `Webhook`. A `type` this SDK does not know decodes as
+`RoutineTrigger::Unknown` with the raw object, and `id()` / `type_name()` read
+it. `routine_metadata` is a typed `RoutineMetadata`: `repositories`,
+`conditions` and, on an `ObservationSynthesis` routine,
+`synthesis_max_conversations`. An update's `routine_metadata` replaces the
+whole object.
 
 `Routine::kind` is `None` for a routine a person created. A platform
 routine carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
@@ -457,9 +461,9 @@ change, so it is not served yet.
 
 ### Run a routine on events
 
-Beside its schedule and a manual trigger, a prompt routine that starts a task
-per run can run on events. Each of its `triggers` listens to an organization
-integration (Slack, GitHub) or a project connector. A custom webhook is a
+Beside its schedules and a manual trigger, a prompt routine that starts a task
+per run can run on events. An event trigger listens to an organization
+integration (Slack, GitHub, Linear) or a project connector. A custom webhook is a
 `webhook` connector. Create issues it no secret; issue the first with
 `client.connectors().secrets.create`, naming its type, and the platform
 generates it and returns it once. Your system then `POST`s to the connector's endpoint, signed
@@ -473,8 +477,7 @@ id, time):
 
 ```rust
 use introspection_sdk::{
-    ConnectorCreateParams, RoutineCreateParams, RoutineTriggerFilter,
-    RoutineTriggerProvider, RoutineTriggerSpec, RoutineTriggerType, WebhookSecretType,
+    ConnectorCreateParams, RoutineCreateParams, RoutineWebhookTrigger, WebhookSecretType,
 };
 
 let connector = client.connectors().create(&ConnectorCreateParams {
@@ -491,22 +494,19 @@ let endpoint = connector.webhook_endpoint("https://api.introspection.dev");
 let triage = client.routines().create(&RoutineCreateParams {
     prompt: Some("Triage the @parameters.severity alert on @parameters.service.".into()),
     runtime_group_id: Some(runtime_group_id),
-    triggers: Some(vec![RoutineTriggerSpec {
+    triggers: Some(vec![RoutineWebhookTrigger {
         // Only bodies whose top-level `env` is "prod".
-        filter: RoutineTriggerFilter {
-            payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
-            ..Default::default()
-        },
+        payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
         // The event type is the body's string `type`; `*` matches any.
-        ..RoutineTriggerSpec::connector(RoutineTriggerProvider::Webhook, "ci-alerts", ["alert.fired"])
-    }]),
-    ..RoutineCreateParams::new("Triage alerts", RoutineTriggerType::Manual)
+        ..RoutineWebhookTrigger::new("ci-alerts", ["alert.fired"])
+    }.into()]),
+    ..RoutineCreateParams::new("Triage alerts")
 }).await?;
 ```
 
 Updating `triggers` replaces the list: an entry with an `id` keeps that trigger
-(`RoutineTrigger::to_spec` builds one from a stored trigger), one without adds
-a trigger, and the rest are removed. A trigger runs one at a time: an event
+(a stored trigger, an unknown one included, sends back as it is), one without
+adds a trigger, and the rest are removed. A trigger runs one at a time: an event
 that arrives during its previous run is skipped as `trigger_busy`.
 
 A webhook connector accepts at most two secrets, both of one type. List them

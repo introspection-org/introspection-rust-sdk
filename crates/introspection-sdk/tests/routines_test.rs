@@ -11,10 +11,11 @@ use introspection_sdk::{
     AdvancedOptions, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
     IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
     RoutineCondition, RoutineConditionType, RoutineCreateParams, RoutineExecutionStatus,
-    RoutineKind, RoutineListParams, RoutineMetadata, RoutineParameters, RoutineSkipReason,
-    RoutineTriggerEventRef, RoutineTriggerFilter, RoutineTriggerParams, RoutineTriggerProvider,
-    RoutineTriggerRequest, RoutineTriggerSource, RoutineTriggerSpec, RoutineTriggerType,
-    RoutineUpdateParams, Routines, TaskFileRef, TaskRepoRequest,
+    RoutineGithubTrigger, RoutineKind, RoutineLinearTrigger, RoutineListParams, RoutineMetadata,
+    RoutineParameters, RoutineScheduleTrigger, RoutineSkipReason, RoutineSlackTrigger,
+    RoutineTrigger, RoutineTriggerEventRef, RoutineTriggerParams, RoutineTriggerRequest,
+    RoutineTriggerType, RoutineUpdateParams, RoutineWebhookTrigger, Routines, TaskFileRef,
+    TaskRepoRequest,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -25,6 +26,7 @@ const ROUTINE_ID: &str = "11111111-1111-7111-8111-111111111111";
 const TASK_ID: &str = "22222222-2222-7222-8222-222222222222";
 const GROUP_ID: &str = "33333333-3333-7333-8333-333333333333";
 const MEMBER_ID: &str = "44444444-4444-7444-8444-444444444444";
+const SCHEDULE_ID: &str = "55555555-5555-7555-8555-555555555555";
 
 fn build_http(server: &MockServer) -> Arc<HttpClient> {
     let cfg = HttpConfig {
@@ -58,17 +60,16 @@ fn routine_json() -> serde_json::Value {
         "execution_blocked_reason": null,
         "can_manage": true,
         "tags": [],
-        "trigger_type": "cron",
-        "cron_schedule": "0 9 * * *",
         "kind": null,
         "prompt": "Check in on the open items.",
-        "metadata": {
-            "cron_schedules": ["0 9 * * 1-5"],
-            "timezone": "Australia/Sydney",
+        "routine_metadata": {
             "repositories": [{"repo": "acme/app", "ref": "main"}],
             "conditions": [{"type": "has_new_tasks_since_last_run"}],
-            "source": {"channel": "ops"},
+            "synthesis_max_conversations": null,
         },
+        "triggers": [
+            {"id": SCHEDULE_ID, "type": "schedule", "cron": "0 9 * * 1-5", "timezone": "Australia/Sydney"},
+        ],
         "last_triggered_at": null,
         "next_trigger_at": "2026-10-05T22:00:00Z",
         "owner_role": "operator",
@@ -88,7 +89,7 @@ fn query_pairs(request: &Request) -> Vec<(String, String)> {
 }
 
 #[tokio::test]
-async fn list_parses_the_read_model_and_its_typed_metadata() {
+async fn list_parses_the_read_model() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/routines"))
@@ -104,7 +105,6 @@ async fn list_parses_the_read_model_and_its_typed_metadata() {
     let routine = found[0].as_ref().unwrap();
     assert_eq!(routine.id, id(ROUTINE_ID));
     assert_eq!(routine.kind, None);
-    assert_eq!(routine.trigger_type, RoutineTriggerType::Cron);
     assert_eq!(routine.task_id, Some(id(TASK_ID)));
     assert_eq!(routine.runtime_group_id, Some(id(GROUP_ID)));
     assert_eq!(routine.created_by_member_id, Some(id(MEMBER_ID)));
@@ -114,17 +114,22 @@ async fn list_parses_the_read_model_and_its_typed_metadata() {
         routine.next_trigger_at.as_deref(),
         Some("2026-10-05T22:00:00Z")
     );
-
-    let metadata = routine.typed_metadata().unwrap();
-    assert_eq!(metadata.cron_schedules, vec!["0 9 * * 1-5".to_string()]);
-    assert_eq!(metadata.timezone.as_deref(), Some("Australia/Sydney"));
+    let metadata = &routine.routine_metadata;
     assert_eq!(metadata.repositories[0].repo, "acme/app");
     assert_eq!(metadata.repositories[0].git_ref.as_deref(), Some("main"));
     assert_eq!(
         metadata.conditions[0].condition_type,
         RoutineConditionType::HasNewTasksSinceLastRun
     );
-    assert_eq!(metadata.other["source"], json!({"channel": "ops"}));
+    assert_eq!(metadata.synthesis_max_conversations, None);
+    assert_eq!(
+        routine.triggers,
+        vec![RoutineTrigger::Schedule(RoutineScheduleTrigger {
+            id: Some(id(SCHEDULE_ID)),
+            timezone: Some("Australia/Sydney".into()),
+            ..RoutineScheduleTrigger::new("0 9 * * 1-5")
+        })]
+    );
 }
 
 #[tokio::test]
@@ -272,7 +277,6 @@ async fn create_sends_only_the_set_fields() {
         .and(path("/v1/routines"))
         .and(body_json(json!({
             "name": "Remind me",
-            "trigger_type": "manual",
             "prompt": "Follow up on the invoice.",
             "runtime_group_id": GROUP_ID,
             "task_id": TASK_ID,
@@ -288,7 +292,7 @@ async fn create_sends_only_the_set_fields() {
             runtime_group_id: Some(id(GROUP_ID)),
             task_id: Some(id(TASK_ID)),
             next_trigger_at: Some("2026-10-06T09:00:00+10:00".into()),
-            ..RoutineCreateParams::new("Remind me", RoutineTriggerType::Manual)
+            ..RoutineCreateParams::new("Remind me")
         })
         .await
         .unwrap();
@@ -297,29 +301,27 @@ async fn create_sends_only_the_set_fields() {
 }
 
 #[tokio::test]
-async fn create_serializes_a_platform_kind_and_typed_metadata() {
+async fn create_serializes_a_platform_kind_its_schedules_and_conditions() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/routines"))
         .and(body_json(json!({
             "name": "Check-in",
-            "trigger_type": "cron",
-            "cron_schedule": "0 9 * * *",
             "kind": "project_check_in",
             "prompt": "How is the project going?",
             "runtime_group_id": GROUP_ID,
-            "metadata": {
+            "routine_metadata": {
                 "repositories": [{"repo": "acme/app"}],
-                "cron_schedules": ["0 9 * * 1-5"],
-                "timezone": "UTC",
                 "conditions": [
                     {"type": "no_live_task_for_routine"},
                     {"type": "last_run_issues_resolved", "runtime_group_id": GROUP_ID},
                 ],
-                "owner": "ops",
-                "priority": 2,
             },
             "enabled": false,
+            "triggers": [
+                {"type": "schedule", "cron": "0 9 * * *"},
+                {"type": "schedule", "cron": "0 9 * * 1-5", "timezone": "UTC"},
+            ],
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(routine_json()))
         .mount(&server)
@@ -327,17 +329,14 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
 
     Routines::new(build_http(&server))
         .create(&RoutineCreateParams {
-            cron_schedule: Some("0 9 * * *".into()),
             kind: Some(RoutineKind::ProjectCheckIn),
             prompt: Some("How is the project going?".into()),
             runtime_group_id: Some(id(GROUP_ID)),
-            metadata: Some(RoutineMetadata {
+            routine_metadata: Some(RoutineMetadata {
                 repositories: vec![TaskRepoRequest {
                     repo: "acme/app".into(),
                     ..Default::default()
                 }],
-                cron_schedules: vec!["0 9 * * 1-5".into()],
-                timezone: Some("UTC".into()),
                 conditions: vec![
                     RoutineCondition::new(RoutineConditionType::NoLiveTaskForRoutine),
                     RoutineCondition {
@@ -345,15 +344,18 @@ async fn create_serializes_a_platform_kind_and_typed_metadata() {
                         ..RoutineCondition::new(RoutineConditionType::LastRunIssuesResolved)
                     },
                 ],
-                other: [
-                    ("owner".into(), json!("ops")),
-                    ("priority".into(), json!(2)),
-                ]
-                .into_iter()
-                .collect(),
+                ..Default::default()
             }),
             enabled: Some(false),
-            ..RoutineCreateParams::new("Check-in", RoutineTriggerType::Cron)
+            triggers: Some(vec![
+                RoutineScheduleTrigger::new("0 9 * * *").into(),
+                RoutineScheduleTrigger {
+                    timezone: Some("UTC".into()),
+                    ..RoutineScheduleTrigger::new("0 9 * * 1-5")
+                }
+                .into(),
+            ]),
+            ..RoutineCreateParams::new("Check-in")
         })
         .await
         .unwrap();
@@ -381,92 +383,55 @@ async fn update_sends_only_the_set_fields() {
         .unwrap();
 }
 
-#[tokio::test]
-async fn update_switches_the_trigger_type() {
-    let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
-        .and(body_json(
-            json!({ "cron_schedule": "0 9 * * *", "trigger_type": "cron" }),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
-        .and(body_json(json!({ "trigger_type": "manual" })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let routines = Routines::new(build_http(&server));
-    routines
-        .update(
-            id(ROUTINE_ID),
-            &RoutineUpdateParams {
-                trigger_type: Some(RoutineTriggerType::Cron),
-                cron_schedule: Some("0 9 * * *".into()),
+#[test]
+fn routine_metadata_decodes_and_an_update_sends_the_whole_object() {
+    let mut value = routine_json();
+    value["kind"] = json!("observation_synthesis");
+    value["routine_metadata"] = json!({"synthesis_max_conversations": 50});
+    let routine: introspection_sdk::Routine = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        routine.routine_metadata,
+        RoutineMetadata {
+            synthesis_max_conversations: Some(50),
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(RoutineUpdateParams {
+            routine_metadata: Some(RoutineMetadata {
+                synthesis_max_conversations: Some(20),
                 ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    routines
-        .update(
-            id(ROUTINE_ID),
-            &RoutineUpdateParams {
-                trigger_type: Some(RoutineTriggerType::Manual),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn update_metadata_sends_only_the_set_metadata_fields() {
-    let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
-        .and(body_json(json!({
-            "cron_schedule": "30 8 * * *",
-            "task_id": TASK_ID,
-            "metadata": {"timezone": "Europe/London"},
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(routine_json()))
-        .mount(&server)
-        .await;
-
-    Routines::new(build_http(&server))
-        .update(
-            id(ROUTINE_ID),
-            &RoutineUpdateParams {
-                cron_schedule: Some("30 8 * * *".into()),
-                task_id: Some(id(TASK_ID)),
-                metadata: Some(RoutineMetadata {
-                    timezone: Some("Europe/London".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+            }),
+            ..Default::default()
+        })
+        .unwrap(),
+        json!({ "routine_metadata": {
+            "repositories": [],
+            "conditions": [],
+            "synthesis_max_conversations": 20,
+        } })
+    );
 }
 
 #[test]
-fn metadata_keeps_keys_it_does_not_name_through_a_round_trip() {
-    let stored = json!({
-        "timezone": "UTC",
-        "owner": "ops",
-        "labels": ["a", "b"],
+fn routine_metadata_keeps_a_key_it_does_not_model() {
+    let value = json!({
+        "repositories": [],
+        "conditions": [],
+        "synthesis_max_conversations": 10,
+        "review_window_hours": 24,
     });
-    let metadata: RoutineMetadata = serde_json::from_value(stored.clone()).unwrap();
-    assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
-    assert_eq!(metadata.other.len(), 2);
-    assert_eq!(serde_json::to_value(&metadata).unwrap(), stored);
+    let metadata: RoutineMetadata = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(metadata.other["review_window_hours"], json!(24));
+    assert_eq!(serde_json::to_value(&metadata).unwrap(), value);
+}
+
+#[test]
+fn a_routine_without_routine_metadata_reads_the_defaults() {
+    let mut value = routine_json();
+    value.as_object_mut().unwrap().remove("routine_metadata");
+    let routine: introspection_sdk::Routine = serde_json::from_value(value).unwrap();
+    assert_eq!(routine.routine_metadata, RoutineMetadata::default());
 }
 
 #[test]
@@ -482,25 +447,10 @@ const TRIGGER_ID: &str = "66666666-6666-7666-8666-666666666666";
 fn webhook_trigger_json() -> serde_json::Value {
     json!({
         "id": TRIGGER_ID,
-        "routine_id": ROUTINE_ID,
-        "org_id": "00000000-0000-0000-0000-0000000000aa",
-        "project_id": "00000000-0000-0000-0000-0000000000bb",
-        "created_at": "2026-10-04T00:00:00Z",
-        "updated_at": "2026-10-04T00:00:00Z",
-        "source": "connector",
-        "provider": "webhook",
+        "type": "webhook",
         "connector_slug": "ci-alerts",
         "event_types": ["alert.fired"],
-        "filter": {
-            "channel_ids": null,
-            "emoji": null,
-            "team_ids": null,
-            "to_states": null,
-            "repository_ids": null,
-            "branches": null,
-            "payload_fields": { "env": ["prod"] },
-        },
-        "enabled": true,
+        "payload_fields": { "env": ["prod"] },
     })
 }
 
@@ -513,15 +463,13 @@ async fn create_sends_a_webhook_trigger() {
         .and(path("/v1/routines"))
         .and(body_json(json!({
             "name": "Triage alerts",
-            "trigger_type": "manual",
             "prompt": "Triage the @parameters.severity alert.",
             "runtime_group_id": GROUP_ID,
             "triggers": [{
-                "source": "connector",
-                "provider": "webhook",
+                "type": "webhook",
                 "connector_slug": "ci-alerts",
                 "event_types": ["alert.fired"],
-                "filter": { "payload_fields": { "env": ["prod"] } },
+                "payload_fields": { "env": ["prod"] },
             }],
         })))
         .respond_with(ResponseTemplate::new(201).set_body_json(created))
@@ -533,28 +481,23 @@ async fn create_sends_a_webhook_trigger() {
         .create(&RoutineCreateParams {
             prompt: Some("Triage the @parameters.severity alert.".into()),
             runtime_group_id: Some(id(GROUP_ID)),
-            triggers: Some(vec![RoutineTriggerSpec {
-                filter: RoutineTriggerFilter {
-                    payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
-                    ..Default::default()
-                },
-                ..RoutineTriggerSpec::connector(
-                    RoutineTriggerProvider::Webhook,
-                    "ci-alerts",
-                    ["alert.fired"],
-                )
-            }]),
-            ..RoutineCreateParams::new("Triage alerts", RoutineTriggerType::Manual)
+            triggers: Some(vec![RoutineWebhookTrigger {
+                payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
+                ..RoutineWebhookTrigger::new("ci-alerts", ["alert.fired"])
+            }
+            .into()]),
+            ..RoutineCreateParams::new("Triage alerts")
         })
         .await
         .unwrap();
 
     let trigger = &routine.triggers[0];
-    assert_eq!(trigger.id, id(TRIGGER_ID));
-    assert_eq!(trigger.source, RoutineTriggerSource::Connector);
-    assert_eq!(trigger.provider, RoutineTriggerProvider::Webhook);
-    assert_eq!(trigger.connector_slug.as_deref(), Some("ci-alerts"));
-    assert!(trigger.enabled);
+    assert_eq!(trigger.id(), Some(id(TRIGGER_ID)));
+    assert_eq!(trigger.type_name(), Some("webhook"));
+    let RoutineTrigger::Webhook(webhook) = trigger else {
+        panic!("a webhook trigger: {trigger:?}");
+    };
+    assert_eq!(webhook.connector_slug, "ci-alerts");
 }
 
 #[tokio::test]
@@ -566,18 +509,15 @@ async fn update_keeps_a_trigger_by_id_and_adds_another() {
             "triggers": [
                 {
                     "id": TRIGGER_ID,
-                    "source": "connector",
-                    "provider": "webhook",
+                    "type": "webhook",
                     "connector_slug": "ci-alerts",
                     "event_types": ["alert.fired"],
-                    "filter": { "payload_fields": { "env": ["prod"] } },
-                    "enabled": true,
+                    "payload_fields": { "env": ["prod"] },
                 },
                 {
-                    "source": "integration",
-                    "provider": "github",
+                    "type": "github",
                     "event_types": ["github.pull_request.opened"],
-                    "filter": { "branches": ["main"] },
+                    "branches": ["main"],
                 },
             ],
         })))
@@ -586,24 +526,18 @@ async fn update_keeps_a_trigger_by_id_and_adds_another() {
         .mount(&server)
         .await;
 
-    let stored: introspection_sdk::RoutineTrigger =
-        serde_json::from_value(webhook_trigger_json()).unwrap();
+    let stored: RoutineTrigger = serde_json::from_value(webhook_trigger_json()).unwrap();
     Routines::new(build_http(&server))
         .update(
             id(ROUTINE_ID),
             &RoutineUpdateParams {
                 triggers: Some(vec![
-                    stored.to_spec(),
-                    RoutineTriggerSpec {
-                        filter: RoutineTriggerFilter {
-                            branches: Some(vec!["main".into()]),
-                            ..Default::default()
-                        },
-                        ..RoutineTriggerSpec::new(
-                            RoutineTriggerProvider::Github,
-                            ["github.pull_request.opened"],
-                        )
-                    },
+                    stored,
+                    RoutineGithubTrigger {
+                        branches: Some(vec!["main".into()]),
+                        ..RoutineGithubTrigger::new(["github.pull_request.opened"])
+                    }
+                    .into(),
                 ]),
                 ..Default::default()
             },
@@ -626,23 +560,119 @@ fn an_empty_trigger_list_removes_every_trigger() {
 
 #[test]
 fn a_routine_without_triggers_reads_an_empty_list() {
-    let routine: introspection_sdk::Routine = serde_json::from_value(routine_json()).unwrap();
+    let mut value = routine_json();
+    value.as_object_mut().unwrap().remove("triggers");
+    let routine: introspection_sdk::Routine = serde_json::from_value(value).unwrap();
     assert!(routine.triggers.is_empty());
 }
 
 #[test]
-fn an_unknown_trigger_provider_is_kept() {
-    let mut value = webhook_trigger_json();
-    value["provider"] = json!("pagerduty");
-    let trigger: introspection_sdk::RoutineTrigger = serde_json::from_value(value).unwrap();
+fn each_trigger_type_decodes_and_serializes_back_unchanged() {
+    let cases = [
+        (
+            json!({"id": TRIGGER_ID, "type": "schedule", "cron": "0 9 * * 1-5", "timezone": "Australia/Sydney"}),
+            RoutineTrigger::Schedule(RoutineScheduleTrigger {
+                id: Some(id(TRIGGER_ID)),
+                timezone: Some("Australia/Sydney".into()),
+                ..RoutineScheduleTrigger::new("0 9 * * 1-5")
+            }),
+        ),
+        (
+            json!({"id": TRIGGER_ID, "type": "slack", "event_types": ["slack.reaction.added"], "channel_ids": ["C1"], "emoji": ["eyes"]}),
+            RoutineTrigger::Slack(RoutineSlackTrigger {
+                id: Some(id(TRIGGER_ID)),
+                channel_ids: Some(vec!["C1".into()]),
+                emoji: Some(vec!["eyes".into()]),
+                ..RoutineSlackTrigger::new(["slack.reaction.added"])
+            }),
+        ),
+        (
+            json!({"id": TRIGGER_ID, "type": "github", "event_types": ["github.push"], "repository_ids": ["R1"], "branches": ["main"]}),
+            RoutineTrigger::Github(RoutineGithubTrigger {
+                id: Some(id(TRIGGER_ID)),
+                repository_ids: Some(vec!["R1".into()]),
+                branches: Some(vec!["main".into()]),
+                ..RoutineGithubTrigger::new(["github.push"])
+            }),
+        ),
+        (
+            json!({"id": TRIGGER_ID, "type": "linear", "event_types": ["linear.issue.created"], "to_states": ["Todo"]}),
+            RoutineTrigger::Linear(RoutineLinearTrigger {
+                id: Some(id(TRIGGER_ID)),
+                to_states: Some(vec!["Todo".into()]),
+                ..RoutineLinearTrigger::new(["linear.issue.created"])
+            }),
+        ),
+        (
+            webhook_trigger_json(),
+            RoutineTrigger::Webhook(RoutineWebhookTrigger {
+                id: Some(id(TRIGGER_ID)),
+                payload_fields: Some([("env".into(), vec!["prod".into()])].into()),
+                ..RoutineWebhookTrigger::new("ci-alerts", ["alert.fired"])
+            }),
+        ),
+    ];
+    for (value, expected) in cases {
+        let trigger: RoutineTrigger = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(trigger, expected);
+        assert_eq!(trigger.id(), Some(id(TRIGGER_ID)));
+        assert_eq!(serde_json::to_value(&trigger).unwrap(), value);
+    }
+}
+
+#[test]
+fn omitted_filter_keys_decode_as_none_and_are_not_sent() {
+    let value = json!({"id": TRIGGER_ID, "type": "slack", "event_types": ["slack.reaction.added"]});
+    let trigger: RoutineTrigger = serde_json::from_value(value.clone()).unwrap();
+    let RoutineTrigger::Slack(slack) = &trigger else {
+        panic!("a slack trigger: {trigger:?}");
+    };
+    assert_eq!(slack.channel_ids, None);
+    assert_eq!(slack.emoji, None);
+    assert_eq!(serde_json::to_value(&trigger).unwrap(), value);
     assert_eq!(
-        trigger.provider,
-        RoutineTriggerProvider::Unknown(json!("pagerduty"))
+        serde_json::to_value(RoutineTrigger::from(RoutineScheduleTrigger::new(
+            "0 9 * * *"
+        )))
+        .unwrap(),
+        json!({"type": "schedule", "cron": "0 9 * * *"})
     );
-    assert_eq!(
-        serde_json::to_value(&trigger).unwrap()["provider"],
-        json!("pagerduty")
-    );
+}
+
+#[test]
+fn an_unknown_trigger_type_is_kept() {
+    let value = json!({
+        "id": TRIGGER_ID,
+        "type": "jira",
+        "event_types": ["jira.issue.created"],
+        "project_keys": ["OPS"],
+    });
+    let trigger: RoutineTrigger = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(trigger, RoutineTrigger::Unknown(value.clone()));
+    assert_eq!(trigger.type_name(), Some("jira"));
+    assert_eq!(trigger.id(), Some(id(TRIGGER_ID)));
+    assert_eq!(serde_json::to_value(&trigger).unwrap(), value);
+}
+
+#[tokio::test]
+async fn a_routine_with_an_unknown_trigger_type_decodes() {
+    let server = MockServer::start().await;
+    let mut value = routine_json();
+    value["triggers"] = json!([
+        {"id": TRIGGER_ID, "type": "introspection", "event_types": ["introspection.task.completed"]},
+    ]);
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/routines/{ROUTINE_ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(value))
+        .mount(&server)
+        .await;
+
+    let routine = Routines::new(build_http(&server))
+        .get(id(ROUTINE_ID))
+        .await
+        .unwrap();
+    assert_eq!(routine.triggers[0].type_name(), Some("introspection"));
+    assert_eq!(routine.triggers[0].id(), Some(id(TRIGGER_ID)));
 }
 
 #[tokio::test]
