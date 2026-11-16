@@ -735,3 +735,32 @@ fn an_issue_event_of_an_unknown_action_is_kept_whole() {
     );
     assert!(read[0].base().is_none());
 }
+
+/// A runtime the API turned off carries `disabled_at` and `enabled`; both
+/// decode without a field left unmodelled and serialize back unchanged.
+#[test]
+fn a_runtime_carries_disabled_at_and_enabled() {
+    for (disabled_at, enabled) in [
+        (serde_json::json!("2026-11-10T08:00:00Z"), false),
+        (serde_json::Value::Null, true),
+    ] {
+        let body = serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000041",
+            "org_id": "00000000-0000-0000-0000-0000000000aa",
+            "project_id": "00000000-0000-0000-0000-0000000000bb",
+            "created_by_member_id": "00000000-0000-0000-0000-0000000000cc",
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-02T00:00:00Z",
+            "name": "Support",
+            "slug": "support",
+            "environments": [],
+            "llm_mode": "managed",
+            "disabled_at": disabled_at,
+            "enabled": enabled,
+        });
+        round_trip::<Runtime>(&body).unwrap();
+        let runtime: Runtime = serde_json::from_value(body).unwrap();
+        assert_eq!(runtime.enabled, Some(enabled));
+        assert_eq!(runtime.disabled_at.is_some(), !enabled);
+    }
+}
