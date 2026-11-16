@@ -764,3 +764,41 @@ fn a_runtime_carries_disabled_at_and_enabled() {
         assert_eq!(runtime.disabled_at.is_some(), !enabled);
     }
 }
+
+/// A routine's `budget_exhausted` is `null` or the budget and the end of its
+/// period; both decode without a field left unmodelled, and the object
+/// serializes back unchanged.
+#[test]
+fn a_routine_carries_budget_exhausted() {
+    for budget_exhausted in [
+        serde_json::Value::Null,
+        serde_json::json!({
+            "budget_id": "00000000-0000-0000-0000-0000000000dd",
+            "until": "2026-12-01T00:00:00Z",
+        }),
+    ] {
+        let body = serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000051",
+            "org_id": "00000000-0000-0000-0000-0000000000aa",
+            "project_id": "00000000-0000-0000-0000-0000000000bb",
+            "created_at": "2026-09-01T00:00:00Z",
+            "updated_at": "2026-09-02T00:00:00Z",
+            "name": "Nightly",
+            "enabled": true,
+            "trigger_type": "manual",
+            "can_manage": true,
+            "tags": [],
+            "budget_exhausted": budget_exhausted,
+        });
+        round_trip::<Routine>(&body).unwrap();
+        let routine: Routine = serde_json::from_value(body).unwrap();
+        assert_eq!(
+            routine.budget_exhausted.map(|b| b.until),
+            budget_exhausted_until(&budget_exhausted)
+        );
+    }
+}
+
+fn budget_exhausted_until(value: &serde_json::Value) -> Option<String> {
+    value["until"].as_str().map(str::to_owned)
+}

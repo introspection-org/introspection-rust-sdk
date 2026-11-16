@@ -4754,6 +4754,18 @@ pub struct Routine {
     /// Events that start a run, beside the schedule and a manual trigger.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<RoutineTrigger>,
+    /// The budget pausing this routine's scheduled and event-started runs,
+    /// until its period ends; `None` while none does. Read-only.
+    #[serde(default)]
+    pub budget_exhausted: Option<RoutineBudgetExhausted>,
+}
+
+/// The budget that has paused a routine's scheduled and event-started runs.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RoutineBudgetExhausted {
+    pub budget_id: Uuid,
+    /// When the budget's period ends and the runs resume (ISO-8601 UTC).
+    pub until: String,
 }
 
 fn default_true() -> bool {
