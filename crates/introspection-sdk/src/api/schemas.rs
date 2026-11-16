@@ -4478,6 +4478,9 @@ open_wire_enum! {
         /// An event reached a trigger whose previous run was still going: a
         /// trigger runs one at a time.
         TriggerBusy => "trigger_busy",
+        /// The routine's member had sent nothing for the schedule's
+        /// [`member_idle_seconds`](RoutineScheduleTrigger::member_idle_seconds).
+        MemberIdle => "member_idle",
     }
 }
 
@@ -4547,6 +4550,17 @@ pub struct RoutineScheduleTrigger {
     pub cron: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// Skip a slot when the routine's member has had no turn in a
+    /// conversation they started in the project for this many seconds (3600
+    /// to 31536000). `None` leaves it out, so a kept schedule keeps its
+    /// stored value and a new one runs every slot; `Some(None)` sends `null`,
+    /// which clears it.
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub member_idle_seconds: Option<Option<u64>>,
 }
 
 impl RoutineScheduleTrigger {
@@ -4555,7 +4569,14 @@ impl RoutineScheduleTrigger {
             id: None,
             cron: cron.into(),
             timezone: None,
+            member_idle_seconds: None,
         }
+    }
+
+    /// Skip a slot once the member has been idle `seconds`; `None` runs every slot.
+    pub fn member_idle_seconds(mut self, seconds: Option<u64>) -> Self {
+        self.member_idle_seconds = Some(seconds);
+        self
     }
 }
 

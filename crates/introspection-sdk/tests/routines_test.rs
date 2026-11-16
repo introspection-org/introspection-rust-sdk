@@ -1629,3 +1629,29 @@ fn synthesis_completed_event_name_round_trips() {
         name
     );
 }
+
+#[test]
+fn a_schedules_idle_window_is_left_out_cleared_or_set() {
+    let unset = serde_json::to_value(RoutineScheduleTrigger::new("0 9 * * *")).unwrap();
+    assert!(unset.get("member_idle_seconds").is_none());
+
+    let cleared =
+        serde_json::to_value(RoutineScheduleTrigger::new("0 9 * * *").member_idle_seconds(None))
+            .unwrap();
+    assert_eq!(cleared["member_idle_seconds"], serde_json::Value::Null);
+
+    let set = serde_json::to_value(
+        RoutineScheduleTrigger::new("0 */6 * * *").member_idle_seconds(Some(172_800)),
+    )
+    .unwrap();
+    assert_eq!(set["member_idle_seconds"], 172_800);
+
+    let read: RoutineScheduleTrigger =
+        serde_json::from_value(json!({ "cron": "0 9 * * *", "member_idle_seconds": 3600 }))
+            .unwrap();
+    assert_eq!(read.member_idle_seconds, Some(Some(3600)));
+    assert_eq!(
+        serde_json::from_value::<RoutineSkipReason>(json!("member_idle")).unwrap(),
+        RoutineSkipReason::MemberIdle
+    );
+}
