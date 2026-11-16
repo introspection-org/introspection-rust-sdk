@@ -783,7 +783,7 @@ fn a_routine_carries_its_triggers_conditions_and_synthesis() {
         "kind": "observation_synthesis",
         "repositories": [{"repo": "acme/app", "ref": "main", "depth": 0}],
         "conditions": [{"type": "has_new_tasks_since_last_run", "runtime_group_id": null}],
-        "synthesis": {"batch": true, "max_conversations": null},
+        "synthesis": {"max_conversations": null},
         "next_trigger_at": "2026-09-03T09:00:00Z",
         "triggers": [
             {"id": "00000000-0000-0000-0000-000000000061", "type": "schedule", "cron": "0 9 * * *", "timezone": null},

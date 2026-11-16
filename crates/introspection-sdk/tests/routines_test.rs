@@ -379,22 +379,23 @@ async fn update_sends_only_the_set_fields() {
 fn synthesis_settings_round_trip() {
     let mut value = routine_json();
     value["kind"] = json!("observation_synthesis");
-    value["synthesis"] = json!({"batch": false, "max_conversations": 50});
+    value["synthesis"] = json!({"max_conversations": 50});
     let routine: introspection_sdk::Routine = serde_json::from_value(value).unwrap();
     assert_eq!(
         routine.synthesis,
         Some(RoutineSynthesis {
-            batch: false,
             max_conversations: Some(50),
         })
     );
     assert_eq!(
         serde_json::to_value(RoutineUpdateParams {
-            synthesis: Some(RoutineSynthesis::default()),
+            synthesis: Some(RoutineSynthesis {
+                max_conversations: Some(20),
+            }),
             ..Default::default()
         })
         .unwrap(),
-        json!({ "synthesis": { "batch": true } })
+        json!({ "synthesis": { "max_conversations": 20 } })
     );
 }
 

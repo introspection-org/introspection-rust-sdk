@@ -4695,23 +4695,11 @@ impl RoutineCondition {
 
 /// An [`RoutineKind::ObservationSynthesis`] routine's settings.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutineSynthesis {
-    /// `false` keeps the per-conversation path.
-    #[serde(default = "default_true")]
-    pub batch: bool,
-    /// The most conversations a batch run samples.
+    /// The most conversations a run samples.
     #[serde(default)]
     pub max_conversations: Option<u32>,
-}
-
-impl Default for RoutineSynthesis {
-    fn default() -> Self {
-        Self {
-            batch: true,
-            max_conversations: None,
-        }
-    }
 }
 
 /// A stored routine: a prompt run as an agent task, or platform work when
