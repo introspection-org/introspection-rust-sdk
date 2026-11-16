@@ -4556,7 +4556,7 @@ pub struct RoutineScheduleTrigger {
     pub timezone: Option<String>,
     /// Skip a slot when the routine's member has sent no message in the
     /// project for this many seconds (3600 to 31536000). `None` leaves it
-    /// out: a new schedule on a routine with `task_id` takes 7 days, and a
+    /// out: a new schedule on a routine with `task_id` takes 2 days, and a
     /// kept schedule keeps its stored value. `Some(None)` sends `null`, which
     /// runs every slot.
     #[serde(
