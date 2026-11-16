@@ -8,9 +8,9 @@ use futures::StreamExt as _;
 use introspection_sdk::{
     EventListParams, ExperimentListParams, ImageCreate, ImageListParams, ImageSource,
     IntrospectionEventName, JudgeListParams, JudgeUpdateParams, PaginationParams,
-    RoutineCreateParams, RoutineListParams, RoutineMetadata, RoutineTriggerType,
-    RoutineUpdateParams, RunRequest, RunnerIdentity, Task, TaskCommand, TaskCommandListParams,
-    TaskCommandSpec, TaskCommandStatus, TaskCreate, TaskKind, TaskStatus,
+    RoutineCreateParams, RoutineListParams, RoutineUpdateParams, RunRequest, RunnerIdentity, Task,
+    TaskCommand, TaskCommandListParams, TaskCommandSpec, TaskCommandStatus, TaskCreate, TaskKind,
+    TaskStatus,
 };
 use serde_json::{json, Value};
 
@@ -500,27 +500,20 @@ pub async fn routines(w: &mut Walk) {
     let routine = sa
         .routines()
         .create(&RoutineCreateParams {
-            name: walk::ROUTINE_NAME.into(),
-            trigger_type: RoutineTriggerType::Manual,
             prompt: Some(w.settings.second_turn()),
             runtime_group_id: set(&w.runtime, "the runtime").runtime_group_id,
             // A routine its owner creates posts into that owner's own
             // task; the first task was archived and unarchived, which the
             // trigger still refuses, so the trial is the one it posts into.
             task_id: Some(set(&w.eval_task, "the trial").id),
-            description: None,
-            cron_schedule: None,
-            kind: None,
-            next_trigger_at: None,
-            metadata: None,
-            enabled: None,
-            triggers: None,
+            ..RoutineCreateParams::new(walk::ROUTINE_NAME)
         })
         .await
         .expect("create the routine");
     assert_stable!(routine, @r#"
     {
       "can_manage": true,
+      "conditions": [],
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
       "enabled": true,
@@ -530,10 +523,11 @@ pub async fn routines(w: &mut Walk) {
       "owner_role": "operator",
       "project_id": "[uuid]",
       "prompt": "Reply with the single word done. <<SCRIPT {\"reply\":\"done\"}>>",
+      "repositories": [],
       "runtime_group_id": "[uuid]",
       "tags": [],
       "task_id": "[uuid]",
-      "trigger_type": "manual",
+      "triggers": [],
       "updated_at": "[timestamp]"
     }
     "#);
@@ -559,19 +553,15 @@ pub async fn routines(w: &mut Walk) {
             routine.id,
             &RoutineUpdateParams {
                 description: Some("triggered once by the walk".into()),
-                // A member may set only `cron_schedules` and `timezone`; an
-                // administrator's free-form keys would land in `other`.
-                metadata: Some(RoutineMetadata {
-                    timezone: Some("UTC".into()),
-                    ..Default::default()
-                }),
                 ..Default::default()
             },
         )
         .await
         .expect("describe the routine");
-    let metadata = described.typed_metadata().expect("typed metadata");
-    assert_eq!(metadata.timezone.as_deref(), Some("UTC"));
+    assert_eq!(
+        described.description.as_deref(),
+        Some("triggered once by the walk")
+    );
     let listed = sa
         .routines()
         .list(&RoutineListParams::default())

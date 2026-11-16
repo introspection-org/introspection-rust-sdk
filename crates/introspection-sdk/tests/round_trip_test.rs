@@ -765,40 +765,36 @@ fn a_runtime_carries_disabled_at_and_enabled() {
     }
 }
 
-/// A routine's `budget_exhausted` is `null` or the budget and the end of its
-/// period; both decode without a field left unmodelled, and the object
-/// serializes back unchanged.
+/// A routine's `triggers`, every known `type` and an unknown one, its
+/// `conditions`, `repositories` and `synthesis` decode without a field left
+/// unmodelled and serialize back unchanged.
 #[test]
-fn a_routine_carries_budget_exhausted() {
-    for budget_exhausted in [
-        serde_json::Value::Null,
-        serde_json::json!({
-            "budget_id": "00000000-0000-0000-0000-0000000000dd",
-            "until": "2026-12-01T00:00:00Z",
-        }),
-    ] {
-        let body = serde_json::json!({
-            "id": "00000000-0000-0000-0000-000000000051",
-            "org_id": "00000000-0000-0000-0000-0000000000aa",
-            "project_id": "00000000-0000-0000-0000-0000000000bb",
-            "created_at": "2026-09-01T00:00:00Z",
-            "updated_at": "2026-09-02T00:00:00Z",
-            "name": "Nightly",
-            "enabled": true,
-            "trigger_type": "manual",
-            "can_manage": true,
-            "tags": [],
-            "budget_exhausted": budget_exhausted,
-        });
-        round_trip::<Routine>(&body).unwrap();
-        let routine: Routine = serde_json::from_value(body).unwrap();
-        assert_eq!(
-            routine.budget_exhausted.map(|b| b.until),
-            budget_exhausted_until(&budget_exhausted)
-        );
-    }
-}
-
-fn budget_exhausted_until(value: &serde_json::Value) -> Option<String> {
-    value["until"].as_str().map(str::to_owned)
+fn a_routine_carries_its_triggers_conditions_and_synthesis() {
+    let body = serde_json::json!({
+        "id": "00000000-0000-0000-0000-000000000051",
+        "org_id": "00000000-0000-0000-0000-0000000000aa",
+        "project_id": "00000000-0000-0000-0000-0000000000bb",
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z",
+        "name": "Nightly",
+        "enabled": true,
+        "can_manage": true,
+        "tags": [],
+        "kind": "observation_synthesis",
+        "repositories": [{"repo": "acme/app", "ref": "main", "depth": 0}],
+        "conditions": [{"type": "has_new_tasks_since_last_run", "runtime_group_id": null}],
+        "synthesis": {"batch": true, "max_conversations": null},
+        "next_trigger_at": "2026-09-03T09:00:00Z",
+        "triggers": [
+            {"id": "00000000-0000-0000-0000-000000000061", "type": "schedule", "cron": "0 9 * * *", "timezone": null},
+            {"id": "00000000-0000-0000-0000-000000000062", "type": "slack", "event_types": ["slack.reaction.added"], "channel_ids": ["C1"], "emoji": ["eyes"]},
+            {"id": "00000000-0000-0000-0000-000000000063", "type": "github", "event_types": ["github.push"], "branches": ["main"]},
+            {"id": "00000000-0000-0000-0000-000000000064", "type": "linear", "event_types": ["linear.issue.created"]},
+            {"id": "00000000-0000-0000-0000-000000000065", "type": "webhook", "connector_slug": "orders", "event_types": ["*"], "payload_fields": {"status": ["paid"]}},
+            {"id": "00000000-0000-0000-0000-000000000066", "type": "jira", "event_types": ["jira.issue.created"], "project_keys": ["OPS"]},
+        ],
+    });
+    round_trip::<Routine>(&body).unwrap();
+    let routine: Routine = serde_json::from_value(body).unwrap();
+    assert!(matches!(routine.triggers[5], RoutineTrigger::Unknown(_)));
 }

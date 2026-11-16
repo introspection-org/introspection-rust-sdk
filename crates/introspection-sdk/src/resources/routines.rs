@@ -4,18 +4,16 @@
 //! A routine either runs a prompt as an agent task (a person's own
 //! routine, [`Routine::kind`] `None`) or runs platform work (a
 //! [`RoutineKind`]). Set `task_id` to post each firing into an existing
-//! task instead of creating one; a one-off reminder is a
-//! [`RoutineTriggerType::Manual`] routine with a future
-//! `next_trigger_at`. Each firing of a routine that runs as a task is
+//! task instead of creating one; a one-off reminder is a routine with no
+//! schedule trigger and a future `next_trigger_at`. Each firing of a routine that runs as a task is
 //! recorded as an [`IntrospectionEventName::RoutineTriggered`] or
 //! [`IntrospectionEventName::RoutineSkipped`] event, read through
 //! [`crate::Events`] with the `routine_id` and `task_id` filters.
 //!
-//! Beside its schedule and a manual trigger, a prompt routine that starts a
-//! task per run can run on events: its [`Routine::triggers`] listen to an
-//! integration (Slack, GitHub) or a project connector, such as a `webhook`
-//! connector, and each event-started run reads the event's body as its
-//! parameters.
+//! [`Routine::triggers`] holds its schedules and, on a prompt routine that
+//! starts a task per run, the events it runs on (Slack, GitHub, Linear or a
+//! `webhook` connector); each event-started run reads the event's body as
+//! its parameters.
 //!
 //! These are Data Plane routes, gated on `routines:read` /
 //! `routines:write`; a runner a member opens for themself carries both.
@@ -25,7 +23,6 @@
 //! `RoutineListParams::task_id` is not served either.
 //!
 //! [`RoutineKind`]: crate::RoutineKind
-//! [`RoutineTriggerType::Manual`]: crate::RoutineTriggerType::Manual
 //! [`IntrospectionEventName::RoutineTriggered`]: crate::IntrospectionEventName::RoutineTriggered
 //! [`IntrospectionEventName::RoutineSkipped`]: crate::IntrospectionEventName::RoutineSkipped
 
