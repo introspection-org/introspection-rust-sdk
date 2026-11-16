@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.51.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.50.0...v0.51.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* routine triggers as one union discriminated on type; schedules are triggers ([#248](https://github.com/introspection-org/introspection-rust-sdk/issues/248))
+
+### Features
+
+* routine triggers as one union discriminated on type; schedules are triggers ([#248](https://github.com/introspection-org/introspection-rust-sdk/issues/248)) ([9c2489b](https://github.com/introspection-org/introspection-rust-sdk/commit/9c2489b0c736891b90ee12b182744b5da330cb6d))
+
 ## [0.50.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.49.0...v0.50.0) (2026-11-16)
 
 
