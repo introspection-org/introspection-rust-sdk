@@ -434,7 +434,7 @@ pub struct TaskFileRef {
 /// stays null and git resolves the remote's HEAD, so it cannot go stale on a
 /// rename.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRepoRequest {
     pub repo: String,
     #[serde(default, rename = "ref")]
@@ -4673,7 +4673,7 @@ routine_trigger_from!(
     Webhook(RoutineWebhookTrigger),
 );
 
-/// One of a routine's [`conditions`](Routine::conditions).
+/// One of a routine's [`conditions`](RoutineMetadata::conditions).
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutineCondition {
@@ -4693,13 +4693,20 @@ impl RoutineCondition {
     }
 }
 
-/// An [`RoutineKind::ObservationSynthesis`] routine's settings.
+/// A routine's typed `routine_metadata`. On update the whole object
+/// replaces the stored one, so send the current values of fields you keep.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoutineSynthesis {
-    /// The most conversations a run samples.
+pub struct RoutineMetadata {
+    /// Repositories a task-run routine clones.
     #[serde(default)]
-    pub max_conversations: Option<u32>,
+    pub repositories: Vec<TaskRepoRequest>,
+    #[serde(default)]
+    pub conditions: Vec<RoutineCondition>,
+    /// The most conversations a run samples; only on a
+    /// [`RoutineKind::ObservationSynthesis`] routine.
+    #[serde(default)]
+    pub synthesis_max_conversations: Option<u32>,
 }
 
 /// A stored routine: a prompt run as an agent task, or platform work when
@@ -4747,14 +4754,8 @@ pub struct Routine {
     pub owner_role: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Repositories a task-run routine clones.
     #[serde(default)]
-    pub repositories: Vec<TaskRepoRequest>,
-    #[serde(default)]
-    pub conditions: Vec<RoutineCondition>,
-    /// Only on a [`RoutineKind::ObservationSynthesis`] routine.
-    #[serde(default)]
-    pub synthesis: Option<RoutineSynthesis>,
+    pub routine_metadata: RoutineMetadata,
     #[serde(default)]
     pub last_triggered_at: Option<String>,
     /// The next slot: with schedule triggers, the earliest across them
@@ -4807,12 +4808,7 @@ pub struct RoutineCreateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_trigger_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub repositories: Option<Vec<TaskRepoRequest>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub conditions: Option<Vec<RoutineCondition>>,
-    /// Only for a [`RoutineKind::ObservationSynthesis`] routine.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub synthesis: Option<RoutineSynthesis>,
+    pub routine_metadata: Option<RoutineMetadata>,
     /// Defaults to `true` server-side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -4852,12 +4848,9 @@ pub struct RoutineUpdateParams {
     /// schedule trigger (RFC 3339 with an offset, in the future).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_trigger_at: Option<String>,
+    /// Replaces the stored object.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub repositories: Option<Vec<TaskRepoRequest>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub conditions: Option<Vec<RoutineCondition>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub synthesis: Option<RoutineSynthesis>,
+    pub routine_metadata: Option<RoutineMetadata>,
     /// `false` pauses and keeps the slot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,

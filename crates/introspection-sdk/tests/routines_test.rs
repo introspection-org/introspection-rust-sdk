@@ -11,8 +11,8 @@ use introspection_sdk::{
     AdvancedOptions, ClientConfig, EnqueuedConversation, Event, EventListParams, Events,
     IntrospectionClient, IntrospectionEventName, ObservationSynthesisStatus, PaginationParams,
     RoutineCondition, RoutineConditionType, RoutineCreateParams, RoutineExecutionStatus,
-    RoutineGithubTrigger, RoutineKind, RoutineLinearTrigger, RoutineListParams, RoutineParameters,
-    RoutineScheduleTrigger, RoutineSkipReason, RoutineSlackTrigger, RoutineSynthesis,
+    RoutineGithubTrigger, RoutineKind, RoutineLinearTrigger, RoutineListParams, RoutineMetadata,
+    RoutineParameters, RoutineScheduleTrigger, RoutineSkipReason, RoutineSlackTrigger,
     RoutineTrigger, RoutineTriggerEventRef, RoutineTriggerParams, RoutineTriggerRequest,
     RoutineTriggerType, RoutineUpdateParams, RoutineWebhookTrigger, Routines, TaskFileRef,
     TaskRepoRequest,
@@ -62,9 +62,11 @@ fn routine_json() -> serde_json::Value {
         "tags": [],
         "kind": null,
         "prompt": "Check in on the open items.",
-        "repositories": [{"repo": "acme/app", "ref": "main"}],
-        "conditions": [{"type": "has_new_tasks_since_last_run"}],
-        "synthesis": null,
+        "routine_metadata": {
+            "repositories": [{"repo": "acme/app", "ref": "main"}],
+            "conditions": [{"type": "has_new_tasks_since_last_run"}],
+            "synthesis_max_conversations": null,
+        },
         "triggers": [
             {"id": SCHEDULE_ID, "type": "schedule", "cron": "0 9 * * 1-5", "timezone": "Australia/Sydney"},
         ],
@@ -112,13 +114,14 @@ async fn list_parses_the_read_model() {
         routine.next_trigger_at.as_deref(),
         Some("2026-10-05T22:00:00Z")
     );
-    assert_eq!(routine.repositories[0].repo, "acme/app");
-    assert_eq!(routine.repositories[0].git_ref.as_deref(), Some("main"));
+    let metadata = &routine.routine_metadata;
+    assert_eq!(metadata.repositories[0].repo, "acme/app");
+    assert_eq!(metadata.repositories[0].git_ref.as_deref(), Some("main"));
     assert_eq!(
-        routine.conditions[0].condition_type,
+        metadata.conditions[0].condition_type,
         RoutineConditionType::HasNewTasksSinceLastRun
     );
-    assert_eq!(routine.synthesis, None);
+    assert_eq!(metadata.synthesis_max_conversations, None);
     assert_eq!(
         routine.triggers,
         vec![RoutineTrigger::Schedule(RoutineScheduleTrigger {
@@ -307,11 +310,13 @@ async fn create_serializes_a_platform_kind_its_schedules_and_conditions() {
             "kind": "project_check_in",
             "prompt": "How is the project going?",
             "runtime_group_id": GROUP_ID,
-            "repositories": [{"repo": "acme/app"}],
-            "conditions": [
-                {"type": "no_live_task_for_routine"},
-                {"type": "last_run_issues_resolved", "runtime_group_id": GROUP_ID},
-            ],
+            "routine_metadata": {
+                "repositories": [{"repo": "acme/app"}],
+                "conditions": [
+                    {"type": "no_live_task_for_routine"},
+                    {"type": "last_run_issues_resolved", "runtime_group_id": GROUP_ID},
+                ],
+            },
             "enabled": false,
             "triggers": [
                 {"type": "schedule", "cron": "0 9 * * *"},
@@ -327,17 +332,20 @@ async fn create_serializes_a_platform_kind_its_schedules_and_conditions() {
             kind: Some(RoutineKind::ProjectCheckIn),
             prompt: Some("How is the project going?".into()),
             runtime_group_id: Some(id(GROUP_ID)),
-            repositories: Some(vec![TaskRepoRequest {
-                repo: "acme/app".into(),
+            routine_metadata: Some(RoutineMetadata {
+                repositories: vec![TaskRepoRequest {
+                    repo: "acme/app".into(),
+                    ..Default::default()
+                }],
+                conditions: vec![
+                    RoutineCondition::new(RoutineConditionType::NoLiveTaskForRoutine),
+                    RoutineCondition {
+                        runtime_group_id: Some(id(GROUP_ID)),
+                        ..RoutineCondition::new(RoutineConditionType::LastRunIssuesResolved)
+                    },
+                ],
                 ..Default::default()
-            }]),
-            conditions: Some(vec![
-                RoutineCondition::new(RoutineConditionType::NoLiveTaskForRoutine),
-                RoutineCondition {
-                    runtime_group_id: Some(id(GROUP_ID)),
-                    ..RoutineCondition::new(RoutineConditionType::LastRunIssuesResolved)
-                },
-            ]),
+            }),
             enabled: Some(false),
             triggers: Some(vec![
                 RoutineScheduleTrigger::new("0 9 * * *").into(),
@@ -376,27 +384,41 @@ async fn update_sends_only_the_set_fields() {
 }
 
 #[test]
-fn synthesis_settings_round_trip() {
+fn routine_metadata_decodes_and_an_update_sends_the_whole_object() {
     let mut value = routine_json();
     value["kind"] = json!("observation_synthesis");
-    value["synthesis"] = json!({"max_conversations": 50});
+    value["routine_metadata"] = json!({"synthesis_max_conversations": 50});
     let routine: introspection_sdk::Routine = serde_json::from_value(value).unwrap();
     assert_eq!(
-        routine.synthesis,
-        Some(RoutineSynthesis {
-            max_conversations: Some(50),
-        })
+        routine.routine_metadata,
+        RoutineMetadata {
+            synthesis_max_conversations: Some(50),
+            ..Default::default()
+        }
     );
     assert_eq!(
         serde_json::to_value(RoutineUpdateParams {
-            synthesis: Some(RoutineSynthesis {
-                max_conversations: Some(20),
+            routine_metadata: Some(RoutineMetadata {
+                synthesis_max_conversations: Some(20),
+                ..Default::default()
             }),
             ..Default::default()
         })
         .unwrap(),
-        json!({ "synthesis": { "max_conversations": 20 } })
+        json!({ "routine_metadata": {
+            "repositories": [],
+            "conditions": [],
+            "synthesis_max_conversations": 20,
+        } })
     );
+}
+
+#[test]
+fn a_routine_without_routine_metadata_reads_the_defaults() {
+    let mut value = routine_json();
+    value.as_object_mut().unwrap().remove("routine_metadata");
+    let routine: introspection_sdk::Routine = serde_json::from_value(value).unwrap();
+    assert_eq!(routine.routine_metadata, RoutineMetadata::default());
 }
 
 #[test]

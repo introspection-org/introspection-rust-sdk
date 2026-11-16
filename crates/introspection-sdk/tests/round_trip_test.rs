@@ -765,11 +765,11 @@ fn a_runtime_carries_disabled_at_and_enabled() {
     }
 }
 
-/// A routine's `triggers`, every known `type` and an unknown one, its
-/// `conditions`, `repositories` and `synthesis` decode without a field left
-/// unmodelled and serialize back unchanged.
+/// A routine's `triggers`, every known `type` and an unknown one, and its
+/// `routine_metadata` decode without a field left unmodelled and serialize
+/// back unchanged.
 #[test]
-fn a_routine_carries_its_triggers_conditions_and_synthesis() {
+fn a_routine_carries_its_triggers_and_routine_metadata() {
     let body = serde_json::json!({
         "id": "00000000-0000-0000-0000-000000000051",
         "org_id": "00000000-0000-0000-0000-0000000000aa",
@@ -781,9 +781,11 @@ fn a_routine_carries_its_triggers_conditions_and_synthesis() {
         "can_manage": true,
         "tags": [],
         "kind": "observation_synthesis",
-        "repositories": [{"repo": "acme/app", "ref": "main", "depth": 0}],
-        "conditions": [{"type": "has_new_tasks_since_last_run", "runtime_group_id": null}],
-        "synthesis": {"max_conversations": null},
+        "routine_metadata": {
+            "repositories": [{"repo": "acme/app", "ref": "main", "depth": 0}],
+            "conditions": [{"type": "has_new_tasks_since_last_run", "runtime_group_id": null}],
+            "synthesis_max_conversations": 200,
+        },
         "next_trigger_at": "2026-09-03T09:00:00Z",
         "triggers": [
             {"id": "00000000-0000-0000-0000-000000000061", "type": "schedule", "cron": "0 9 * * *", "timezone": null},

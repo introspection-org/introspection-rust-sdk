@@ -439,8 +439,10 @@ let fired = client.events().list(&EventListParams {
 `Routine::triggers` is one list discriminated on `type`: `Schedule`, `Slack`,
 `Github`, `Linear` and `Webhook`. A `type` this SDK does not know decodes as
 `RoutineTrigger::Unknown` with the raw object, and `id()` / `type_name()` read
-it. `repositories`, `conditions` and, on an `ObservationSynthesis` routine,
-`synthesis` are top-level fields.
+it. `routine_metadata` is a typed `RoutineMetadata`: `repositories`,
+`conditions` and, on an `ObservationSynthesis` routine,
+`synthesis_max_conversations`. An update's `routine_metadata` replaces the
+whole object.
 
 `Routine::kind` is `None` for a routine a person created. A platform
 routine carries its kind: `ProjectCheckIn`, `ObservationSynthesis` or
