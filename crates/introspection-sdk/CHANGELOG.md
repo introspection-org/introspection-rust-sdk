@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.52.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.51.0...v0.52.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **routines:** a schedule trigger's member_idle_seconds and the MemberIdle skip reason ([#250](https://github.com/introspection-org/introspection-rust-sdk/issues/250))
+
+### Features
+
+* **routines:** a schedule trigger's member_idle_seconds and the MemberIdle skip reason ([#250](https://github.com/introspection-org/introspection-rust-sdk/issues/250)) ([0a19920](https://github.com/introspection-org/introspection-rust-sdk/commit/0a199206566ba422c729e3d548d57ceb266718ed))
+
 ## [0.51.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.50.0...v0.51.0) (2026-11-16)
 
 
