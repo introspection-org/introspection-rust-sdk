@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.50.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.49.0...v0.50.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **routines:** model budget_exhausted on the Routine response ([#247](https://github.com/introspection-org/introspection-rust-sdk/issues/247))
+* **runtimes:** model enabled and disabled_at on the Runtime response ([#245](https://github.com/introspection-org/introspection-rust-sdk/issues/245))
+
+### Features
+
+* **routines:** model budget_exhausted on the Routine response ([#247](https://github.com/introspection-org/introspection-rust-sdk/issues/247)) ([f323a3f](https://github.com/introspection-org/introspection-rust-sdk/commit/f323a3ff093aeff895721d0a36bfc6dad634fa4e))
+* **runtimes:** model enabled and disabled_at on the Runtime response ([#245](https://github.com/introspection-org/introspection-rust-sdk/issues/245)) ([fa18a22](https://github.com/introspection-org/introspection-rust-sdk/commit/fa18a22fdff823c641029b8153a3760fe3c4d8b4))
+
 ## [0.49.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.48.1...v0.49.0) (2026-11-15)
 
 
