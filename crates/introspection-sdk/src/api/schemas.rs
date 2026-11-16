@@ -4707,6 +4707,10 @@ pub struct RoutineMetadata {
     /// [`RoutineKind::ObservationSynthesis`] routine.
     #[serde(default)]
     pub synthesis_max_conversations: Option<u32>,
+    /// Keys this SDK build does not model, kept so a read-modify-write
+    /// does not clear them.
+    #[serde(flatten)]
+    pub other: BTreeMap<String, serde_json::Value>,
 }
 
 /// A stored routine: a prompt run as an agent task, or platform work when

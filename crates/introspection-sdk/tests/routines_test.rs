@@ -414,6 +414,19 @@ fn routine_metadata_decodes_and_an_update_sends_the_whole_object() {
 }
 
 #[test]
+fn routine_metadata_keeps_a_key_it_does_not_model() {
+    let value = json!({
+        "repositories": [],
+        "conditions": [],
+        "synthesis_max_conversations": 10,
+        "review_window_hours": 24,
+    });
+    let metadata: RoutineMetadata = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(metadata.other["review_window_hours"], json!(24));
+    assert_eq!(serde_json::to_value(&metadata).unwrap(), value);
+}
+
+#[test]
 fn a_routine_without_routine_metadata_reads_the_defaults() {
     let mut value = routine_json();
     value.as_object_mut().unwrap().remove("routine_metadata");

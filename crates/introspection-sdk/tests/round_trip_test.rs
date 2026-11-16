@@ -785,6 +785,7 @@ fn a_routine_carries_its_triggers_and_routine_metadata() {
             "repositories": [{"repo": "acme/app", "ref": "main", "depth": 0}],
             "conditions": [{"type": "has_new_tasks_since_last_run", "runtime_group_id": null}],
             "synthesis_max_conversations": 200,
+            "review_window_hours": 24,
         },
         "next_trigger_at": "2026-09-03T09:00:00Z",
         "triggers": [
