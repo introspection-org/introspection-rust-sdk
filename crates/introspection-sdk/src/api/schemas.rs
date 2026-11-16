@@ -1912,6 +1912,15 @@ pub struct Runtime {
     pub yanked_at: Option<String>,
     #[serde(default)]
     pub yanked_reason: Option<String>,
+    /// When the runtime was turned off, which turns off every version of it;
+    /// `None` while it is on. Read-only.
+    #[serde(default)]
+    pub disabled_at: Option<String>,
+    /// Whether the runtime is on (`disabled_at` is `None`). Turning it off
+    /// applies to every version of it. Read-only; `None` when the server
+    /// omits it (older servers).
+    #[serde(default)]
+    pub enabled: Option<bool>,
     #[serde(default)]
     pub kind: Option<String>,
     #[serde(default)]

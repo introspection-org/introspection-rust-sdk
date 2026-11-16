@@ -343,7 +343,7 @@ fn assert_built_from(runtime: &Runtime, recipe_sha: &str) {
 }
 
 /// The runtime without what moves between the recording and a live run:
-/// `git_commit_sha`, which the recording predates, and the image metadata
+/// `git_commit_sha`, `disabled_at` and `enabled`, which the recording predates, and the image metadata
 /// past its five declared fields, which is whatever the data plane reports
 /// (tool versions, say) and changes with a release.
 fn runtime_snapshot(runtime: &Runtime) -> Value {
@@ -354,7 +354,7 @@ fn runtime_snapshot(runtime: &Runtime) -> Value {
         "external_image_name",
         "verdict_by",
     ];
-    let mut value = without(runtime, &["git_commit_sha"]);
+    let mut value = without(runtime, &["git_commit_sha", "disabled_at", "enabled"]);
     if let Some(Value::Object(metadata)) = value.get_mut("image_build_metadata") {
         metadata.retain(|key, _| DECLARED.contains(&key.as_str()));
     }
