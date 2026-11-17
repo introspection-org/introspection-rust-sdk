@@ -24,6 +24,7 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 const ROUTINE_ID: &str = "11111111-1111-7111-8111-111111111111";
 const TASK_ID: &str = "22222222-2222-7222-8222-222222222222";
+const RUN_ID: &str = "77777777-7777-7777-8777-777777777777";
 const GROUP_ID: &str = "33333333-3333-7333-8333-333333333333";
 const MEMBER_ID: &str = "44444444-4444-7444-8444-444444444444";
 const SCHEDULE_ID: &str = "55555555-5555-7555-8555-555555555555";
@@ -1362,6 +1363,7 @@ async fn routine_events_decode_and_filter_by_routine_and_task() {
                     "member_id": MEMBER_ID,
                     "runtime_group_id": GROUP_ID,
                     "triggered_by_member_id": null,
+                    "run_id": RUN_ID,
                     "event": {
                         "trigger_id": TRIGGER_ID,
                         "event_type": "alert.fired",
@@ -1400,6 +1402,7 @@ async fn routine_events_decode_and_filter_by_routine_and_task() {
     assert!(triggered.payload.posted);
     assert_eq!(triggered.payload.member_id, id(MEMBER_ID));
     assert_eq!(triggered.payload.triggered_by_member_id, None);
+    assert_eq!(triggered.payload.run_id, Some(id(RUN_ID)));
     assert_eq!(
         triggered.payload.event,
         Some(RoutineTriggerEventRef {
