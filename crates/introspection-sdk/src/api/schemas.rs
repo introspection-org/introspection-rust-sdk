@@ -8279,6 +8279,10 @@ pub struct RoutineTriggeredPayload {
     /// The event trigger it answered, for a run an event started.
     #[serde(default)]
     pub event: Option<RoutineTriggerEventRef>,
+    /// The run the trigger's turn executes on: the `introspection.run.id`
+    /// its spans carry. `None` on a row written before it was recorded.
+    #[serde(default)]
+    pub run_id: Option<Uuid>,
 }
 
 /// The event trigger a routine run or skip answered
