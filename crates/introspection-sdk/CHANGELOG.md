@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.53.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.52.0...v0.53.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **events:** `RoutineTriggeredPayload` gains a public `run_id: Option<Uuid>` field; an exhaustive struct literal must now set it.
+
+### Features
+
+* **events:** run_id on the routines.triggered payload ([#252](https://github.com/introspection-org/introspection-rust-sdk/issues/252)) ([ec91818](https://github.com/introspection-org/introspection-rust-sdk/commit/ec918184a3641b7e1f22bfe4f6751d285cff0f8a))
+
 ## [0.52.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.51.0...v0.52.0) (2026-11-16)
 
 
