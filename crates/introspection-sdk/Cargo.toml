@@ -81,7 +81,7 @@ opentelemetry-otlp = { version = "0.33.0", default-features = false, features = 
 # HTTP client — async + multipart + streaming for the REST API; `blocking`
 # is required by the OTLP `reqwest-blocking-client` exporter under the
 # `otel` feature (the BatchSpanProcessor runs on a non-tokio thread).
-# Pinned to 0.13 to match opentelemetry-otlp 0.32 (avoids a duplicate
+# Pinned to 0.13 to match opentelemetry-otlp 0.33 (avoids a duplicate
 # reqwest in the dep graph and the resulting HttpClient trait-bound
 # mismatch).
 # `gzip` makes the client advertise `Accept-Encoding: gzip` and decompress
@@ -90,7 +90,7 @@ opentelemetry-otlp = { version = "0.33.0", default-features = false, features = 
 percent-encoding = { workspace = true }
 # `system-proxy` is what makes 0.13 honour HTTPS_PROXY / NO_PROXY; 0.12 did so
 # unconditionally, and a client behind a corporate proxy otherwise never connects.
-reqwest = { workspace = true, features = ["blocking", "multipart", "query", "stream", "rustls-native-certs", "gzip", "system-proxy"] }
+reqwest = { workspace = true, features = ["blocking", "multipart", "query", "stream", "gzip", "system-proxy"] }
 
 # Serialization
 serde = { workspace = true }
