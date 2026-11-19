@@ -124,8 +124,10 @@ let follow_up = runner.tasks().runs.create(
 println!("{}", follow_up.text().await?);
 ```
 
-Unknown future AG-UI event types surface as `AgUiEvent::Unknown`, carrying the
-frame as JSON, rather than ending the stream.
+The AG-UI types (`introspection_sdk::agui`) match `@ag-ui/core@1.0.5` exactly.
+An unknown future event type, or a frame that does not satisfy its type's
+schema, surfaces as `AgUiEvent::Unknown`, carrying the frame as JSON, rather
+than ending the stream.
 
 See [Tasks and streaming](https://docs.introspection.dev/reference/rust#continue-and-control-a-task) for reconnects,
 interrupts, and cancellation.

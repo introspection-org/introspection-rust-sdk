@@ -1,7 +1,7 @@
 //! AG-UI protocol types ([`Event`]) and Introspection's extensions to them.
 //!
 //! The task-run stream ([`crate::api::TaskRuns::stream`]) speaks the
-//! [AG-UI protocol] natively. This module owns a faithful Rust mirror of the
+//! [AG-UI protocol] natively. This module owns an exact Rust mirror of the
 //! `@ag-ui/core` event taxonomy — see [`event`] for why the SDK owns these
 //! types rather than depending on a third-party crate — and layers
 //! Introspection's own additions on the protocol's sanctioned `CUSTOM`
@@ -13,19 +13,32 @@
 //!
 //! [AG-UI protocol]: https://github.com/ag-ui-protocol/ag-ui
 
+mod de;
 pub mod event;
+pub mod input;
+pub mod message;
+pub mod patch;
 
 pub use event::{
-    ActivityDeltaEvent, ActivitySnapshotEvent, BaseEvent, CustomEvent, Event, EventType,
-    MessagesSnapshotEvent, RawEvent, ReasoningEncryptedValueEvent, ReasoningEndEvent,
-    ReasoningMessageChunkEvent, ReasoningMessageContentEvent, ReasoningMessageEndEvent,
-    ReasoningMessageStartEvent, ReasoningStartEvent, RunErrorEvent, RunFinishedEvent,
-    RunFinishedOutcome, RunStartedEvent, StateDeltaEvent, StateSnapshotEvent, StepFinishedEvent,
-    StepStartedEvent, SubagentErrorEvent, SubagentFinishedEvent, SubagentStartedEvent,
-    TextMessageChunkEvent, TextMessageContentEvent, TextMessageEndEvent, TextMessageStartEvent,
-    TokenUsage, ToolCallArgsEvent, ToolCallChunkEvent, ToolCallEndEvent, ToolCallResultContent,
-    ToolCallResultEvent, ToolCallStartEvent,
+    ActivityDeltaEvent, ActivitySnapshotEvent, BaseEvent, CustomEvent, Event, EventType, Interrupt,
+    MessagesSnapshotEvent, RawEvent, ReasoningEncryptedValueEvent, ReasoningEncryptedValueSubtype,
+    ReasoningEndEvent, ReasoningMessageChunkEvent, ReasoningMessageContentEvent,
+    ReasoningMessageEndEvent, ReasoningMessageStartEvent, ReasoningRole, ReasoningStartEvent,
+    RunErrorEvent, RunFinishedEvent, RunFinishedOutcome, RunStartedEvent, StateDeltaEvent,
+    StateSnapshotEvent, StepFinishedEvent, StepStartedEvent, SubagentErrorEvent,
+    SubagentFinishedEvent, SubagentFinishedOutcome, SubagentStartedEvent, TextMessageChunkEvent,
+    TextMessageContentEvent, TextMessageEndEvent, TextMessageRole, TextMessageStartEvent,
+    TokenUsage, ToolCallArgsEvent, ToolCallChunkEvent, ToolCallEndEvent, ToolCallResultEvent,
+    ToolCallStartEvent, ToolRole,
 };
+pub use input::{Context, ResumeEntry, ResumeStatus, RunAgentInput, Tool};
+pub use message::{
+    ActivityMessage, AssistantMessage, AudioPart, DataSource, DeveloperMessage, DocumentPart,
+    FileSource, FunctionCall, ImagePart, InputContent, InstructionMessage, MediaPart, Message,
+    MessageContent, PartSource, ReasoningMessage, SystemMessage, TextPart, ToolCall, ToolCallType,
+    ToolMessage, UrlSource, UserMessage, VideoPart,
+};
+pub use patch::{InvalidJsonPointer, JsonPatch, JsonPatchOperation, JsonPointer};
 
 /// Introspection's extensions to the AG-UI protocol, carried on the `CUSTOM`
 /// event channel so they interoperate with any AG-UI consumer and are

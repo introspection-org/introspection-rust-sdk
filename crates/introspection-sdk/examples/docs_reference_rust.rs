@@ -38,7 +38,7 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
     // #region docs:reference/rust/run-task
     use futures::StreamExt;
     use introspection_sdk::{
-        AgUiEvent, ClientConfig, IntrospectionAPIError, IntrospectionClient, RunRequest, RunnerIdentity,
+        agui::Message, AgUiEvent, ClientConfig, IntrospectionAPIError, IntrospectionClient, RunRequest, RunnerIdentity,
     };
 
     /// Applies one stream event to the assistant text read so far. A reconnect
@@ -50,8 +50,10 @@ async fn run_task() -> Result<(IntrospectionClient, Runner), Box<dyn Error>> {
                 *text = e
                     .messages
                     .iter()
-                    .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
-                    .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                    .filter_map(|m| match m {
+                        Message::Assistant(a) => a.content.as_deref(),
+                        _ => None,
+                    })
                     .collect();
             }
             AgUiEvent::TextMessageContent(m) => text.push_str(&m.delta),

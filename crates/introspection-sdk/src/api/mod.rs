@@ -136,8 +136,9 @@
 //! where [`Event`] is the typed AG-UI protocol event (see [`crate::agui`]).
 //! The stream yields only protocol events — transport frames (`heartbeat`,
 //! `done`, `result`) are handled internally — so callers branch on the
-//! [`Event`] variant directly. An unrecognised future event `type` surfaces
-//! as [`Event::Unknown`] rather than failing the stream.
+//! [`Event`] variant directly. An unrecognised future event `type`, or a
+//! frame that does not satisfy its type's `@ag-ui/core` schema, surfaces as
+//! [`Event::Unknown`] rather than failing the stream.
 //! [`RunHandle::text`] is a convenience that concatenates the `delta` of
 //! [`Event::TextMessageContent`] events into a single string.
 //!

@@ -11,8 +11,8 @@ use std::{collections::HashMap, error::Error};
 
 use futures::StreamExt;
 use introspection_sdk::{
-    AgUiEvent, ClientConfig, IntrospectionClient, RunRequest, TaskPrompt, TaskRunCreate,
-    TaskRunKind,
+    agui::Message, AgUiEvent, ClientConfig, IntrospectionClient, RunRequest, TaskPrompt,
+    TaskRunCreate, TaskRunKind,
 };
 use serde::Deserialize;
 
@@ -47,14 +47,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // A reconnect behind the replay buffer sends the run so far instead.
             AgUiEvent::MessagesSnapshot(e) => {
                 args.clear();
-                let calls = e.messages.iter().filter_map(|m| m["toolCalls"].as_array());
+                let calls = e.messages.into_iter().filter_map(|m| match m {
+                    Message::Assistant(a) => a.tool_calls,
+                    _ => None,
+                });
                 for call in calls.flatten() {
-                    let id = call["id"].as_str().unwrap_or_default().to_string();
-                    if call["function"]["name"] == "submit_result" {
-                        submit_id = Some(id.clone());
+                    if call.function.name == "submit_result" {
+                        submit_id = Some(call.id.clone());
                     }
-                    let arguments = call["function"]["arguments"].as_str().unwrap_or_default();
-                    args.insert(id, arguments.into());
+                    args.insert(call.id, call.function.arguments);
                 }
             }
             AgUiEvent::RunError(e) => return Err(format!("run failed: {}", e.message).into()),
