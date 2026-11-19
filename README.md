@@ -633,8 +633,30 @@ for comment in issue.comments.unwrap_or_default() {
 }
 ```
 
-`IssueInclude::Attachments` adds `links`, `files`, `events` and `spans`;
-`Comments` is for `get` only. `IssueListParams` filters by `relation` and
+Evidence is one list of attachments, each a link, file, event or span with
+its own `id`. Add one without reading the issue first; the server skips one it
+already holds:
+
+```rust
+use introspection_sdk::{IssueLink, IssueUpdateParams};
+
+issues.update(
+    issue_id,
+    &IssueUpdateParams {
+        add_attachments: Some(vec![IssueLink {
+            url: "https://github.com/acme/app/pull/12".into(),
+            title: Some("Proposed fix".into()),
+        }
+        .into()]),
+        remove_attachments: Some(vec![stale_attachment_id]),
+        ..Default::default()
+    },
+    &[],
+    None,
+).await?;
+```
+
+`IssueInclude::Attachments` adds `attachments`; `Comments` is for `get` only. `IssueListParams` filters by `relation` and
 `member_id`. The history is the `introspection.issue` events of the issue
 (`created`, `updated`, `commented`, `deleted`).
 

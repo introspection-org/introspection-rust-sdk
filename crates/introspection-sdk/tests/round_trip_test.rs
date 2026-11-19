@@ -704,6 +704,33 @@ fn an_issue_updated_event_carries_each_change_without_its_null_side() {
 }
 
 #[test]
+fn an_issue_updated_event_carries_the_attachments_added_and_removed() {
+    let link = serde_json::json!({
+        "id": "00000000-0000-0000-0000-0000000000e1", "kind": "link",
+        "url": "https://github.com/acme/app/pull/12", "title": "Fix",
+    });
+    let event = serde_json::json!({
+        "id": "00000000-0000-0000-0000-0000000000e2", "kind": "event",
+        "event_id": "00000000-0000-0000-0000-0000000000e3",
+    });
+    let changes = serde_json::json!({"changes": {
+        "attachments": {"added": [link], "removed": [event]},
+    }});
+    let read = issue_events(&[issue_payload("updated", changes)]);
+    let IssueActivityPayload::Updated(updated) = &read[0] else {
+        panic!("updated: {:?}", read[0]);
+    };
+    let change = &updated.changes["attachments"];
+    assert!(change.before.is_none() && change.after.is_none());
+    let added = change.added.as_deref().unwrap();
+    assert!(
+        matches!(&added[0], IssueAttachment::Link { title: Some(title), .. } if title == "Fix")
+    );
+    let removed = change.removed.as_deref().unwrap();
+    assert!(matches!(removed[0], IssueAttachment::Event { .. }));
+}
+
+#[test]
 fn an_issue_commented_event_carries_the_comment() {
     let comment = serde_json::json!({"comment": "Ship it?"});
     let read = issue_events(&[issue_payload("commented", comment)]);

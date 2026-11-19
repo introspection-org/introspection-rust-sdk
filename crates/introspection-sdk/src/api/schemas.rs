@@ -5193,6 +5193,95 @@ pub struct IssueSpanReference {
     pub span_id: String,
 }
 
+/// One piece of an issue's evidence, as read. Each carries its own `id`,
+/// which [`IssueUpdateParams::remove_attachments`] takes.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum IssueAttachment {
+    Link {
+        id: Uuid,
+        url: String,
+        #[serde(default)]
+        title: Option<String>,
+    },
+    File {
+        id: Uuid,
+        file_id: Uuid,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        checksum: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        source_event_ids: Vec<Uuid>,
+    },
+    Event {
+        id: Uuid,
+        event_id: Uuid,
+    },
+    Span {
+        id: Uuid,
+        trace_id: String,
+        span_id: String,
+    },
+    /// A kind this SDK build does not know, as the server sent it.
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+impl IssueAttachment {
+    /// The attachment's id; `None` for an [`Self::Unknown`] without one.
+    pub fn id(&self) -> Option<Uuid> {
+        match self {
+            Self::Link { id, .. }
+            | Self::File { id, .. }
+            | Self::Event { id, .. }
+            | Self::Span { id, .. } => Some(*id),
+            Self::Unknown(value) => value
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|id| Uuid::parse_str(id).ok()),
+        }
+    }
+}
+
+/// An attachment to add to an issue: the server dedups it by its identity
+/// (a link's `url`, a file's `file_id`, an event's `event_id`, a span's
+/// `trace_id` and `span_id`) and assigns its `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum IssueAttachmentCreate {
+    Link(IssueLink),
+    File(IssueFile),
+    Event(IssueEventReference),
+    Span(IssueSpanReference),
+}
+
+impl From<IssueLink> for IssueAttachmentCreate {
+    fn from(link: IssueLink) -> Self {
+        Self::Link(link)
+    }
+}
+
+impl From<IssueFile> for IssueAttachmentCreate {
+    fn from(file: IssueFile) -> Self {
+        Self::File(file)
+    }
+}
+
+impl From<IssueEventReference> for IssueAttachmentCreate {
+    fn from(event: IssueEventReference) -> Self {
+        Self::Event(event)
+    }
+}
+
+impl From<IssueSpanReference> for IssueAttachmentCreate {
+    fn from(span: IssueSpanReference) -> Self {
+        Self::Span(span)
+    }
+}
+
 /// How a member stands to an issue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -5242,7 +5331,7 @@ pub struct IssueComment {
 pub enum IssueInclude {
     /// `members`.
     Members,
-    /// `links`, `files`, `events` and `spans`.
+    /// `attachments`.
     Attachments,
     /// `comments`, oldest first, at most 500. On `Issues::get` only: the
     /// list, create and update answer `422`.
@@ -5310,16 +5399,10 @@ pub struct Issue {
     /// order they were added; with [`IssueInclude::Members`].
     #[serde(default)]
     pub members: Option<Vec<IssueMember>>,
-    /// With [`IssueInclude::Attachments`], as are `files`, `events` and
-    /// `spans`.
+    /// The issue's evidence in the order it was added; with
+    /// [`IssueInclude::Attachments`].
     #[serde(default)]
-    pub links: Option<Vec<IssueLink>>,
-    #[serde(default)]
-    pub files: Option<Vec<IssueFile>>,
-    #[serde(default)]
-    pub events: Option<Vec<IssueEventReference>>,
-    #[serde(default)]
-    pub spans: Option<Vec<IssueSpanReference>>,
+    pub attachments: Option<Vec<IssueAttachment>>,
     /// With [`IssueInclude::Comments`].
     #[serde(default)]
     pub comments: Option<Vec<IssueComment>>,
@@ -5356,14 +5439,9 @@ pub struct IssueCreateParams {
     /// Caller-defined attributes: string, number, bool or null values.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
+    /// The issue's evidence, in order.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub files: Option<Vec<IssueFile>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<IssueLink>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events: Option<Vec<IssueEventReference>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spans: Option<Vec<IssueSpanReference>>,
+    pub attachments: Option<Vec<IssueAttachmentCreate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignee_member_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5384,10 +5462,7 @@ impl IssueCreateParams {
             priority: None,
             tags: None,
             metadata: None,
-            files: None,
-            links: None,
-            events: None,
-            spans: None,
+            attachments: None,
             assignee_member_id: None,
             reviewer_member_id: None,
             follower_member_ids: None,
@@ -5396,9 +5471,11 @@ impl IssueCreateParams {
 }
 
 /// `PATCH /v1/issues/{id}` body. `None` leaves a field
-/// as it is; each list (and `metadata`) replaces the stored one wholesale, so
-/// `Some(vec![])` clears it. Pass the issue's [`Issue::etag`] as `If-Match` to
-/// refuse the edit when the issue has changed since it was read.
+/// as it is; `tags`, `metadata` and the followers replace the stored ones
+/// wholesale, so `Some(vec![])` clears one. Evidence changes by
+/// `add_attachments` and `remove_attachments`, which need no `If-Match`.
+/// Pass the issue's [`Issue::etag`] as `If-Match` to refuse the edit when the
+/// issue has changed since it was read.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct IssueUpdateParams {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5413,14 +5490,14 @@ pub struct IssueUpdateParams {
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
+    /// Appends, in order, the attachments the issue does not hold yet; one
+    /// it holds already is skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub files: Option<Vec<IssueFile>>,
+    pub add_attachments: Option<Vec<IssueAttachmentCreate>>,
+    /// Removes the attachments with these ids; an id the issue does not
+    /// hold is ignored.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<IssueLink>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events: Option<Vec<IssueEventReference>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spans: Option<Vec<IssueSpanReference>>,
+    pub remove_attachments: Option<Vec<Uuid>>,
     /// `Some(Some(id))` assigns the issue, replacing its assignee;
     /// `Some(None)` sends `null`, which unassigns it; `None` leaves it.
     #[serde(
@@ -8160,7 +8237,8 @@ impl JudgementPayload {
 }
 
 /// One authored field's value on either side of an update. A side that was
-/// null is `None`.
+/// null is `None`. The `attachments` change carries `added` and `removed`
+/// instead.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct IssueFieldChange {
@@ -8168,6 +8246,10 @@ pub struct IssueFieldChange {
     pub before: Option<serde_json::Value>,
     #[serde(default)]
     pub after: Option<serde_json::Value>,
+    #[serde(default)]
+    pub added: Option<Vec<IssueAttachment>>,
+    #[serde(default)]
+    pub removed: Option<Vec<IssueAttachment>>,
 }
 
 /// What every issue event carries, whichever action it records.
