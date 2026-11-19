@@ -124,8 +124,8 @@ let follow_up = runner.tasks().runs.create(
 println!("{}", follow_up.text().await?);
 ```
 
-Unknown future AG-UI event types surface as `AgUiEvent::Unknown` rather than
-ending the stream.
+Unknown future AG-UI event types surface as `AgUiEvent::Unknown`, carrying the
+frame as JSON, rather than ending the stream.
 
 See [Tasks and streaming](https://docs.introspection.dev/reference/rust#continue-and-control-a-task) for reconnects,
 interrupts, and cancellation.

@@ -596,7 +596,7 @@ pub struct SubagentErrorEvent {
 /// A single AG-UI protocol event.
 ///
 /// Internally tagged by `type`. An unrecognised `type` deserializes to
-/// [`Event::Unknown`] (the body is not retained) so a forward-compatible
+/// [`Event::Unknown`] (the frame is kept verbatim) so a forward-compatible
 /// protocol addition never severs an in-flight stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -632,10 +632,10 @@ pub enum Event {
     SubagentStarted(SubagentStartedEvent),
     SubagentFinished(SubagentFinishedEvent),
     SubagentError(SubagentErrorEvent),
-    /// An event whose `type` is not recognised by this SDK version. The
-    /// payload is not retained; the stream continues uninterrupted.
-    #[serde(other)]
-    Unknown,
+    /// An event whose `type` this SDK version does not model, kept as the
+    /// server sent it (every field, `type` included).
+    #[serde(untagged)]
+    Unknown(Value),
 }
 
 impl Event {
@@ -674,7 +674,7 @@ impl Event {
             Event::SubagentStarted(_) => EventType::SubagentStarted,
             Event::SubagentFinished(_) => EventType::SubagentFinished,
             Event::SubagentError(_) => EventType::SubagentError,
-            Event::Unknown => return None,
+            Event::Unknown(_) => return None,
         })
     }
 }
@@ -713,8 +713,22 @@ mod tests {
     #[test]
     fn unknown_type_does_not_error() {
         let ev: Event = serde_json::from_str(r#"{"type":"SOME_FUTURE_EVENT","foo":1}"#).unwrap();
-        assert_eq!(ev, Event::Unknown);
+        assert_eq!(
+            ev,
+            Event::Unknown(serde_json::json!({"type": "SOME_FUTURE_EVENT", "foo": 1}))
+        );
         assert_eq!(ev.event_type(), None);
+    }
+
+    #[test]
+    fn unknown_event_round_trips_every_field() {
+        let frame = serde_json::json!({
+            "type": "SOME_FUTURE_EVENT",
+            "timestamp": 1,
+            "nested": {"a": [1, null]},
+        });
+        let ev: Event = serde_json::from_value(frame.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&ev).unwrap(), frame);
     }
 
     #[test]
@@ -758,9 +772,10 @@ mod tests {
             "THINKING_TEXT_MESSAGE_CONTENT",
             "THINKING_TEXT_MESSAGE_END",
         ] {
-            let ev: Event =
-                serde_json::from_str(&format!(r#"{{"type":"{ty}","delta":"hmm"}}"#)).unwrap();
-            assert_eq!(ev, Event::Unknown, "{ty}");
+            let frame = serde_json::json!({"type": ty, "messageId": "m", "delta": "hmm"});
+            let ev: Event = serde_json::from_value(frame.clone()).unwrap();
+            assert_eq!(ev, Event::Unknown(frame.clone()), "{ty}");
+            assert_eq!(serde_json::to_value(&ev).unwrap(), frame, "{ty}");
         }
     }
 
