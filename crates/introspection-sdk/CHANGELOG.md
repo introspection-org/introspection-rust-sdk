@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.55.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.54.0...v0.55.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** Project, ProjectUpdateParams, JudgementVerdictPayload and IntrospectionHistory gain public fields, so a struct literal without `..` no longer compiles, and an exhaustive match on TaskKind needs a Simulate arm.
+
+### Bug Fixes
+
+* **api:** model cloud 0.87's project previous_slugs and slug rename, simulate tasks and classifier judgement scores ([#261](https://github.com/introspection-org/introspection-rust-sdk/issues/261)) ([e46fcec](https://github.com/introspection-org/introspection-rust-sdk/commit/e46fcecb4ce8a694325c5d43ca2b17e34c17659e))
+
 ## [0.54.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.53.0...v0.54.0) (2026-11-19)
 
 
