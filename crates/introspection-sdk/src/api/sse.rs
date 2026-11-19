@@ -23,8 +23,9 @@ pub(crate) const AG_UI_FRAME: &str = "ag_ui";
 
 /// Decode an `ag_ui` frame's `data` payload into a typed [`Event`].
 ///
-/// An unrecognised event `type` decodes to [`Event::Unknown`] (never an
-/// error); a structurally invalid payload yields
+/// A frame this SDK does not model, including a known `type` whose fields do
+/// not match, decodes to [`Event::Unknown`] with the frame kept (never an
+/// error); a payload that is not JSON yields
 /// [`IntrospectionAPIError::Decode`]. Used by the resumable stream
 /// (`crate::api::resumable`), which tracks frame ids itself and reuses this
 /// for the decode step.
@@ -372,7 +373,7 @@ mod tests {
     fn an_unrecognised_event_type_decodes_to_unknown_rather_than_erroring() {
         // A future protocol addition must never sever a live stream.
         let ev = decode_agui_event(r#"{"type":"SOME_FUTURE_EVENT","x":1}"#).unwrap();
-        assert!(matches!(ev, Event::Unknown));
+        assert!(matches!(ev, Event::Unknown(_)));
     }
 
     #[test]

@@ -20,10 +20,11 @@ pub use event::{
     MessagesSnapshotEvent, RawEvent, ReasoningEncryptedValueEvent, ReasoningEndEvent,
     ReasoningMessageChunkEvent, ReasoningMessageContentEvent, ReasoningMessageEndEvent,
     ReasoningMessageStartEvent, ReasoningStartEvent, RunErrorEvent, RunFinishedEvent,
-    RunStartedEvent, StateDeltaEvent, StateSnapshotEvent, StepFinishedEvent, StepStartedEvent,
+    RunFinishedOutcome, RunStartedEvent, StateDeltaEvent, StateSnapshotEvent, StepFinishedEvent,
+    StepStartedEvent, SubagentErrorEvent, SubagentFinishedEvent, SubagentStartedEvent,
     TextMessageChunkEvent, TextMessageContentEvent, TextMessageEndEvent, TextMessageStartEvent,
-    ToolCallArgsEvent, ToolCallChunkEvent, ToolCallEndEvent, ToolCallResultEvent,
-    ToolCallStartEvent,
+    TokenUsage, ToolCallArgsEvent, ToolCallChunkEvent, ToolCallEndEvent, ToolCallResultContent,
+    ToolCallResultEvent, ToolCallStartEvent,
 };
 
 /// Introspection's extensions to the AG-UI protocol, carried on the `CUSTOM`
@@ -44,6 +45,7 @@ pub mod introspection {
     pub fn reconnect_event(value: Value) -> Event {
         Event::Custom(CustomEvent {
             base: BaseEvent::default(),
+            subagent_run_id: None,
             name: RECONNECT_EVENT_NAME.to_string(),
             value,
         })
