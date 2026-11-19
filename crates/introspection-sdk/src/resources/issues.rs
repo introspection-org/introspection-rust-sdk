@@ -5,9 +5,10 @@
 //! An issue is created on its worker Task and starts `open`. An edit applies
 //! the fields it names and the last write wins; pass the issue's
 //! [`Issue::etag`] as `If-Match` to refuse the edit (412) when the issue has
-//! changed since it was read. Each evidence list (`files`, `links`, `events`,
-//! `spans`), `tags`, `metadata` and the followers replace the stored ones
-//! wholesale.
+//! changed since it was read. `tags`, `metadata` and the followers replace
+//! the stored ones wholesale. Evidence is one list of [`IssueAttachment`](crate::IssueAttachment)s:
+//! `add_attachments` appends the ones the issue does not hold yet and
+//! `remove_attachments` drops them by id, neither needing `If-Match`.
 //!
 //! An issue has an assignee, a reviewer and followers. To ask a person
 //! something, assign the issue to them, set it `waiting` and comment
