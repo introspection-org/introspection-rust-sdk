@@ -48,7 +48,7 @@ updates:
           - "minor"
           - "patch"
       # The OTLP exporter pins the HTTP client: Cargo.toml holds reqwest at 0.13
-      # to match opentelemetry-otlp 0.32, to avoid "a duplicate reqwest in the
+      # to match opentelemetry-otlp 0.33, to avoid "a duplicate reqwest in the
       # dep graph and the resulting HttpClient trait-bound mismatch". Bumping
       # either side alone breaks that pairing, so they are grouped to RESOLVE
       # together — not because the bump is safe. All four are pre-1.0, so they
