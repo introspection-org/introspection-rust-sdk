@@ -158,6 +158,9 @@ pub enum TaskKind {
     /// The agent shape run as an evaluation trial; the only kind that takes
     /// task commands.
     Eval,
+    /// The agent shape run against a simulated user; kept out of
+    /// observations and patterns.
+    Simulate,
     Process,
     /// Forward-compatible escape hatch for kinds the DP adds later.
     Other(String),
@@ -169,6 +172,7 @@ impl TaskKind {
         match self {
             Self::Agent => "agent",
             Self::Eval => "eval",
+            Self::Simulate => "simulate",
             Self::Process => "process",
             Self::Other(s) => s,
         }
@@ -180,6 +184,7 @@ impl From<&str> for TaskKind {
         match s {
             "agent" => Self::Agent,
             "eval" => Self::Eval,
+            "simulate" => Self::Simulate,
             "process" => Self::Process,
             other => Self::Other(other.to_string()),
         }
@@ -4152,6 +4157,10 @@ pub struct Project {
     /// it nullable; a project created before slugs existed may have none.
     #[serde(default)]
     pub slug: Option<String>,
+    /// Slugs the project had before a rename; each still resolves to it.
+    /// `None` only from a server that predates renames.
+    #[serde(default)]
+    pub previous_slugs: Option<Vec<String>>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
@@ -4274,6 +4283,9 @@ impl ProjectCreateParams {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ProjectUpdateParams {
     pub name: Option<String>,
+    /// A new slug; the current one keeps resolving to the project as one of
+    /// its [`Project::previous_slugs`].
+    pub slug: Option<String>,
     pub description: Option<String>,
     /// The prefixes to change; one left out keeps its current value.
     pub display_id_prefixes: Option<DisplayIdPrefixes>,
@@ -8180,6 +8192,10 @@ pub struct JudgementVerdictPayload {
     pub contract_version: Option<String>,
     #[serde(default)]
     pub sequence_hash: Option<String>,
+    /// A classifier judge's answers: each question's probability of true,
+    /// 0-1. `None` for an LLM judge.
+    #[serde(default)]
+    pub scores: Option<BTreeMap<String, f64>>,
     #[serde(default)]
     pub input_tokens: Option<i64>,
     #[serde(default)]
@@ -8396,6 +8412,10 @@ pub struct RoutineSkippedPayload {
     /// ([`RoutineSkipReason::TriggerBusy`]).
     #[serde(default)]
     pub event: Option<RoutineTriggerEventRef>,
+    /// The member who owns the skip: the one who triggered the run, else
+    /// the routine's creator, else the organization's Admin Agent.
+    #[serde(default)]
+    pub member_id: Option<Uuid>,
 }
 
 /// Whole-event envelope + typed payload per family.
@@ -9041,6 +9061,7 @@ mod tests {
         for (wire, kind) in [
             ("agent", TaskKind::Agent),
             ("eval", TaskKind::Eval),
+            ("simulate", TaskKind::Simulate),
             ("process", TaskKind::Process),
         ] {
             let parsed: TaskKind = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
@@ -10037,6 +10058,32 @@ mod tests {
             base.experiment_arm_id.unwrap().to_string(),
             "00000000-0000-0000-0000-00000000eeee"
         );
+    }
+
+    #[test]
+    fn judgement_verdict_reads_a_classifier_judges_scores() {
+        let raw = json!({
+            "id": "evt_6",
+            "timestamp": "2026-07-01T00:00:00Z",
+            "event_name": "introspection.judgement",
+            "payload": {
+                "kind": "verdict",
+                "judgement_id": "jm_2",
+                "result": "pass",
+                "contract_version": "3",
+                "scores": {"resolved": 0.92, "polite": 0.4},
+            },
+        });
+        let event: Event = serde_json::from_value(raw).unwrap();
+        let Event::Judgement(j) = &event else {
+            panic!("expected Judgement, got {event:?}");
+        };
+        let JudgementPayload::Verdict(verdict) = &j.payload else {
+            panic!("expected a verdict, got {:?}", j.payload);
+        };
+        let scores = verdict.scores.as_ref().unwrap();
+        assert_eq!(scores.get("resolved"), Some(&0.92));
+        assert_eq!(scores.get("polite"), Some(&0.4));
     }
 
     #[test]

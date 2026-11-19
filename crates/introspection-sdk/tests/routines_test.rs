@@ -1427,6 +1427,7 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
                 "slot": "2026-10-05T22:00:00Z",
                 "task_id": TASK_ID,
                 "reason": reason,
+                "member_id": MEMBER_ID,
             },
         })
     };
@@ -1459,6 +1460,7 @@ async fn skipped_events_decode_their_reason_including_an_unknown_one() {
             Event::RoutineSkipped(skipped) => {
                 assert_eq!(skipped.payload.trigger_type, RoutineTriggerType::Manual);
                 assert_eq!(skipped.payload.task_id, Some(id(TASK_ID)));
+                assert_eq!(skipped.payload.member_id, Some(id(MEMBER_ID)));
                 skipped.payload.reason.clone()
             }
             other => panic!("expected RoutineSkipped, got {other:?}"),

@@ -469,3 +469,38 @@ fn a_project_keeps_an_integration_type_it_does_not_know_and_reads_none_from_an_o
         Some(vec![IntegrationType::Other("dropbox".into())])
     );
 }
+
+#[tokio::test]
+async fn update_renames_the_slug_and_the_old_one_is_a_previous_slug() {
+    let server = MockServer::start().await;
+    let mut updated = project_json();
+    updated["slug"] = json!("helpdesk");
+    updated["previous_slugs"] = json!(["support-desk"]);
+    Mock::given(method("PATCH"))
+        .and(path("/v1/projects/support-desk"))
+        .and(body_json(json!({"slug": "helpdesk"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(updated))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let project = Projects::new(build_http(&server))
+        .update(
+            "support-desk",
+            &ProjectUpdateParams {
+                slug: Some("helpdesk".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(project.slug.as_deref(), Some("helpdesk"));
+    assert_eq!(project.previous_slugs, Some(vec!["support-desk".into()]));
+}
+
+#[test]
+fn a_project_from_a_server_without_renames_has_no_previous_slugs() {
+    let project: introspection_sdk::Project = serde_json::from_value(project_json()).unwrap();
+    assert!(project.previous_slugs.is_none());
+}

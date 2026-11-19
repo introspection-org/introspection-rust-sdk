@@ -84,7 +84,8 @@ fn full_span() -> serde_json::Value {
                     "is_new": true,
                     "continuation_method": "history",
                     "hash_hit": false,
-                    "new_messages": {"start": 0, "end": 1}
+                    "new_messages": {"start": 0, "end": 1},
+                    "loaded_messages": 3
                 }
             }
         }
@@ -168,6 +169,7 @@ fn introspection_attributes_sit_beside_gen_ai_not_inside_it() {
     assert_eq!(history.hash_hit, Some(false));
     let new_messages = history.new_messages.unwrap();
     assert_eq!((new_messages.start, new_messages.end), (Some(0), Some(1)));
+    assert_eq!(history.loaded_messages, Some(3));
 }
 
 #[test]
