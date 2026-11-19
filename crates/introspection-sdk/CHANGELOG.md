@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.54.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.53.0...v0.54.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **issues:** Issue, IssueCreateParams and IssueUpdateParams gain public fields, so a struct literal without `..` no longer compiles; callers using `IssueCreateParams::new` or `..Default::default()` are unaffected.
+* **agui:** BaseEvent.timestamp is Option<i64> (was f64). TextMessageStartEvent/TextMessageChunkEvent.role is Option<TextMessageRole>; ReasoningMessageStartEvent.role is ReasoningRole (required); ToolCallResultEvent.role is Option<ToolRole>. ReasoningEncryptedValueEvent.subtype is ReasoningEncryptedValueSubtype and entity_id is String (both required); ReasoningStartEvent.message_id and ReasoningEndEvent.message_id are String (required). CustomEvent.value is required. MessagesSnapshotEvent.messages is Vec<Message>; StateDeltaEvent.delta and ActivityDeltaEvent.patch are JsonPatch; RunStartedEvent.input is Option<Box<RunAgentInput>>; RunFinishedEvent.outcome is Option<RunFinishedOutcome> and RunFinishedEvent::parsed_outcome is removed; RunFinishedOutcome loses Unknown and Interrupt carries Vec<Interrupt>; SubagentFinishedEvent.outcome is Option<SubagentFinishedOutcome>. ToolCallResultContent is replaced by MessageContent (Text or Parts(Vec<InputContent>), no Unknown). New public types: Message and its message structs, ToolCall, ToolCallType, FunctionCall, InputContent, TextPart, MediaPart, PartSource, DataSource, UrlSource, FileSource, RunAgentInput, Tool, Context, ResumeEntry, ResumeStatus, Interrupt, JsonPatchOperation, JsonPointer, InvalidJsonPointer, EventType::ALL.
+* **agui:** Event/EventType lose the Thinking* variants, ReasoningStartEvent loses `title`, ToolCallResultEvent.content is now ToolCallResultContent, and several public structs gain fields.
+
+### Features
+
+* **agui:** match @ag-ui/core@1.0.5 exactly, held to its schema ([#258](https://github.com/introspection-org/introspection-rust-sdk/issues/258)) ([c5a0b95](https://github.com/introspection-org/introspection-rust-sdk/commit/c5a0b957e7c05693550bca0292439f1ff5b4aeb5))
+* **agui:** mirror AG-UI 1.0 (@ag-ui/core@1.0.5) ([#256](https://github.com/introspection-org/introspection-rust-sdk/issues/256)) ([075c5a3](https://github.com/introspection-org/introspection-rust-sdk/commit/075c5a30be5a997956a5b4eafb78c8aeef275892))
+* **issues:** attachments discriminated on kind, with add_attachments and remove_attachments ([#259](https://github.com/introspection-org/introspection-rust-sdk/issues/259)) ([136e370](https://github.com/introspection-org/introspection-rust-sdk/commit/136e37068efb27e0e820e132ebaadfedee650499))
+
+
+### Bug Fixes
+
+* **deps:** drop reqwest's removed rustls-native-certs feature ([#254](https://github.com/introspection-org/introspection-rust-sdk/issues/254)) ([09739a6](https://github.com/introspection-org/introspection-rust-sdk/commit/09739a66fe1adab701289c0285e5b73395a4567f))
+
 ## [0.53.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.52.0...v0.53.0) (2026-11-17)
 
 
