@@ -8412,6 +8412,10 @@ pub struct RoutineSkippedPayload {
     /// ([`RoutineSkipReason::TriggerBusy`]).
     #[serde(default)]
     pub event: Option<RoutineTriggerEventRef>,
+    /// The member who owns the skip: the one who triggered the run, else
+    /// the routine's creator, else the organization's Admin Agent.
+    #[serde(default)]
+    pub member_id: Option<Uuid>,
 }
 
 /// Whole-event envelope + typed payload per family.
