@@ -10,7 +10,8 @@ use std::error::Error;
 
 use futures::StreamExt;
 use introspection_sdk::{
-    AgUiEvent, ClientConfig, IntrospectionClient, ResumeEntry, RunRequest, TaskRunResume,
+    agui::RunFinishedOutcome, AgUiEvent, ClientConfig, IntrospectionClient, ResumeEntry,
+    RunRequest, TaskRunResume,
 };
 
 #[tokio::main]
@@ -35,11 +36,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while let Some(event) = stream.next().await {
         match event? {
             AgUiEvent::RunFinished(e) => {
-                if let Some(outcome) = e.outcome.filter(|o| o["type"] == "interrupt") {
-                    interrupts = outcome["interrupts"]
-                        .as_array()
-                        .cloned()
-                        .unwrap_or_default();
+                if let Some(RunFinishedOutcome::Interrupt { interrupts: asked }) = e.outcome {
+                    interrupts = asked;
                 }
             }
             AgUiEvent::RunError(e) => return Err(format!("run failed: {}", e.message).into()),
@@ -61,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             &task_id,
             &TaskRunResume {
                 resume: vec![ResumeEntry {
-                    interrupt_id: interrupt["id"].as_str().unwrap_or_default().into(),
+                    interrupt_id: interrupt.id.clone(),
                     status: "resolved".into(),
                     payload: Some(serde_json::json!({ "answer": "EU" })),
                 }],

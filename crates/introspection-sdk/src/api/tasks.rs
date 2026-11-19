@@ -7,7 +7,7 @@ use futures::stream::Stream;
 use futures::StreamExt;
 use serde::Serialize;
 
-use crate::agui::Event;
+use crate::agui::{Event, Message};
 use crate::api::error::{ApiResult, IntrospectionAPIError};
 use crate::api::http::HttpClient;
 use crate::api::paginator::Paginator;
@@ -104,8 +104,10 @@ impl RunHandle {
                     out = e
                         .messages
                         .iter()
-                        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
-                        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                        .filter_map(|m| match m {
+                            Message::Assistant(a) => a.content.as_deref(),
+                            _ => None,
+                        })
                         .collect();
                 }
                 Event::TextMessageContent(e) => out.push_str(&e.delta),
