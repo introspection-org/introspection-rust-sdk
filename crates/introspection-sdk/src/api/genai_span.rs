@@ -364,6 +364,10 @@ pub struct IntrospectionHistory {
     pub hash_hit: Option<bool>,
     #[serde(default)]
     pub new_messages: Option<IntrospectionNewMessages>,
+    /// Input messages `[0, n)` a run's `messages` loaded rather than a model
+    /// call produced.
+    #[serde(default)]
+    pub loaded_messages: Option<i64>,
     /// A stored history existed but stopped matching before the last
     /// assistant message: stale, edited, or the previous output replayed in
     /// another form.
