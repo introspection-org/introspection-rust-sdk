@@ -8,9 +8,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use introspection_sdk::api::{HttpClient, HttpConfig};
 use introspection_sdk::{
-    IssueCreateParams, IssueInclude, IssueLink, IssueListParams, IssueMemberRelation, IssueOwner,
-    IssuePriority, IssueSpanReference, IssueStatus, IssueUpdateParams, PaginationParams,
-    TaskStatus,
+    IssueCreateParams, IssueEventReference, IssueFile, IssueInclude, IssueLink, IssueListParams,
+    IssueMemberRelation, IssueOwner, IssuePriority, IssueSpanReference, IssueStatus,
+    IssueUpdateParams, PaginationParams, TaskStatus,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -516,4 +516,44 @@ async fn an_issue_without_a_display_index_or_warnings_decodes() {
     let issue: introspection_sdk::Issue = serde_json::from_value(body).unwrap();
     assert!(issue.display_key.is_none());
     assert!(issue.warnings.is_none());
+}
+
+#[test]
+fn update_serialises_add_lists_and_omits_unset_ones() {
+    let update = IssueUpdateParams {
+        add_links: Some(vec![IssueLink {
+            url: "https://github.com/acme/app/pull/12".into(),
+            title: Some("Fix".into()),
+        }]),
+        add_files: Some(vec![IssueFile::new(id(TASK_ID))]),
+        add_events: Some(vec![IssueEventReference {
+            event_id: id(MEMBER_ID),
+        }]),
+        ..IssueUpdateParams::default()
+    };
+    assert_eq!(
+        serde_json::to_value(&update).unwrap(),
+        json!({
+            "add_links": [{"url": "https://github.com/acme/app/pull/12", "title": "Fix"}],
+            "add_files": [{"file_id": TASK_ID}],
+            "add_events": [{"event_id": MEMBER_ID}],
+        })
+    );
+
+    let update = IssueUpdateParams {
+        add_spans: Some(vec![IssueSpanReference {
+            trace_id: "0af7651916cd43dd8448eb211c80319c".into(),
+            span_id: "b7ad6b7169203331".into(),
+        }]),
+        ..IssueUpdateParams::default()
+    };
+    assert_eq!(
+        serde_json::to_value(&update).unwrap(),
+        json!({
+            "add_spans": [{
+                "trace_id": "0af7651916cd43dd8448eb211c80319c",
+                "span_id": "b7ad6b7169203331",
+            }],
+        })
+    );
 }

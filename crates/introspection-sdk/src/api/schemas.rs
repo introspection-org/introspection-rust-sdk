@@ -5397,7 +5397,7 @@ impl IssueCreateParams {
 
 /// `PATCH /v1/issues/{id}` body. `None` leaves a field
 /// as it is; each list (and `metadata`) replaces the stored one wholesale, so
-/// `Some(vec![])` clears it. Pass the issue's [`Issue::etag`] as `If-Match` to
+/// `Some(vec![])` clears it, while an `add_*` list appends to it instead. Pass the issue's [`Issue::etag`] as `If-Match` to
 /// refuse the edit when the issue has changed since it was read.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct IssueUpdateParams {
@@ -5421,6 +5421,18 @@ pub struct IssueUpdateParams {
     pub events: Option<Vec<IssueEventReference>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spans: Option<Vec<IssueSpanReference>>,
+    /// Appends to the issue's links, which the server dedups; sending it with `links` is a 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_links: Option<Vec<IssueLink>>,
+    /// Appends to the issue's files, which the server dedups; sending it with `files` is a 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_files: Option<Vec<IssueFile>>,
+    /// Appends to the issue's events, which the server dedups; sending it with `events` is a 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_events: Option<Vec<IssueEventReference>>,
+    /// Appends to the issue's spans, which the server dedups; sending it with `spans` is a 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_spans: Option<Vec<IssueSpanReference>>,
     /// `Some(Some(id))` assigns the issue, replacing its assignee;
     /// `Some(None)` sends `null`, which unassigns it; `None` leaves it.
     #[serde(
