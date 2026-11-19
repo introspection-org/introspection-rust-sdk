@@ -5331,8 +5331,7 @@ pub struct IssueComment {
 pub enum IssueInclude {
     /// `members`.
     Members,
-    /// `attachments`, and the deprecated `links`, `files`, `events` and
-    /// `spans`.
+    /// `attachments`.
     Attachments,
     /// `comments`, oldest first, at most 500. On `Issues::get` only: the
     /// list, create and update answer `422`.
@@ -5404,18 +5403,6 @@ pub struct Issue {
     /// [`IssueInclude::Attachments`].
     #[serde(default)]
     pub attachments: Option<Vec<IssueAttachment>>,
-    #[deprecated(note = "read `attachments`")]
-    #[serde(default)]
-    pub links: Option<Vec<IssueLink>>,
-    #[deprecated(note = "read `attachments`")]
-    #[serde(default)]
-    pub files: Option<Vec<IssueFile>>,
-    #[deprecated(note = "read `attachments`")]
-    #[serde(default)]
-    pub events: Option<Vec<IssueEventReference>>,
-    #[deprecated(note = "read `attachments`")]
-    #[serde(default)]
-    pub spans: Option<Vec<IssueSpanReference>>,
     /// With [`IssueInclude::Comments`].
     #[serde(default)]
     pub comments: Option<Vec<IssueComment>>,
@@ -5455,18 +5442,6 @@ pub struct IssueCreateParams {
     /// The issue's evidence, in order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<IssueAttachmentCreate>>,
-    #[deprecated(note = "use `attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub files: Option<Vec<IssueFile>>,
-    #[deprecated(note = "use `attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<IssueLink>>,
-    #[deprecated(note = "use `attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events: Option<Vec<IssueEventReference>>,
-    #[deprecated(note = "use `attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spans: Option<Vec<IssueSpanReference>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignee_member_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5479,7 +5454,6 @@ pub struct IssueCreateParams {
 impl IssueCreateParams {
     /// Create params with the required fields set and every optional field
     /// unset. Combine with struct-update syntax.
-    #[allow(deprecated)]
     pub fn new(title: impl Into<String>, description: impl Into<String>, task_id: Uuid) -> Self {
         Self {
             title: title.into(),
@@ -5489,10 +5463,6 @@ impl IssueCreateParams {
             tags: None,
             metadata: None,
             attachments: None,
-            files: None,
-            links: None,
-            events: None,
-            spans: None,
             assignee_member_id: None,
             reviewer_member_id: None,
             follower_member_ids: None,
@@ -5528,20 +5498,6 @@ pub struct IssueUpdateParams {
     /// hold is ignored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remove_attachments: Option<Vec<Uuid>>,
-    /// Replaces the stored files wholesale; sending it, or any other
-    /// replace list, with `add_attachments` or `remove_attachments` is a 422.
-    #[deprecated(note = "use `add_attachments` and `remove_attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub files: Option<Vec<IssueFile>>,
-    #[deprecated(note = "use `add_attachments` and `remove_attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<IssueLink>>,
-    #[deprecated(note = "use `add_attachments` and `remove_attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub events: Option<Vec<IssueEventReference>>,
-    #[deprecated(note = "use `add_attachments` and `remove_attachments`")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub spans: Option<Vec<IssueSpanReference>>,
     /// `Some(Some(id))` assigns the issue, replacing its assignee;
     /// `Some(None)` sends `null`, which unassigns it; `None` leaves it.
     #[serde(

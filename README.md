@@ -654,8 +654,7 @@ issues.update(
 ).await?;
 ```
 
-`IssueInclude::Attachments` adds `attachments` (the `links`, `files`, `events`
-and `spans` lists are deprecated); `Comments` is for `get` only. `IssueListParams` filters by `relation` and
+`IssueInclude::Attachments` adds `attachments`; `Comments` is for `get` only. `IssueListParams` filters by `relation` and
 `member_id`. The history is the `introspection.issue` events of the issue
 (`created`, `updated`, `commented`, `deleted`).
 

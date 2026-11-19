@@ -1,7 +1,7 @@
 //! Integration tests for the issues DP surface (`client.issues()`), backed by
 //! `wiremock`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -70,10 +70,6 @@ fn issue_json() -> serde_json::Value {
         "metadata": {"source": "check-in", "attempts": 2},
         "members": null,
         "attachments": null,
-        "links": null,
-        "files": null,
-        "events": null,
-        "spans": null,
         "comments": null,
     })
 }
@@ -92,13 +88,6 @@ fn issue_with_lists() -> serde_json::Value {
         {"id": EVENT_ATTACHMENT_ID, "kind": "event", "event_id": EVENT_ID},
         {"id": SPAN_ATTACHMENT_ID, "kind": "span", "trace_id": "0123456789abcdef0123456789abcdef", "span_id": "0123456789abcdef"},
     ]);
-    issue["files"] =
-        json!([{"file_id": FILE_ID, "name": "Examples", "checksum": null, "source_event_ids": []}]);
-    issue["links"] =
-        json!([{"url": "https://github.com/acme/app/pull/12", "title": "Proposed fix"}]);
-    issue["events"] = json!([{"event_id": EVENT_ID}]);
-    issue["spans"] =
-        json!([{"trace_id": "0123456789abcdef0123456789abcdef", "span_id": "0123456789abcdef"}]);
     issue["comments"] = json!([comment_json()]);
     issue
 }
@@ -387,47 +376,6 @@ async fn create_sends_only_the_fields_set() {
 }
 
 #[tokio::test]
-#[allow(deprecated)]
-async fn update_still_sends_a_deprecated_replace_list_and_an_empty_one_to_clear() {
-    let server = MockServer::start().await;
-    Mock::given(method("PATCH"))
-        .and(path(format!("/v1/issues/{ISSUE_ID}")))
-        .and(body_json(json!({
-            "status": "closed",
-            "links": [{"url": "https://github.com/acme/app/pull/12"}],
-            "spans": [],
-            "metadata": {},
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let update = IssueUpdateParams {
-        status: Some(IssueStatus::Closed),
-        links: Some(vec![IssueLink {
-            url: "https://github.com/acme/app/pull/12".into(),
-            title: None,
-        }]),
-        spans: Some(Vec::<IssueSpanReference>::new()),
-        metadata: Some(BTreeMap::new()),
-        ..IssueUpdateParams::default()
-    };
-    build_http(&server)
-        .issues()
-        .update(id(ISSUE_ID), &update, &[], None)
-        .await
-        .unwrap();
-
-    let received = server.received_requests().await.unwrap();
-    assert_eq!(
-        if_match(&received[0]),
-        None,
-        "no If-Match unless one is given"
-    );
-}
-
-#[tokio::test]
 async fn update_sends_null_to_clear_a_person_and_omits_one_left_alone() {
     let server = MockServer::start().await;
     Mock::given(method("PATCH"))
@@ -561,23 +509,6 @@ async fn an_issue_without_a_display_index_or_warnings_decodes() {
     let issue: introspection_sdk::Issue = serde_json::from_value(body).unwrap();
     assert!(issue.display_key.is_none());
     assert!(issue.warnings.is_none());
-}
-
-#[test]
-#[allow(deprecated)]
-fn the_deprecated_lists_still_decode_beside_attachments() {
-    let issue: introspection_sdk::Issue = serde_json::from_value(issue_with_lists()).unwrap();
-    assert_eq!(issue.attachments.as_deref().unwrap().len(), 4);
-    assert_eq!(
-        issue.links.as_deref().unwrap()[0].title.as_deref(),
-        Some("Proposed fix")
-    );
-    assert_eq!(issue.files.as_deref().unwrap()[0].file_id, id(FILE_ID));
-    assert_eq!(issue.events.as_deref().unwrap()[0].event_id, id(EVENT_ID));
-    assert_eq!(
-        issue.spans.as_deref().unwrap()[0].span_id,
-        "0123456789abcdef"
-    );
 }
 
 #[test]
