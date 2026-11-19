@@ -8281,7 +8281,8 @@ impl JudgementPayload {
 }
 
 /// One authored field's value on either side of an update. A side that was
-/// null is `None`.
+/// null is `None`. The `attachments` change carries `added` and `removed`
+/// instead.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct IssueFieldChange {
@@ -8289,6 +8290,10 @@ pub struct IssueFieldChange {
     pub before: Option<serde_json::Value>,
     #[serde(default)]
     pub after: Option<serde_json::Value>,
+    #[serde(default)]
+    pub added: Option<Vec<IssueAttachment>>,
+    #[serde(default)]
+    pub removed: Option<Vec<IssueAttachment>>,
 }
 
 /// What every issue event carries, whichever action it records.
