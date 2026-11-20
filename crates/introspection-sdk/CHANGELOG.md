@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.56.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.55.1...v0.56.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** IssueCreateParams::new(title, description) no longer takes a task id, and IssueCreateParams.task_id is Option<Uuid>. Set a worker Task with IssueCreateParams::with_task_id(task_id).
+
+### Bug Fixes
+
+* **api:** make task_id optional on issue create ([#267](https://github.com/introspection-org/introspection-rust-sdk/issues/267)) ([8847ce9](https://github.com/introspection-org/introspection-rust-sdk/commit/8847ce90646c43ef81b1e0336c4d1f7cc9e5f6eb))
+
 ## [0.55.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.55.0...v0.55.1) (2026-11-20)
 
 
