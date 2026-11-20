@@ -393,7 +393,8 @@ pub async fn runtime(w: &mut Walk) {
         .find(|r| r.recipe_id == Some(recipe))
         .expect("the push-versioned runtime");
     assert_built_from(&runtime, &recipe_sha);
-    assert_stable!(runtime_snapshot(&runtime), @r#"
+    // The description is the template repository's manifest's.
+    assert_stable!(runtime_snapshot(&runtime), { ".description" => "[template's]" }, @r#"
     {
       "config_json": {
         "connectors": [
@@ -402,7 +403,7 @@ pub async fn runtime(w: &mut Walk) {
       },
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
-      "description": "Harbor E2B task calling a development MCP server",
+      "description": "[template's]",
       "environments": [
         "production",
         "staging"
