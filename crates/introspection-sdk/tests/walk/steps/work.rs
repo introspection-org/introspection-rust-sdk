@@ -539,7 +539,17 @@ pub async fn evidence(w: &mut Walk) {
         .get(&conversation_id)
         .await
         .expect("read the conversation");
-    assert_stable!(conversation, @r#"
+    // A customer runtime's conversations publish as introspection-agents
+    // since cloud 0.87, and as the runtime's name before.
+    assert!(
+        matches!(
+            conversation.service_name.as_deref(),
+            Some("introspection-agents") | Some(walk::RUNTIME_SLUG)
+        ),
+        "the conversation's service: {:?}",
+        conversation.service_name
+    );
+    assert_stable!(conversation, { ".service_name" => "[runtime's service]" }, @r#"
     {
       "agents": [
         {
@@ -576,7 +586,7 @@ pub async fn evidence(w: &mut Walk) {
         "group_id": "[uuid]",
         "id": "[uuid]"
       },
-      "service_name": "hello-mcp",
+      "service_name": "[runtime's service]",
       "task_title": "The walk's task",
       "updated_at": "[timestamp]",
       "usage": {

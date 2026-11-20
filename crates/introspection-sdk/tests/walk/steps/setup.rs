@@ -158,7 +158,7 @@ pub async fn project(w: &mut Walk) {
     let project = set(&w.project, "the project").clone();
     // The slug is new on every live run.
     assert_project_defaults(&project);
-    assert_stable!(without(&project, &["display_id_prefixes", "connection_integrations"]), { ".slug" => "[per run]" }, @r#"
+    assert_stable!(without(&project, &["display_id_prefixes", "connection_integrations", "previous_slugs"]), { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
@@ -230,7 +230,7 @@ pub async fn project(w: &mut Walk) {
         .expect("create a sibling project");
     assert_eq!(sibling.deployment_id, project.deployment_id);
     assert_project_defaults(&sibling);
-    assert_stable!(without(&sibling, &["display_id_prefixes", "connection_integrations"]), { ".slug" => "[per run]" }, @r#"
+    assert_stable!(without(&sibling, &["display_id_prefixes", "connection_integrations", "previous_slugs"]), { ".slug" => "[per run]" }, @r#"
     {
       "created_by_member_id": "[uuid]",
       "deployment_id": "[uuid]",
@@ -249,8 +249,10 @@ pub async fn project(w: &mut Walk) {
 }
 
 /// A project created without prefixes or connection integrations carries
-/// the defaults; a server that predates either sends none.
+/// the defaults, and one never renamed has no previous slugs; a server that
+/// predates any of them sends none.
 fn assert_project_defaults(project: &introspection_sdk::Project) {
+    assert!(project.previous_slugs.as_ref().is_none_or(Vec::is_empty));
     assert!(project
         .connection_integrations
         .as_ref()
@@ -741,13 +743,14 @@ pub async fn recipe(w: &mut Walk) {
     // The slug ends in the first 12 characters of the template repository's
     // commit, which moves with that repository; the text before it is pinned.
     let slug = recipe.slug.replace(&head[..12], "[sha]");
-    // What the recipe's agents and issue providers are follows the template
-    // repository, and a server that predates them sends neither.
-    assert_stable!(without(&recipe, &["agents", "issue_providers"]), { ".slug" => slug }, @r#"
+    // What the recipe's description, agents and issue providers are follows
+    // the template repository, and a server that predates the last two sends
+    // neither.
+    assert_stable!(without(&recipe, &["agents", "issue_providers"]), { ".slug" => slug, ".description" => "[template's]" }, @r#"
     {
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
-      "description": "Harbor E2B task calling a development MCP server",
+      "description": "[template's]",
       "git_commit_sha": "[sha]",
       "git_ref": "main",
       "id": "[uuid]",

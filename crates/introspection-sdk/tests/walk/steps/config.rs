@@ -365,6 +365,17 @@ fn runtime_snapshot(runtime: &Runtime) -> Value {
     value
 }
 
+/// The push-versioned runtime's config is its manifest's: the template
+/// repository's later commits declare no connectors.
+fn assert_manifest_config(runtime: &Runtime) {
+    let config = runtime.config_json.clone().unwrap_or_default();
+    let connectors = BTreeMap::from([("connectors".to_string(), json!([walk::CONNECTOR_NAME]))]);
+    assert!(
+        config.is_empty() || config == connectors,
+        "the manifest's runtime config: {config:?}"
+    );
+}
+
 pub async fn runtime(w: &mut Walk) {
     let sa = w.sa();
     let project = w.project_id();
@@ -393,16 +404,14 @@ pub async fn runtime(w: &mut Walk) {
         .find(|r| r.recipe_id == Some(recipe))
         .expect("the push-versioned runtime");
     assert_built_from(&runtime, &recipe_sha);
-    assert_stable!(runtime_snapshot(&runtime), @r#"
+    // The description and config are the template repository's manifest's.
+    assert_manifest_config(&runtime);
+    assert_stable!(runtime_snapshot(&runtime), { ".description" => "[template's]", ".config_json" => "[template's]" }, @r#"
     {
-      "config_json": {
-        "connectors": [
-          "hello-mcp"
-        ]
-      },
+      "config_json": "[template's]",
       "created_at": "[timestamp]",
       "created_by_member_id": "[uuid]",
-      "description": "Harbor E2B task calling a development MCP server",
+      "description": "[template's]",
       "environments": [
         "production",
         "staging"
