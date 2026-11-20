@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.1](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.55.0...v0.55.1) (2026-11-20)
+
+
+### Miscellaneous Chores
+
+* release 0.55.1 with the cloud 0.87 walk snapshots ([#264](https://github.com/introspection-org/introspection-rust-sdk/issues/264)) ([041055f](https://github.com/introspection-org/introspection-rust-sdk/commit/041055fc2107e67b11d21a04ad5ec4b5e1113b64))
+
 ## [0.55.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.54.0...v0.55.0) (2026-11-19)
 
 
