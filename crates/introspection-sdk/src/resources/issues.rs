@@ -1,8 +1,11 @@
 //! `issues()` (DP) — a project's pursuits, each with a living brief, its
-//! people, its evidence, and one fixed worker Task, on the client or a
-//! [`Runner`](crate::Runner).
+//! people, its evidence, and at most one fixed worker Task, on the client or
+//! a [`Runner`](crate::Runner).
 //!
-//! An issue is created on its worker Task and starts `open`. An edit applies
+//! An issue starts `open`. A Task that creates one with its own `task_id`
+//! ([`IssueCreateParams::with_task_id`]) becomes its fixed worker; naming
+//! another Task is a 403. Without `task_id` the issue has no Task, and a
+//! project member or any agent's Task may create any number of them. An edit applies
 //! the fields it names and the last write wins; pass the issue's
 //! [`Issue::etag`] as `If-Match` to refuse the edit (412) when the issue has
 //! changed since it was read. `tags`, `metadata` and the followers replace
@@ -86,8 +89,10 @@ impl Issues {
         self.http.get_json(&path, &()).await
     }
 
-    /// `POST /v1/issues` — open an issue on its worker Task. Repeating it
-    /// with the same content returns the Task's issue.
+    /// `POST /v1/issues` — open an issue, on the caller's own worker Task when
+    /// `params.task_id` is set (another Task's id is a 403), otherwise with no
+    /// Task. Repeating a worker's create with the same content returns the
+    /// Task's issue.
     pub async fn create(
         &self,
         params: &IssueCreateParams,

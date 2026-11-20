@@ -356,11 +356,8 @@ async fn create_sends_only_the_fields_set() {
         tags: Some(vec!["customer:acme".into()]),
         assignee_member_id: Some(id(MEMBER_ID)),
         follower_member_ids: Some(vec![id(REVIEWER_ID)]),
-        ..IssueCreateParams::new(
-            "Clarify affiliation rules",
-            "Agree the affiliate standard.",
-            id(TASK_ID),
-        )
+        ..IssueCreateParams::new("Clarify affiliation rules", "Agree the affiliate standard.")
+            .with_task_id(id(TASK_ID))
     };
     let issue = build_http(&server)
         .issues()
@@ -373,6 +370,39 @@ async fn create_sends_only_the_fields_set() {
         query_pairs(&received[0]),
         [("include".to_string(), "members".to_string())]
     );
+}
+
+#[tokio::test]
+async fn create_without_a_task_omits_task_id_and_decodes_a_taskless_issue() {
+    let server = MockServer::start().await;
+    let mut taskless = issue_json();
+    taskless["task_id"] = serde_json::Value::Null;
+    taskless["task_status"] = serde_json::Value::Null;
+    Mock::given(method("POST"))
+        .and(path("/v1/issues"))
+        .and(body_json(json!({
+            "title": "Clarify affiliation rules",
+            "description": "Agree the affiliate standard.",
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(taskless))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let params =
+        IssueCreateParams::new("Clarify affiliation rules", "Agree the affiliate standard.");
+    assert_eq!(params.task_id, None);
+    let issue = build_http(&server)
+        .issues()
+        .create(&params, &[])
+        .await
+        .unwrap();
+    assert_eq!(issue.id, id(ISSUE_ID));
+    assert_eq!(issue.task_id, None);
+    assert_eq!(issue.task_status, None);
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).unwrap();
+    assert!(body.get("task_id").is_none());
 }
 
 #[tokio::test]
@@ -572,8 +602,8 @@ async fn create_sends_attachments_tagged_on_kind() {
         ..IssueCreateParams::new(
             "Clarify affiliation rules",
             "Affiliate classifications are inconsistent.",
-            id(TASK_ID),
         )
+        .with_task_id(id(TASK_ID))
     };
     build_http(&server)
         .issues()
@@ -623,6 +653,7 @@ fn unset_attachment_fields_are_omitted() {
         serde_json::to_value(IssueUpdateParams::default()).unwrap(),
         json!({})
     );
-    let create = serde_json::to_value(IssueCreateParams::new("t", "d", id(TASK_ID))).unwrap();
+    let create =
+        serde_json::to_value(IssueCreateParams::new("t", "d").with_task_id(id(TASK_ID))).unwrap();
     assert!(create.get("attachments").is_none());
 }

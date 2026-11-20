@@ -5385,7 +5385,7 @@ pub struct Issue {
     /// Orders the issue's activity snapshots. For a conditional edit, use
     /// [`Self::etag`].
     pub revision: u64,
-    /// The fixed worker Task. Nullable in the persisted schema.
+    /// The fixed worker Task; `None` for an issue created without one.
     #[serde(default)]
     pub task_id: Option<Uuid>,
     #[serde(default)]
@@ -5433,8 +5433,12 @@ impl Issue {
     }
 }
 
-/// `POST /v1/issues` body. Build with [`Self::new`] and struct-update syntax
-/// for the rest. The issue starts `open`.
+/// `POST /v1/issues` body. Build with [`Self::new`], [`Self::with_task_id`]
+/// and struct-update syntax for the rest. The issue starts `open`.
+///
+/// Without `task_id` the issue has no Task (its `task_id` and `task_status`
+/// read back `None`); a project member or any agent's Task may create any
+/// number of these.
 #[derive(Debug, Clone, Serialize)]
 pub struct IssueCreateParams {
     /// At most 500 characters, nonblank.
@@ -5442,7 +5446,10 @@ pub struct IssueCreateParams {
     /// Markdown, at most 50000 characters, nonblank.
     pub description: String,
     /// The fixed worker Task the issue's chat and Slack replies continue.
-    pub task_id: Uuid,
+    /// Only the caller's own Task may be named (otherwise 403), and it
+    /// becomes the issue's worker. `None` creates an issue with no Task.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<IssuePriority>,
     /// Free-form tags, conventionally `key:value`.
@@ -5465,12 +5472,13 @@ pub struct IssueCreateParams {
 
 impl IssueCreateParams {
     /// Create params with the required fields set and every optional field
-    /// unset. Combine with struct-update syntax.
-    pub fn new(title: impl Into<String>, description: impl Into<String>, task_id: Uuid) -> Self {
+    /// unset, `task_id` included, so the issue has no Task. Combine with
+    /// [`Self::with_task_id`] and struct-update syntax.
+    pub fn new(title: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             description: description.into(),
-            task_id,
+            task_id: None,
             priority: None,
             tags: None,
             metadata: None,
@@ -5479,6 +5487,13 @@ impl IssueCreateParams {
             reviewer_member_id: None,
             follower_member_ids: None,
         }
+    }
+
+    /// Make `task_id` the issue's fixed worker Task. It must be the caller's
+    /// own Task; naming another is a 403.
+    pub fn with_task_id(mut self, task_id: Uuid) -> Self {
+        self.task_id = Some(task_id);
+        self
     }
 }
 
