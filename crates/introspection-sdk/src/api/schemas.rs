@@ -1947,6 +1947,10 @@ pub struct Runtime {
     /// version whose Recipe records no commit.
     #[serde(default)]
     pub git_commit_sha: Option<String>,
+    /// The recipe branch this version was built from; `None` from servers
+    /// that predate it.
+    #[serde(default)]
+    pub recipe_git_ref: Option<String>,
     /// Kind of recipe the runtime serves (`production`, `preview`, ...).
     #[serde(default)]
     pub recipe_kind: Option<String>,
@@ -2050,6 +2054,9 @@ pub struct RuntimeListParams {
     /// sha).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_commit_sha: Option<String>,
+    /// Restrict to versions built from exactly this recipe branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe_git_ref: Option<String>,
     /// Restrict to runtimes serving this environment. An API key already
     /// selects its environment, so passing both is a 400.
     #[serde(skip_serializing_if = "Option::is_none")]
