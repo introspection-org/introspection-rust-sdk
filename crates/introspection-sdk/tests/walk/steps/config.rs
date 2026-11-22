@@ -325,12 +325,18 @@ async fn runtimes(
         .await
 }
 
-/// The bake's end.
+/// The bake's end: ready, or a panic carrying the bake's error.
 fn baked(runtime: &Runtime) -> bool {
-    matches!(
-        runtime.image_build_status.as_deref(),
-        Some("ready" | "failed")
-    )
+    match runtime.image_build_status.as_deref() {
+        Some("failed") => panic!(
+            "bake failed: {}",
+            runtime
+                .image_build_error_message
+                .as_deref()
+                .unwrap_or_default()
+        ),
+        status => status == Some("ready"),
+    }
 }
 
 /// The runtime was built from the recipe's commit; a server that predates
@@ -386,12 +392,14 @@ pub async fn runtime(w: &mut Walk) {
     // The push versioned the group at the recipe's commit; that version is
     // the runtime the walk runs on, and the API creates the next one.
     let quiet = creds.quiet();
+    // The owner's list, since the service account's is scoped to its lane.
+    let owner_quiet = w.owner.quiet();
     let versioned = settled(
         w.mode,
         "push-versioned runtime bake",
         bake,
         || runtimes(&sa, project),
-        || runtimes(&quiet, project),
+        || runtimes(&owner_quiet, project),
         |rows: &Vec<Runtime>| {
             rows.iter()
                 .find(|r| r.recipe_id == Some(recipe))
