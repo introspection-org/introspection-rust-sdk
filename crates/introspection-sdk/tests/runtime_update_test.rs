@@ -307,6 +307,66 @@ fn a_runtime_without_a_commit_reads_none() {
     assert_eq!(runtime.git_commit_sha, None);
 }
 
+#[tokio::test]
+async fn list_filters_by_recipe_git_ref_and_reads_it() {
+    let server = MockServer::start().await;
+    let mut row = runtime_json();
+    row["recipe_git_ref"] = json!("feature/clean-jokes");
+    Mock::given(method("GET"))
+        .and(path("/v1/runtimes"))
+        .and(query_param("recipe_git_ref", "feature/clean-jokes"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"records": [row], "count": 1, "next": null})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = Runtimes::new(build_http(&server))
+        .list(&RuntimeListParams {
+            recipe_git_ref: Some("feature/clean-jokes".into()),
+            ..Default::default()
+        })
+        .next_page()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        page.records[0].recipe_git_ref.as_deref(),
+        Some("feature/clean-jokes")
+    );
+}
+
+#[tokio::test]
+async fn list_omits_recipe_git_ref_when_unset() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/runtimes"))
+        .and(query_param_is_missing("recipe_git_ref"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"records": [runtime_json()], "count": 1, "next": null})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Runtimes::new(build_http(&server))
+        .list(&RuntimeListParams::default())
+        .next_page()
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[test]
+fn a_runtime_without_a_recipe_git_ref_reads_none() {
+    let runtime: introspection_sdk::Runtime = serde_json::from_value(runtime_json()).unwrap();
+    assert_eq!(runtime.recipe_git_ref, None);
+}
+
 /// The image metadata is an open object: past its declared fields it holds
 /// whatever the data plane reported, which a strict decode must keep.
 #[tokio::test]
