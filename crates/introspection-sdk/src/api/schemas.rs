@@ -215,7 +215,6 @@ pub enum TaskStatus {
     Idle,
     Completed,
     Failed,
-    /// Post-run work (judges, an eval's verifier) before `Completed`.
     Finishing,
     Cancelling,
     Cancelled,
