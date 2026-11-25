@@ -65,6 +65,18 @@ fn a_task_ignores_unknown_fields_and_keeps_unknown_enum_values() {
 }
 
 #[test]
+fn a_finishing_task_decodes_and_round_trips() {
+    let mut body = task();
+    body["status"] = json!("finishing");
+    let task: Task = serde_json::from_value(body).unwrap();
+    assert_eq!(task.status, TaskStatus::Finishing);
+    assert_eq!(
+        serde_json::to_value(&task.status).unwrap(),
+        json!("finishing")
+    );
+}
+
+#[test]
 fn a_share_keeps_a_resource_type_this_build_predates() {
     let share: ResourceShare = serde_json::from_value(json!({
         "id": TASK_ID,

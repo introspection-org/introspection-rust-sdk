@@ -215,6 +215,8 @@ pub enum TaskStatus {
     Idle,
     Completed,
     Failed,
+    /// Post-run work (judges, an eval's verifier) before `Completed`.
+    Finishing,
     Cancelling,
     Cancelled,
     /// Forward-compatible escape hatch.
@@ -232,6 +234,7 @@ impl TaskStatus {
             Self::Idle => "idle",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Finishing => "finishing",
             Self::Cancelling => "cancelling",
             Self::Cancelled => "cancelled",
             Self::Other(s) => s,
@@ -250,6 +253,7 @@ impl From<&str> for TaskStatus {
             "idle" => Self::Idle,
             "completed" => Self::Completed,
             "failed" => Self::Failed,
+            "finishing" => Self::Finishing,
             "cancelling" => Self::Cancelling,
             "cancelled" => Self::Cancelled,
             other => Self::Other(other.to_string()),
