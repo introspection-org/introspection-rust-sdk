@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.57.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.56.0...v0.57.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tasks:** TaskStatus gains Finishing, so an exhaustive match on it needs the arm, and "finishing" no longer decodes as Other.
+
+### Features
+
+* **tasks:** TaskStatus::Finishing ([#270](https://github.com/introspection-org/introspection-rust-sdk/issues/270)) ([0a89a05](https://github.com/introspection-org/introspection-rust-sdk/commit/0a89a05e0d1d1845f01be63637fc06f8d134fd68))
+
 ## [0.56.0](https://github.com/introspection-org/introspection-rust-sdk/compare/v0.55.1...v0.56.0) (2026-11-20)
 
 
